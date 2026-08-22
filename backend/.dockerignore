@@ -1,0 +1,23 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.git
+.gitignore
+# Never ship local dev secrets into the Docker image —
+# production credentials come from DO env vars at runtime
+.env
+.env.*
+.DS_Store
+.pytest_cache
+*.log
+migration_debug.log
+setup_debug.log
+backend.log
+run_uvicorn.log
+run_uvicorn_8001.log
+server.log

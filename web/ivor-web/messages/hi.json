@@ -1,0 +1,205 @@
+{
+  "common": {
+    "save": "सहेजें",
+    "cancel": "रद्द करें",
+    "delete": "हटाएं",
+    "create": "बनाएं",
+    "edit": "संपादित करें",
+    "open": "खोलें",
+    "close": "बंद करें",
+    "refresh": "ताज़ा करें",
+    "loading": "लोड हो रहा है…",
+    "noData": "कोई डेटा नहीं",
+    "yes": "हाँ",
+    "no": "नहीं",
+    "search": "खोजें",
+    "actions": "कार्रवाइयाँ",
+    "status": "स्थिति",
+    "total": "कुल",
+    "amount": "राशि",
+    "period": "अवधि",
+    "currency": "मुद्रा",
+    "language": "भाषा"
+  },
+
+  "nav": {
+    "dashboard": "डैशबोर्ड",
+    "reports": "रिपोर्ट",
+    "teams": "टीमें",
+    "attendance": "उपस्थिति",
+    "payroll": "वेतन-भुगतान",
+    "payrollRuns": "वेतन चक्र",
+    "salaryStructures": "वेतन संरचनाएँ",
+    "salaryOverview": "वेतन अवलोकन",
+    "compliance": "अनुपालन",
+    "disputes": "विवाद",
+    "overtime": "ओवरटाइम",
+    "schedule": "शेड्यूल",
+    "leave": "अवकाश",
+    "notifications": "सूचनाएँ",
+    "documents": "दस्तावेज़",
+    "settings": "सेटिंग्स",
+    "settingsGeneral": "सामान्य",
+    "settingsLeaveTypes": "अवकाश प्रकार",
+    "settingsDepartments": "विभाग",
+    "settingsHolidays": "छुट्टियाँ",
+    "settingsOrganization": "संगठन",
+    "settingsPermissions": "अनुमतियाँ",
+    "payrollRules": "वेतन नियम",
+    "platform": "प्लेटफ़ॉर्म",
+    "roles": "भूमिकाएँ",
+    "auditLogs": "ऑडिट लॉग",
+    "help": "सहायता"
+  },
+
+  "auth": {
+    "signIn": "साइन इन करें",
+    "signingIn": "साइन इन हो रहा है…",
+    "email": "ईमेल पता",
+    "emailPlaceholder": "अपना ईमेल दर्ज करें",
+    "password": "पासवर्ड",
+    "passwordPlaceholder": "अपना पासवर्ड दर्ज करें",
+    "forgotPassword": "पासवर्ड भूल गए?",
+    "loginFailed": "लॉगिन विफल। कृपया अपनी साख जाँचें।",
+    "signInToDashboard": "अपने डैशबोर्ड में साइन इन करें"
+  },
+
+  "payrollRuns": {
+    "title": "वेतन चक्र",
+    "subtitle": "अपनी टीम के लिए मासिक वेतन तैयार करें, समीक्षा करें और अंतिम रूप दें।",
+    "startPayroll": "वेतन शुरू करें",
+    "noRuns": "अभी तक कोई वेतन चक्र नहीं",
+    "noRunsHint": "वर्तमान माह के लिए अपना पहला वेतन चक्र शुरू करें।",
+    "tableHeaders": {
+      "period": "अवधि",
+      "status": "स्थिति",
+      "payslips": "वेतन पर्चियाँ",
+      "totalNet": "कुल शुद्ध",
+      "created": "बनाया गया",
+      "actions": "कार्रवाइयाँ"
+    },
+    "status": {
+      "draft": "मसौदा",
+      "finalized": "अंतिम",
+      "cancelled": "रद्द"
+    },
+    "actions": {
+      "open": "खोलें",
+      "openTooltip": "समीक्षा चरण पर विज़ार्ड फिर से शुरू करें",
+      "cancel": "रद्द करें",
+      "cancelling": "रद्द हो रहा है…",
+      "cancelTooltip": "इस मसौदे को हटाएं ताकि अवधि फिर से उपलब्ध हो",
+      "cancelConfirm": "{period} का मसौदा रद्द करें? आप बाद में उसी अवधि के लिए नया मसौदा बना सकेंगे।",
+      "cancelSuccess": "{period} का मसौदा रद्द किया गया"
+    },
+    "wizard": {
+      "selectPeriod": "अवधि चुनें",
+      "review": "समीक्षा",
+      "finalize": "अंतिम रूप दें",
+      "createDraft": "मसौदा बनाएं",
+      "creatingDraft": "मसौदा बन रहा है…",
+      "cancelDraft": "मसौदा रद्द करें",
+      "cancelDraftConfirm": "यह मसौदा चक्र रद्द करें? आप इसे बाद में फिर से बना सकते हैं।",
+      "draftCancelled": "मसौदा रद्द किया गया",
+      "finalizeConfirm": "इस चक्र को अंतिम रूप दें? एक बार अंतिम होने पर वेतन पर्चियाँ अपरिवर्तनीय हो जाती हैं।",
+      "finalizeSuccess": "वेतन अंतिम रूप दिया गया",
+      "requestOtp": "OTP अनुरोध करें",
+      "otpSent": "OTP भेजा गया। अपना ईमेल जाँचें।",
+      "otpLabel": "6 अंकों का OTP कोड",
+      "otpPlaceholder": "अपने ईमेल से OTP दर्ज करें",
+      "otpInvalid": "अपने ईमेल से 6 अंकों का OTP दर्ज करें",
+      "totalGross": "कुल सकल",
+      "payslipCount": "{count, plural, one {# वेतन पर्ची} other {# वेतन पर्चियाँ}}"
+    }
+  },
+
+  "salaryStructures": {
+    "title": "वेतन संरचनाएँ",
+    "subtitle": "पुन: उपयोग योग्य वेतन टेम्पलेट परिभाषित करें और उन्हें कर्मचारियों को सौंपें।",
+    "components": "घटक",
+    "structures": "संरचनाएँ",
+    "noStructures": "अभी तक कोई वेतन संरचना नहीं",
+    "newStructure": "नई संरचना",
+    "newComponent": "नया घटक"
+  },
+
+  "leaveTypes": {
+    "title": "अवकाश प्रकार",
+    "subtitle": "अवकाश प्रकारों की सूची जिनके लिए कर्मचारी आवेदन कर सकते हैं।",
+    "newType": "नया प्रकार",
+    "seedFromCountry": "देश से आरंभ करें",
+    "seedConfirm": "देश के डिफ़ॉल्ट से अवकाश प्रकार आरंभ करें?\n\nयह किसी भी गुम वैधानिक अवकाश प्रकार जोड़ता है और देश से जुड़े प्रकारों के मान ताज़ा करता है। आपके बनाए गए कस्टम प्रकार अपरिवर्तित रहेंगे।",
+    "noTypes": "अभी तक कोई अवकाश प्रकार नहीं"
+  },
+
+  "payrollRules": {
+    "title": "वेतन नियम",
+    "subtitle": "देश-स्तरीय कर स्लैब, वैधानिक कटौतियाँ, अवकाश डिफ़ॉल्ट और बोनस फ़ॉर्मूले।",
+    "addVersion": "नया संस्करण जोड़ें"
+  },
+
+  "employees": {
+    "title": "टीम सदस्य",
+    "lockProfile": "प्रोफ़ाइल लॉक करें",
+    "unlockProfile": "प्रोफ़ाइल अनलॉक करें",
+    "locked": "लॉक्ड",
+    "unlocked": "अनलॉक्ड",
+    "lockedHint": "लॉक्ड — HR से संपर्क करें",
+    "lockReason": "कारण",
+    "oneOffAllowances": {
+      "title": "एकमुश्त भत्ते",
+      "subtitle": "किसी विशेष माह के लिए निर्धारित तदर्थ बोनस, प्रतिपूर्ति, कटौतियाँ।",
+      "schedule": "निर्धारित करें",
+      "noOneOffs": "कोई एकमुश्त भत्ता निर्धारित नहीं है।",
+      "pending": "लंबित",
+      "applied": "भुगतान किया",
+      "deleteConfirm": "{period} के लिए निर्धारित एकमुश्त भत्ता \"{label}\" हटाएं?",
+      "deleteApplied": "वेतन पर्ची पर पहले से लागू; हटाया नहीं जा सकता"
+    }
+  },
+
+  "payslip": {
+    "title": "वेतन पर्ची",
+    "netPay": "शुद्ध वेतन",
+    "gross": "सकल",
+    "taxableIncome": "करयोग्य आय",
+    "earnings": "आय",
+    "deductions": "कटौतियाँ",
+    "statutoryEmployee": "वैधानिक कटौतियाँ (कर्मचारी)",
+    "statutoryEmployer": "नियोक्ता योगदान",
+    "downloadPdf": "PDF डाउनलोड करें",
+    "summary": "सारांश",
+    "yearToDate": "शुद्ध वेतन · {year}",
+    "noPayslips": "अभी तक कोई वेतन पर्ची नहीं",
+    "noPayslipsHint": "आपकी वेतन पर्चियाँ यहाँ तब दिखाई देंगी जब आपका नियोक्ता वेतन चक्र को अंतिम रूप देगा।"
+  },
+
+  "leaveScreen": {
+    "title": "अवकाश अनुरोध",
+    "newRequest": "नया अनुरोध",
+    "myRequests": "मेरे अनुरोध",
+    "balances": "आपका शेष · {year}",
+    "noQuotaSet": "कोई कोटा निर्धारित नहीं",
+    "daysOf": "/ {total} दिन",
+    "used": "{count} उपयोग किए",
+    "leaveType": "अवकाश प्रकार",
+    "notes": "नोट्स (वैकल्पिक)",
+    "notesPlaceholder": "अवकाश का कारण…",
+    "quickSelect": "त्वरित चयन",
+    "today": "आज",
+    "thisWeek": "इस सप्ताह",
+    "nextWeek": "अगले सप्ताह",
+    "thisMonth": "इस माह",
+    "submit": "जमा करें",
+    "submitting": "जमा हो रहा है…",
+    "noRequests": "अभी तक कोई अनुरोध नहीं",
+    "noRequestsHint": "नया अनुरोध टैब का उपयोग करके अपना पहला अवकाश अनुरोध जमा करें।",
+    "statutoryBadge": "वैध"
+  },
+
+  "profile": {
+    "lockedBanner": "प्रोफ़ाइल लॉक्ड",
+    "lockedDescription": "आपकी पहचान संबंधी जानकारी (नाम, जन्म तिथि, पासपोर्ट, लिंग) केवल पढ़ने योग्य है। बदलाव के लिए HR से संपर्क करें।",
+    "lockedReason": "कारण: {reason}"
+  }
+}

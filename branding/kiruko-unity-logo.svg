@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 130" width="460" height="130" font-family="'Trebuchet MS','Segoe UI',sans-serif">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBD34D"/><stop offset=".55" stop-color="#F2B705"/><stop offset="1" stop-color="#C99405"/>
+    </linearGradient>
+    <linearGradient id="goldText" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD84D"/><stop offset="1" stop-color="#F2B705"/>
+    </linearGradient>
+    <radialGradient id="green" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#7CFF4A"/><stop offset="1" stop-color="#33CC11"/>
+    </radialGradient>
+    <g id="pg" fill="url(#gold)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+  </defs>
+
+  <!-- icon -->
+  <g transform="translate(8,15) scale(1.0)">
+    <circle cx="50" cy="50" r="32" fill="none" stroke="url(#gold)" stroke-width="2.6" opacity=".55"/>
+    <use href="#pg" transform="rotate(45 50 50)"/><use href="#pg" transform="rotate(90 50 50)"/>
+    <use href="#pg" transform="rotate(135 50 50)"/><use href="#pg" transform="rotate(180 50 50)"/>
+    <use href="#pg" transform="rotate(225 50 50)"/><use href="#pg" transform="rotate(270 50 50)"/>
+    <use href="#pg" transform="rotate(315 50 50)"/>
+    <g fill="url(#green)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+    <path d="M39 37 L46 37 L46 46.5 L54 37 L62 37 L51 50 L62 63 L54 63 L46 53.5 L46 63 L39 63 Z" fill="url(#green)" stroke="url(#green)" stroke-width="1.4" stroke-linejoin="round"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="125" y="66" font-size="52" font-weight="800" letter-spacing="3" fill="url(#goldText)">KIRUKO</text>
+  <text x="127" y="92" font-size="17.5" font-weight="700" letter-spacing="7.4" fill="#33CC11">TOGETHER WE CAN</text>
+</svg>

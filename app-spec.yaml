@@ -1,0 +1,77 @@
+# DigitalOcean App Platform spec for Kontokaz (ivor-mobile).
+#
+# Apply with:  doctl apps update <APP_ID> --spec app-spec.yaml
+#        (or)  doctl apps create --spec app-spec.yaml
+#
+# Single backend service. startup.sh migrates + seeds (idempotently) then
+# serves, so every deploy brings the DB to head and seeds reference data
+# automatically — no manual steps, no RUN_SEEDER flag. Correct for
+# instance_count: 1; for multi-instance, move migrate.sh to a `kind:
+# PRE_DEPLOY` job so instances don't race to migrate the same DB.
+#
+# ⚠️ SECRETS are placeholders here. Applying with the placeholder OVERWRITES
+# the live secret. Before `doctl apps update`, paste your existing EV[...]
+# values in place of REPLACE_IN_DASHBOARD (or re-enter them in the dashboard
+# right after). Affected: JWT_SECRET, SMTP_PASS, SUPER_USER_PASSWORD.
+alerts:
+- rule: DEPLOYMENT_FAILED
+- rule: DOMAIN_FAILED
+databases:
+- engine: PG
+  name: kontokaz-db-549322
+  version: "17"
+features:
+- buildpack-stack=ubuntu-22
+ingress:
+  rules:
+  - component:
+      name: ivor-mobile-backend
+    match:
+      path:
+        prefix: /
+name: kontokaz-app
+region: blr
+services:
+- name: ivor-mobile-backend
+  dockerfile_path: backend/Dockerfile
+  source_dir: backend
+  github:
+    branch: main
+    deploy_on_push: true
+    repo: iwugod/ivor-mobile
+  http_port: 8080
+  instance_count: 1
+  instance_size_slug: apps-s-1vcpu-0.5gb
+  # startup.sh migrates + seeds (fail-loud) then serves.
+  run_command: bash /app/startup.sh
+  health_check:
+    http_path: /health
+  envs:
+  - { key: POSTGRES_USER,     scope: RUN_TIME, value: "${kontokaz-db-549322.USERNAME}" }
+  - { key: POSTGRES_PASSWORD, scope: RUN_TIME, value: "${kontokaz-db-549322.PASSWORD}" }
+  - { key: POSTGRES_SERVER,   scope: RUN_TIME, value: "${kontokaz-db-549322.HOSTNAME}" }
+  - { key: POSTGRES_PORT,     scope: RUN_TIME, value: "${kontokaz-db-549322.PORT}" }
+  - { key: POSTGRES_DB,       scope: RUN_TIME, value: "${kontokaz-db-549322.DATABASE}" }
+  - { key: POSTGRES_SSLMODE,  scope: RUN_TIME, value: "require" }
+  - { key: PORT,              scope: RUN_TIME, value: "8080" }
+  # Auth — set the real JWT_SECRET in the dashboard (see header warning).
+  - { key: JWT_SECRET,    scope: RUN_TIME, type: SECRET, value: "REPLACE_IN_DASHBOARD" }
+  - { key: JWT_ALGORITHM, scope: RUN_TIME, value: "HS256" }
+  # Runtime authz: which emails are treated as platform admins.
+  - { key: SUPER_ADMIN_EMAILS, scope: RUN_TIME, value: "iwugodlabs@gmail.com" }
+  # Email (SendGrid) — set the real SMTP_PASS in the dashboard.
+  - { key: SMTP_HOST,       scope: RUN_TIME, value: "smtp.sendgrid.net" }
+  - { key: SMTP_PORT,       scope: RUN_TIME, value: "587" }
+  - { key: SMTP_USER,       scope: RUN_TIME, value: "apikey" }
+  - { key: SMTP_PASS,       scope: RUN_TIME, type: SECRET, value: "REPLACE_IN_DASHBOARD" }
+  - { key: SMTP_FROM_EMAIL, scope: RUN_TIME, value: "iwugodlabs@gmail.com" }
+  - { key: INVITE_EXPIRY_DAYS, scope: RUN_TIME, value: "7" }
+  # Storage — `local` is ephemeral (uploads + payslip PDFs wiped on redeploy).
+  # Switch to DO Spaces for persistence: STORAGE_TYPE=s3 + AWS_* (create the
+  # bucket + access key first).
+  - { key: STORAGE_TYPE, scope: RUN_TIME, value: "local" }
+  # Super admin: created on first deploy if missing. MUST be RUN_TIME (not
+  # BUILD_TIME) so the seeder reads them at runtime. Password is NOT reset on
+  # later deploys unless you also set RESET_SUPER_USER_PASSWORD=true.
+  - { key: SUPER_USER_EMAIL,    scope: RUN_TIME, value: "iwugodlabs@gmail.com" }
+  - { key: SUPER_USER_PASSWORD, scope: RUN_TIME, type: SECRET, value: "REPLACE_IN_DASHBOARD" }

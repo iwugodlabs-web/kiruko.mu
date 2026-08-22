@@ -1,0 +1,37 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&display=swap');
+  html,body{margin:0;padding:0}
+  .b{width:1200px;height:630px;background:linear-gradient(135deg,#1E2A52 0%,#176E78 55%,#14B8A6 100%);
+     display:flex;align-items:center;justify-content:center;gap:54px;font-family:'Orbitron','Trebuchet MS',sans-serif;
+     position:relative;overflow:hidden}
+  .glow{position:absolute;width:760px;height:760px;border-radius:50%;
+        background:radial-gradient(circle,rgba(224,169,59,.16),transparent 60%);left:-160px;top:-120px}
+  .txt{display:flex;flex-direction:column}
+  .wm{font-weight:800;font-size:118px;letter-spacing:6px;line-height:.95;
+      background:linear-gradient(180deg,#FFD84D,#F2B705);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{font-weight:700;font-size:34px;letter-spacing:13px;color:#5CF03A;margin-top:14px}
+  .sub{font-weight:700;font-size:24px;letter-spacing:3px;color:#CBD5E6;margin-top:22px;font-family:'Trebuchet MS',sans-serif}
+</style></head>
+<body>
+  <div class="b">
+    <div class="glow"></div>
+    <svg width="300" height="300" viewBox="0 0 100 100">
+      <defs>
+        <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBD34D"/><stop offset=".55" stop-color="#F2B705"/><stop offset="1" stop-color="#C99405"/></linearGradient>
+        <radialGradient id="green" cx="0.5" cy="0.4" r="0.7"><stop offset="0" stop-color="#7CFF4A"/><stop offset="1" stop-color="#33CC11"/></radialGradient>
+        <g id="pg" fill="url(#gold)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+      </defs>
+      <circle cx="50" cy="50" r="32" fill="none" stroke="url(#gold)" stroke-width="2.6" opacity=".6"/>
+      <use href="#pg" transform="rotate(45 50 50)"/><use href="#pg" transform="rotate(90 50 50)"/><use href="#pg" transform="rotate(135 50 50)"/>
+      <use href="#pg" transform="rotate(180 50 50)"/><use href="#pg" transform="rotate(225 50 50)"/><use href="#pg" transform="rotate(270 50 50)"/><use href="#pg" transform="rotate(315 50 50)"/>
+      <g fill="url(#green)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+      <path d="M39 37 L46 37 L46 46.5 L54 37 L62 37 L51 50 L62 63 L54 63 L46 53.5 L46 63 L39 63 Z" fill="url(#green)" stroke="url(#green)" stroke-width="1.4" stroke-linejoin="round"/>
+    </svg>
+    <div class="txt">
+      <div class="wm">KIRUKO</div>
+      <div class="tag">TOGETHER WE CAN</div>
+      <div class="sub">Payroll &amp; people, in one place</div>
+    </div>
+  </div>
+</body></html>

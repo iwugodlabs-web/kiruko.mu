@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kiruko — Payroll &amp; people, together.</title>
+<meta name="description" content="Kiruko is the all-in-one platform for scheduling, time tracking, payroll and compliance — one app for employers, one for your team. Built for Mauritius, and beyond." />
+<link rel="canonical" href="https://kiruko.mu/" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta name="theme-color" content="#16203B" />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Kiruko" />
+<meta property="og:url" content="https://kiruko.mu/" />
+<meta property="og:title" content="Kiruko — Payroll &amp; people, together." />
+<meta property="og:description" content="Scheduling, time tracking, payroll and compliance in one place. Together We Can." />
+<meta property="og:image" content="https://kiruko.mu/assets/og-image.png" />
+<meta property="og:locale" content="en" />
+<meta property="og:locale:alternate" content="fr" />
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Kiruko — Payroll &amp; people, together." />
+<meta name="twitter:description" content="Scheduling, time tracking, payroll and compliance in one place. Together We Can." />
+<meta name="twitter:image" content="https://kiruko.mu/assets/og-image.png" />
+
+<!-- Structured data (Organization + WebSite + SoftwareApplication) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://kiruko.mu/#organization",
+      "name": "Kiruko",
+      "url": "https://kiruko.mu/",
+      "logo": "https://kiruko.mu/assets/favicon.png",
+      "description": "All-in-one HR platform for SMEs — scheduling, time tracking, payroll, leave and compliance.",
+      "areaServed": ["Mauritius", "Madagascar"]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://kiruko.mu/#website",
+      "url": "https://kiruko.mu/",
+      "name": "Kiruko",
+      "publisher": { "@id": "https://kiruko.mu/#organization" },
+      "inLanguage": ["en", "fr"]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Kiruko",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "iOS, Android, Web",
+      "description": "Scheduling, time tracking, payroll, leave and compliance — one app for employers, one for employees. Built for Mauritius.",
+      "publisher": { "@id": "https://kiruko.mu/#organization" }
+    }
+  ]
+}
+</script>
+<link rel="icon" href="./assets/favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<script>(function(){try{var t=localStorage.getItem('kiruko-theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();</script>
+<!-- Analytics: Umami Cloud (cookieless, no consent banner).
+     data-domains restricts tracking to the live site only — localhost and
+     preview *.pages.dev hostnames are ignored, so dev traffic never counts. -->
+<script defer src="https://cloud.umami.is/script.js" data-website-id="2898468b-057d-4ba1-bf48-aa6f461e8dd7" data-domains="kiruko.mu,www.kiruko.mu"></script>
+<style>
+  /* ===== Design schema — mirrors Palette (mobile/app/constants/theme.ts) ===== */
+  :root, [data-theme="light"]{
+    --gold:#F2B705; --gold-tint:#FFF6DB; --green:#33CC11; --green-glow:#7CFF4A;
+    --teal:#14B8A6; --teal-tint:#DEFAF4; --blue:#4F6BE0; --blue-tint:#EAEEFC;
+    --violet:#8B5CF6; --violet-tint:#F1ECFE; --indigo:#1E2A52; --ink:#16203B;
+    --ink-fixed:#16203B;
+    --paper:#F9FAFB; --white:#FFFFFF; --surface:#FFFFFF;
+    --gray400:#9CA3AF; --gray500:#6B7280; --gray600:#4B5563; --gray100:#F3F4F6; --gray200:#E5E7EB;
+    --radius:22px; --shadow:0 18px 50px rgba(22,32,59,.10);
+    --maxw:1140px;
+    --header-bg:rgba(249,250,251,.82); --header-border:var(--gray100);
+    --line:rgba(22,32,59,.10); --line-strong:rgba(22,32,59,.16);
+    --glass:rgba(255,255,255,.72); --glass-card:rgba(255,255,255,.82);
+    --chip-bg:rgba(22,32,59,.035); --chip-bg-hover:rgba(22,32,59,.07);
+    --grid-line:rgba(22,32,59,.04); --aurora-op:.55;
+    --browser-bar:linear-gradient(180deg,#f5f6fb,#eceef6); --browser-bg:#ffffff;
+    --chrome-text:#79809A; --val-earn:#b8860b; --val-green:#1a9e0c;
+    --callout-bg:rgba(255,255,255,.9); --callout-text:#16203B;
+    --dev-shadow:0 40px 90px -34px rgba(22,32,59,.42), 0 0 0 1px rgba(22,32,59,.05), -30px 30px 80px -46px rgba(79,107,224,.28);
+    --card-shadow:0 18px 44px rgba(22,32,59,.16), inset 0 1px 0 rgba(255,255,255,.6);
+    --nav-shadow:0 8px 34px rgba(22,32,59,.10);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  [data-theme="dark"]{
+    --gold-tint:rgba(242,183,5,.15); --teal-tint:rgba(20,184,166,.15);
+    --blue-tint:rgba(79,107,224,.18); --violet-tint:rgba(139,92,246,.18);
+    --ink:#F4F5FB;
+    --paper:#0B0B16; --white:#14152b; --surface:#14152b;
+    --gray400:#79809A; --gray500:#A6ABC4; --gray600:#C2C7DA;
+    --gray100:rgba(255,255,255,.08); --gray200:rgba(255,255,255,.14);
+    --shadow:0 18px 50px rgba(0,0,0,.5);
+    --header-bg:rgba(11,11,22,.72); --header-border:rgba(255,255,255,.08);
+    --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.14);
+    --glass:rgba(22,24,46,.55); --glass-card:rgba(20,21,43,.62);
+    --chip-bg:rgba(255,255,255,.04); --chip-bg-hover:rgba(255,255,255,.08);
+    --grid-line:rgba(255,255,255,.022); --aurora-op:1;
+    --browser-bar:linear-gradient(180deg,#15172e,#101226); --browser-bg:#0e0f1f;
+    --chrome-text:#767B96; --val-earn:#FFD84D; --val-green:#d6f5cf;
+    --callout-bg:rgba(14,16,34,.92); --callout-text:#EAF0FB;
+    --dev-shadow:0 40px 90px -30px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.04), -30px 30px 80px -40px rgba(79,107,224,.4);
+    --card-shadow:0 18px 44px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+    --nav-shadow:0 8px 40px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);
+       background:var(--paper);line-height:1.55;-webkit-font-smoothing:antialiased;
+       transition:background-color .4s ease,color .3s ease}
+  header,.card,.step,.deskwin,.tier,.offer,.compare,.lang-card,.faq details,.contact,.proof,.btn-ghost,.pill,.langs span{
+       transition:background-color .4s ease,border-color .4s ease,color .3s ease,box-shadow .4s ease}
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .eyebrow{font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+  h1,h2,h3{letter-spacing:-.02em;line-height:1.1}
+  .muted{color:var(--gray500)}
+
+  /* ===== Buttons ===== */
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:15px;border-radius:999px;
+       padding:14px 26px;cursor:pointer;border:1.5px solid transparent;transition:transform .15s ease,box-shadow .2s ease}
+  .btn:hover{transform:translateY(-2px)}
+  .btn-primary{background:var(--ink-fixed);color:#fff;box-shadow:0 10px 24px rgba(22,32,59,.22)}
+  .btn-gold{background:linear-gradient(180deg,#FFD84D,var(--gold));color:var(--ink);box-shadow:0 10px 24px rgba(242,183,5,.32)}
+  .btn-ghost{background:var(--surface);color:var(--ink);border-color:var(--gray200)}
+
+  /* ===== Nav ===== */
+  header{position:sticky;top:0;z-index:50;background:var(--header-bg);backdrop-filter:saturate(180%) blur(14px);
+         border-bottom:1px solid var(--header-border)}
+  /* theme toggle */
+  .theme-toggle{width:40px;height:40px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+       border-radius:12px;cursor:pointer;background:var(--chip-bg);border:1.5px solid var(--gray200);color:var(--ink)}
+  .theme-toggle:hover{background:var(--chip-bg-hover)}
+  .theme-toggle svg{width:19px;height:19px}
+  .theme-toggle .i-sun{display:none}.theme-toggle .i-moon{display:block}
+  [data-theme="dark"] .theme-toggle .i-sun{display:block}[data-theme="dark"] .theme-toggle .i-moon{display:none}
+  nav{display:flex;align-items:center;justify-content:space-between;height:72px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand svg{display:block;flex:none}
+  .wm{font-family:'Trebuchet MS','Inter',sans-serif;font-weight:900;letter-spacing:1.5px;font-size:22px;line-height:1;
+      background:linear-gradient(180deg,#FFD84D,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .navlinks{display:flex;gap:30px;font-weight:600;font-size:15px;color:var(--gray600)}
+  .navlinks a:hover{color:var(--ink)}
+  .navcta{display:flex;gap:12px;align-items:center}
+  @media(max-width:880px){.navlinks{display:none}.navcta .btn-ghost{display:none}}
+  @media(max-width:560px){.navcta .btn-gold{display:none}}
+  .hamburger{display:none;width:42px;height:38px;border:1px solid var(--gray200);border-radius:10px;background:transparent;color:inherit;cursor:pointer;align-items:center;justify-content:center;flex:none}
+  .hamburger svg{width:20px;height:20px;display:block}
+  .mobile-menu{display:none;position:absolute;top:100%;left:0;right:0;background:var(--header-bg);backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--gray100);box-shadow:0 14px 30px rgba(22,32,59,.12);padding:8px 22px 14px;flex-direction:column;z-index:60}
+  .mobile-menu.open{display:flex}
+  .mobile-menu a{padding:13px 4px;font-weight:600;font-size:15px;color:var(--gray600);border-bottom:1px solid var(--gray100)}
+  .mobile-menu a.cta{color:var(--ink);font-weight:800}
+  .mobile-menu a:last-child{border-bottom:none}
+  @media(max-width:880px){.hamburger{display:flex}}
+  @media(min-width:881px){.mobile-menu{display:none !important}}
+
+  /* ===== Hero (premium device stage) ===== */
+  .hero{position:relative;overflow:hidden;padding:72px 0 86px}
+  .hero .aurora{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;opacity:var(--aurora-op);transition:opacity .4s ease}
+  .blob{position:absolute;border-radius:50%;filter:blur(90px);will-change:transform}
+  .blob--teal{width:560px;height:560px;background:radial-gradient(circle at 30% 30%,var(--teal),transparent 70%);top:-200px;left:-120px;opacity:.5;animation:drift1 22s ease-in-out infinite}
+  .blob--violet{width:600px;height:600px;background:radial-gradient(circle at 50% 50%,var(--violet),transparent 70%);top:-160px;right:-140px;opacity:.5;animation:drift2 26s ease-in-out infinite}
+  .blob--blue{width:620px;height:620px;background:radial-gradient(circle at 50% 50%,var(--blue),transparent 70%);bottom:-300px;left:14%;opacity:.42;animation:drift3 30s ease-in-out infinite}
+  .blob--gold{width:420px;height:420px;background:radial-gradient(circle at 50% 50%,var(--gold),transparent 70%);top:30%;right:8%;opacity:.26;animation:drift4 24s ease-in-out infinite}
+  .blob--green{width:360px;height:360px;background:radial-gradient(circle at 50% 50%,var(--green),transparent 70%);bottom:-160px;right:20%;opacity:.2;animation:drift2 28s ease-in-out infinite}
+  @keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(70px,50px) scale(1.12)}}
+  @keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-60px,46px) scale(1.1)}}
+  @keyframes drift3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(54px,-60px) scale(1.14)}}
+  @keyframes drift4{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-44px,36px) scale(1.08)}}
+  .hero .aurora::after{content:"";position:absolute;inset:0;background:
+      radial-gradient(ellipse 80% 60% at 50% 0%,transparent 46%,var(--paper) 100%),
+      radial-gradient(ellipse 120% 80% at 50% 120%,transparent 36%,var(--paper) 100%)}
+  .hero .grid-overlay{position:absolute;inset:0;z-index:0;pointer-events:none;
+      background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gradient(90deg,var(--grid-line) 1px,transparent 1px);
+      background-size:64px 64px;mask-image:radial-gradient(ellipse 90% 70% at 50% 30%,#000 30%,transparent 80%);-webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 30%,#000 30%,transparent 80%)}
+  .hero .wrap{position:relative;z-index:2}
+  .hero-grid{display:grid;grid-template-columns:1.02fr 1.18fr;gap:44px;align-items:center}
+  .hero .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:700;letter-spacing:.14em;
+      color:var(--gray600);text-transform:uppercase;padding:7px 14px 7px 11px;border:1px solid var(--line);border-radius:100px;
+      background:var(--chip-bg);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  .hero .eyebrow .pulse{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 0 rgba(242,183,5,.6);animation:ping 2.2s ease-out infinite}
+  @keyframes ping{0%{box-shadow:0 0 0 0 rgba(242,183,5,.55)}70%,100%{box-shadow:0 0 0 9px rgba(242,183,5,0)}}
+  .hero h1{font-size:clamp(40px,5.4vw,62px);font-weight:900;line-height:1.03;margin:22px 0 0}
+  .hero h1 .accent{background:linear-gradient(110deg,var(--teal) 0%,var(--blue) 42%,var(--violet) 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.lead{font-size:18.5px;color:var(--gray600);max-width:540px;margin:22px 0 0;line-height:1.62}
+  .hero-cta{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:30px}
+  .hero .trust{margin-top:28px;font-size:14px;color:var(--gray500);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--gray200);
+        border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600}
+  @media(max-width:920px){.hero-grid{grid-template-columns:1fr;gap:40px;text-align:center}.hero p.lead{margin-left:auto;margin-right:auto}.hero .eyebrow,.hero-cta,.hero .trust{justify-content:center}.hero h1{font-size:40px}}
+
+  /* ===== Hero device stage — 3D dashboard + glass cards + annotation ===== */
+  .stage{position:relative;perspective:1800px;min-height:430px}
+  .browser{position:relative;transform:perspective(1700px) rotateY(-15deg) rotateX(4deg) rotate(.4deg);transform-style:preserve-3d;
+      border-radius:16px;overflow:hidden;background:var(--browser-bg);border:1px solid var(--line-strong);box-shadow:var(--dev-shadow);width:108%;margin-left:-2%}
+  .browser-bar{display:flex;align-items:center;gap:12px;padding:11px 16px;background:var(--browser-bar);border-bottom:1px solid var(--line)}
+  .dots{display:flex;gap:7px}.dots span{width:11px;height:11px;border-radius:50%}
+  .dots span:nth-child(1){background:#ff5f57}.dots span:nth-child(2){background:#febc2e}.dots span:nth-child(3){background:#28c840}
+  .url{flex:1;max-width:300px;margin:0 auto;text-align:center;font-size:12.5px;color:var(--chrome-text);background:var(--chip-bg);border:1px solid var(--line);border-radius:8px;padding:5px 14px;display:flex;align-items:center;justify-content:center;gap:7px}
+  .url svg{width:12px;height:12px;opacity:.7}
+  .browser-img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top left}
+  .browser-reflect{position:absolute;left:6%;right:6%;bottom:-34px;height:60px;background:linear-gradient(180deg,rgba(79,107,224,.28),transparent);filter:blur(22px);border-radius:50%;transform:perspective(1700px) rotateX(60deg);z-index:-1}
+  .phone{position:absolute;right:-12px;bottom:-40px;width:188px;z-index:5;transform:perspective(1400px) rotateY(-12deg) rotate(2deg);
+      border-radius:30px;padding:7px;background:linear-gradient(160deg,#20223f,#0c0d1b);border:1px solid rgba(255,255,255,.10);
+      box-shadow:0 30px 60px -18px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.06),0 0 50px -10px rgba(139,92,246,.40)}
+  .phone-screen{position:relative;border-radius:24px;overflow:hidden;background:#000}
+  .phone-screen img{display:block;width:100%;border-radius:24px}
+  .notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:52px;height:16px;background:#06070e;border-radius:12px;z-index:2;border:1px solid rgba(255,255,255,.06)}
+  .gcard{position:absolute;background:var(--glass-card);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);
+      border:1px solid var(--line-strong);border-radius:16px;padding:13px 16px;box-shadow:var(--card-shadow);z-index:8}
+  .gcard-label{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--gray500);text-transform:uppercase;margin-bottom:5px}
+  .gcard-value{font-size:18px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+  .dot-gold{width:9px;height:9px;border-radius:50%;background:var(--gold);box-shadow:0 0 10px 1px rgba(242,183,5,.8)}
+  .dot-green{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 10px 1px rgba(51,204,17,.7)}
+  .card-earn{top:14px;left:-30px;animation:float 6s ease-in-out infinite}.card-earn .gcard-value{color:var(--val-earn)}
+  .card-payroll{bottom:62px;left:-20px;animation:float 7s ease-in-out infinite .6s}.card-payroll .gcard-value{color:var(--val-green)}
+  .card-payroll .sub{font-size:11.5px;color:var(--gray500);font-weight:500;margin-top:2px}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+  .callout{position:absolute;z-index:8;top:-12px;right:-30px;font-family:var(--mono);font-size:11.5px;font-weight:500;letter-spacing:.01em;
+      color:var(--callout-text);background:var(--callout-bg);backdrop-filter:blur(10px) saturate(140%);-webkit-backdrop-filter:blur(10px) saturate(140%);
+      border:1px solid var(--line-strong);padding:9px 13px;border-radius:10px;box-shadow:var(--card-shadow);display:flex;align-items:center;gap:8px;white-space:nowrap;animation:float 6.5s ease-in-out infinite .3s}
+  .callout .led{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px 1px rgba(20,184,166,.85);flex:none}
+  .callout::before{content:"";position:absolute;width:54px;height:1px;top:50%;left:-58px;background:linear-gradient(90deg,rgba(20,184,166,.55),var(--line-strong));transform:rotate(-20deg);transform-origin:right}
+  .callout::after{content:"";position:absolute;width:7px;height:7px;border-radius:50%;top:calc(50% + 22px);left:-72px;background:var(--callout-bg);border:1.5px solid var(--teal);box-shadow:0 0 11px rgba(20,184,166,.7)}
+  /* shared screenshot placeholder (also used by desktop band + showcase) */
+  .shot{width:100%;height:100%;object-fit:cover;display:block}
+  .ph{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+      color:var(--gray400);font-size:13px;font-weight:600;text-align:center;padding:18px;
+      background:repeating-linear-gradient(135deg,var(--surface),var(--surface) 12px,var(--paper) 12px,var(--paper) 24px)}
+  .ph .dot{width:34px;height:34px;border-radius:10px;background:var(--teal-tint);display:grid;place-items:center;color:var(--teal);font-size:18px}
+  @media(max-width:920px){
+    .stage{perspective:none;min-height:0;max-width:560px;margin:0 auto;width:100%;padding-bottom:0;display:block}
+    .browser{transform:none;width:100%;margin-left:0}
+    .browser-reflect{transform:none;opacity:.6}
+    .phone{transform:rotate(3deg);right:-6px;bottom:-26px;width:150px}
+    .card-earn{left:-8px;top:-8px}.card-payroll{left:-12px;bottom:38px}
+    .callout{display:none}
+  }
+  @media(max-width:560px){.phone{width:120px;right:0;bottom:-20px}.card-earn,.card-payroll{left:0;padding:10px 12px}.gcard-value{font-size:15px}.blob{filter:blur(60px)}}
+  @media(max-width:400px){.phone,.card-payroll{display:none}}
+  @media (prefers-reduced-motion:reduce){.blob,.card-earn,.card-payroll,.callout,.pulse{animation:none !important}}
+
+  /* ===== Desktop / web band ===== */
+  .deskwin{background:var(--surface);border-radius:16px;border:1px solid var(--gray200);box-shadow:var(--shadow);overflow:hidden}
+  .deskwin .bar{height:34px;background:var(--gray100);display:flex;align-items:center;gap:7px;padding:0 13px;border-bottom:1px solid var(--gray200)}
+  .deskwin .bar i{width:10px;height:10px;border-radius:50%;background:var(--gray200);display:block}
+  .deskwin .ph{aspect-ratio:16/10;height:auto}
+  .deskwin .shot{aspect-ratio:16/10;height:auto}
+  .deskgrid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:26px}
+  .deskcap{font-size:13.5px;color:var(--gray500);font-weight:600;line-height:1.5;margin:12px 4px 0}
+  .deskcap b{color:var(--ink)}
+  @media(max-width:760px){.deskgrid{grid-template-columns:1fr}}
+
+  /* ===== Marquee / proof ===== */
+  .proof{border-top:1px solid var(--gray100);border-bottom:1px solid var(--gray100);background:var(--surface)}
+  .proof .wrap{display:flex;flex-wrap:wrap;gap:14px 40px;align-items:center;justify-content:space-between;padding:22px 24px}
+  .stat{display:flex;flex-direction:column}
+  .stat b{font-size:26px;font-weight:900;letter-spacing:-.02em}
+  .stat span{font-size:13px;color:var(--gray500);font-weight:600}
+
+  /* ===== Sections ===== */
+  section.block{padding:90px 0}
+  @media(max-width:560px){section.block{padding:56px 0}}
+  .head{max-width:680px;margin:0 auto 50px;text-align:center}
+  .head h2{font-size:38px;font-weight:900;margin:12px 0 14px}
+  .head p{font-size:18px;color:var(--gray600)}
+
+  /* features grid */
+  .feat{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .card{background:var(--surface);border:1px solid var(--gray100);border-radius:var(--radius);padding:26px;box-shadow:0 6px 22px rgba(22,32,59,.05)}
+  .card .ic{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:22px;margin-bottom:16px}
+  .card h3{font-size:19px;font-weight:800;margin-bottom:8px}
+  .card p{font-size:15px;color:var(--gray600)}
+  @media(max-width:920px){.feat{grid-template-columns:1fr}}
+
+  /* two apps split */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .panel{border-radius:26px;padding:38px;color:#fff;position:relative;overflow:hidden;min-height:340px;display:flex;flex-direction:column}
+  .panel.employer{background:linear-gradient(150deg,var(--indigo),#2E4374)}
+  .panel.employee{background:linear-gradient(150deg,var(--teal),var(--green))}
+  .panel .tag{font-size:13px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;opacity:.85}
+  .panel h3{font-size:28px;font-weight:900;margin:10px 0 14px}
+  .panel ul{list-style:none;display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .panel li{display:flex;align-items:flex-start;gap:10px;font-size:15px;opacity:.95}
+  .panel li::before{content:"✓";font-weight:900;color:#fff;background:rgba(255,255,255,.22);width:20px;height:20px;
+                    border-radius:50%;display:inline-grid;place-items:center;font-size:12px;flex:none;margin-top:2px}
+  @media(max-width:920px){.split{grid-template-columns:1fr}}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;counter-reset:s}
+  .step{background:var(--surface);border:1px solid var(--gray100);border-radius:var(--radius);padding:28px;position:relative}
+  .step::before{counter-increment:s;content:counter(s);position:absolute;top:-16px;left:24px;width:36px;height:36px;
+                border-radius:11px;background:var(--ink-fixed);color:#fff;font-weight:900;display:grid;place-items:center;box-shadow:0 6px 14px rgba(22,32,59,.25)}
+  .step h3{margin:14px 0 8px;font-size:18px;font-weight:800}
+  .step p{font-size:15px;color:var(--gray600)}
+  @media(max-width:920px){.steps{grid-template-columns:1fr;gap:32px}}
+
+  /* showcase strip — horizontal scroll, holds any number of phones */
+  .showcase{display:flex;gap:18px;overflow-x:auto;scroll-snap-type:x proximity;padding:6px 2px 18px;-webkit-overflow-scrolling:touch}
+  .frame{flex:0 0 230px;scroll-snap-align:center;background:var(--surface);border:10px solid var(--ink-fixed);border-radius:30px;overflow:hidden;aspect-ratio:9/19.5;box-shadow:var(--shadow)}
+  .showcase-hint{text-align:center;font-size:13px;color:var(--gray400);font-weight:600;margin-top:-6px}
+
+  /* CTA */
+  .cta{background:radial-gradient(700px 320px at 85% -20%, rgba(124,255,74,.25), transparent 60%),
+                linear-gradient(150deg,var(--indigo),var(--ink-fixed));color:#fff;border-radius:30px;padding:64px 40px;text-align:center}
+  .cta h2{font-size:38px;font-weight:900;margin-bottom:12px}
+  .cta p{font-size:18px;opacity:.85;max-width:560px;margin:0 auto 26px}
+  @media(max-width:560px){.cta{padding:44px 22px}.cta h2{font-size:26px}.cta p{font-size:16px}}
+
+  /* download / app stores */
+  .download{background:var(--surface);border:1px solid var(--gray100);border-radius:28px;padding:50px 40px;text-align:center;box-shadow:var(--shadow)}
+  .download h2{font-size:32px;font-weight:900;margin:12px 0 12px}
+  .download p{font-size:17px;color:var(--gray600);max-width:600px;margin:0 auto 28px}
+  .download p b{color:var(--ink)}
+  .stores{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .store{display:inline-flex;align-items:center;gap:12px;background:var(--ink-fixed);color:#fff;border-radius:14px;padding:12px 22px;min-width:210px;justify-content:center;border:1px solid rgba(255,255,255,.08);transition:transform .15s ease,box-shadow .2s ease}
+  .store:hover{transform:translateY(-2px);box-shadow:0 14px 30px rgba(22,32,59,.28)}
+  .store svg{width:24px;height:24px;flex:none}
+  .store .lbl{display:flex;flex-direction:column;align-items:flex-start;line-height:1.16}
+  .store .lbl small{font-size:10.5px;opacity:.82;font-weight:500;letter-spacing:.02em}
+  .store .lbl b{font-size:16px;font-weight:700}
+  @media(max-width:560px){.download{padding:36px 22px}.download h2{font-size:26px}.store{width:100%;max-width:320px}}
+
+  /* faq */
+  .faq{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+  .faq details{background:var(--surface);border:1px solid var(--gray100);border-radius:16px;padding:0 22px;box-shadow:0 6px 22px rgba(22,32,59,.05)}
+  .faq summary{list-style:none;cursor:pointer;font-weight:700;font-size:17px;padding:20px 0;display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::after{content:"+";font-size:26px;font-weight:300;color:var(--teal);line-height:1}
+  .faq details[open] summary::after{content:"\2013"}
+  .faq details>p{padding:0 0 20px;margin:0;color:var(--gray600);font-size:15px}
+
+  /* languages */
+  .langs-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;max-width:780px;margin:0 auto}
+  .lang-card{background:var(--surface);border:1px solid var(--gray100);border-radius:16px;padding:22px 12px;text-align:center;box-shadow:0 6px 22px rgba(22,32,59,.05)}
+  .lang-card .flag{font-size:30px;line-height:1}
+  .lang-card b{display:block;margin-top:10px;font-size:15px}
+  .lang-card span{font-size:12px;color:var(--gray500);font-weight:600}
+  @media(max-width:760px){.langs-grid{grid-template-columns:repeat(3,1fr)}}
+
+  /* pricing */
+  .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;align-items:stretch}
+  .tier{background:var(--surface);border:1px solid var(--gray200);border-radius:24px;padding:32px;display:flex;flex-direction:column}
+  .tier.featured{border-color:var(--teal);box-shadow:0 18px 50px rgba(20,184,166,.18);position:relative}
+  .tier .badge{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--teal);color:#fff;font-size:12px;font-weight:800;letter-spacing:.05em;padding:6px 14px;border-radius:999px;white-space:nowrap}
+  .tier h3{font-size:20px;font-weight:800}
+  .tier .price{font-size:38px;font-weight:900;letter-spacing:-.02em;margin:12px 0 4px}
+  .tier .price small{font-size:15px;font-weight:600;color:var(--gray500)}
+  .tier .desc{color:var(--gray500);font-size:14px;margin-bottom:20px}
+  .tier ul{list-style:none;display:flex;flex-direction:column;gap:11px;margin:0 0 26px;flex:1}
+  .tier li{display:flex;gap:9px;font-size:14px;color:var(--gray600)}
+  .tier li::before{content:"✓";color:var(--teal);font-weight:900;flex:none}
+  .tier .btn{justify-content:center;width:100%}
+  @media(max-width:920px){.tiers{grid-template-columns:1fr}}
+
+  /* contact / leads */
+  .contact{display:grid;grid-template-columns:1fr 1.15fr;gap:40px;background:var(--surface);border:1px solid var(--gray100);border-radius:28px;padding:46px;box-shadow:var(--shadow)}
+  .contact .info h3{font-size:28px;font-weight:900;margin:10px 0 10px}
+  .contact .info p{color:var(--gray600);margin-bottom:24px}
+  .contact .meta{display:flex;flex-direction:column;gap:14px}
+  .contact .meta a{display:flex;align-items:center;gap:12px;font-weight:600;color:var(--ink)}
+  .contact .meta .ic{width:42px;height:42px;border-radius:12px;background:var(--teal-tint);color:var(--teal);display:grid;place-items:center;font-size:18px;flex:none}
+  form.lead{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  form.lead .full{grid-column:1/-1}
+  form.lead label{font-size:13px;font-weight:700;color:var(--gray600);display:block;margin-bottom:6px}
+  form.lead input,form.lead select,form.lead textarea{width:100%;border:1.5px solid var(--gray200);border-radius:12px;padding:12px 14px;font-size:15px;font-family:inherit;color:var(--ink);background:var(--paper)}
+  form.lead input:focus,form.lead select:focus,form.lead textarea:focus{outline:none;border-color:var(--teal);background:var(--surface)}
+  form.lead textarea{min-height:92px;resize:vertical}
+  .contact .reach{display:flex;flex-direction:column;justify-content:center;gap:14px;background:var(--paper);border:1px solid var(--gray100);border-radius:20px;padding:34px}
+  .contact .reach h4{font-size:18px;font-weight:800;margin:0 0 4px}
+  .contact .reach-btn{width:100%;justify-content:center;font-size:16px;padding:15px}
+  .contact .reach .formnote{margin:8px 0 0;font-size:13px}
+  .formnote{font-size:12px;color:var(--gray400);margin-top:6px}
+  @media(max-width:880px){.contact{grid-template-columns:1fr;padding:30px}form.lead{grid-template-columns:1fr}}
+
+  /* launch banner */
+  .launchbar{background:linear-gradient(90deg,var(--indigo),var(--teal));color:#fff;text-align:center;font-size:14px;font-weight:600;padding:11px 16px}
+  .launchbar b{font-weight:800}
+  .launchbar a{font-weight:800;text-decoration:underline;text-underline-offset:2px}
+
+  /* live remuneration */
+  .liverem{background:linear-gradient(150deg,var(--ink-fixed),var(--indigo));border-radius:30px;padding:54px 44px;color:#fff;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;overflow:hidden;position:relative}
+  .liverem::before{content:"";position:absolute;inset:0;background:radial-gradient(520px 260px at 92% 8%,rgba(124,255,74,.22),transparent 60%);pointer-events:none}
+  .liverem .eyebrow{color:var(--green-glow)}
+  .liverem h2{font-size:34px;font-weight:900;margin:12px 0 14px}
+  .liverem p{opacity:.85;font-size:16px;max-width:470px}
+  .counter{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:30px;text-align:center;position:relative;z-index:1}
+  .counter .lbl{font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7;font-weight:700}
+  .counter .amt{font-size:46px;font-weight:900;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin:8px 0 4px;
+    background:linear-gradient(180deg,#7CFF4A,var(--green));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .counter .sub{font-size:13px;opacity:.7}
+  @media(max-width:880px){.liverem{grid-template-columns:1fr;padding:36px 26px}}
+
+  /* pricing offer */
+  .price-wrap{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:stretch}
+  .offer{background:var(--surface);border:2px solid var(--teal);border-radius:26px;padding:38px;box-shadow:0 18px 50px rgba(20,184,166,.16);position:relative;display:flex;flex-direction:column}
+  .offer .badge{position:absolute;top:-13px;left:34px;background:linear-gradient(180deg,#FFD84D,var(--gold));color:var(--ink);font-size:12px;font-weight:800;letter-spacing:.03em;padding:6px 14px;border-radius:999px}
+  .offer h3{font-size:20px;font-weight:800;margin-bottom:8px}
+  .offer .big{font-size:46px;font-weight:900;letter-spacing:-.02em;line-height:1}
+  .offer .big small{font-size:16px;font-weight:600;color:var(--gray500)}
+  .offer .per{font-size:17px;font-weight:800;margin:12px 0 0}
+  .offer .per span{color:var(--teal)}
+  .offer ul{list-style:none;display:flex;flex-direction:column;gap:10px;margin:18px 0 22px;flex:1}
+  .offer li{display:flex;gap:9px;font-size:14px;color:var(--gray600)}
+  .offer li::before{content:"✓";color:var(--teal);font-weight:900;flex:none}
+  .offer .risk{font-size:13px;color:var(--gray500);margin-top:14px;display:flex;gap:8px;align-items:flex-start}
+  .compare{background:var(--paper);border:1px solid var(--gray200);border-radius:26px;padding:38px;display:flex;flex-direction:column}
+  .compare h3{font-size:17px;font-weight:800;margin-bottom:14px}
+  .compare .line{display:flex;justify-content:space-between;font-size:14px;color:var(--gray600);padding:11px 0;border-bottom:1px dashed var(--gray200)}
+  .compare .line b{color:var(--ink)}
+  .compare .save{margin-top:18px;background:var(--green);color:#fff;border-radius:16px;padding:15px;text-align:center;font-weight:800;font-size:15px}
+  .compare .eg{margin-top:16px;font-size:13px;color:var(--gray500);line-height:1.7}
+  .compare .eg b{color:var(--ink)}
+  @media(max-width:880px){.price-wrap{grid-template-columns:1fr}}
+
+  /* footer */
+  footer{padding:60px 0 40px;border-top:1px solid var(--gray100);margin-top:90px}
+  .foot{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:30px}
+  .foot h4{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--gray500);margin-bottom:14px}
+  .foot a{display:block;color:var(--gray600);font-size:15px;margin-bottom:9px}
+  .foot a:hover{color:var(--ink)}
+  .foot .brand{display:flex;align-items:center;gap:10px;margin-bottom:0}
+  .foot .tagline{font-weight:700;font-size:13px;letter-spacing:4px;color:var(--green);margin-top:8px}
+  .poweredby{display:inline-flex;align-items:center;gap:8px;margin-top:18px;font-size:12.5px;font-weight:600;
+       color:var(--gray500);background:var(--chip-bg);border:1px solid var(--gray200);border-radius:999px;padding:7px 14px}
+  .poweredby b{color:var(--ink);font-weight:800;letter-spacing:.02em}
+  .poweredby .spark{width:7px;height:7px;border-radius:50%;background:linear-gradient(180deg,#FFD84D,var(--gold));flex:none}
+  .legal{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;
+         margin-top:40px;padding-top:24px;border-top:1px solid var(--gray100);color:var(--gray500);font-size:13px}
+  .langs{display:flex;gap:8px}.langs span{background:var(--surface);border:1px solid var(--gray200);border-radius:8px;padding:3px 9px;font-weight:600}
+  @media(max-width:880px){.foot{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<!-- ===== Unity Ring SVG defs (from kiruko-unity-brand.html) ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FBD34D"/><stop offset=".55" stop-color="#F2B705"/><stop offset="1" stop-color="#C99405"/>
+  </linearGradient>
+  <radialGradient id="green" cx="0.5" cy="0.4" r="0.7">
+    <stop offset="0" stop-color="#7CFF4A"/><stop offset="1" stop-color="#33CC11"/>
+  </radialGradient>
+  <g id="person-g" fill="url(#gold)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+  <g id="unity-full">
+    <circle cx="50" cy="50" r="32" fill="none" stroke="url(#gold)" stroke-width="2.6" opacity=".55"/>
+    <use href="#person-g" transform="rotate(45 50 50)"/><use href="#person-g" transform="rotate(90 50 50)"/>
+    <use href="#person-g" transform="rotate(135 50 50)"/><use href="#person-g" transform="rotate(180 50 50)"/>
+    <use href="#person-g" transform="rotate(225 50 50)"/><use href="#person-g" transform="rotate(270 50 50)"/>
+    <use href="#person-g" transform="rotate(315 50 50)"/>
+    <g fill="url(#green)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+    <text x="50" y="52" text-anchor="middle" dominant-baseline="central" font-family="'Trebuchet MS',sans-serif" font-size="26" font-weight="800" fill="url(#green)">K</text>
+  </g>
+</defs></svg>
+
+<!-- ===== Launch banner ===== -->
+<div class="launchbar">🎉 <b>Launch offer</b> — the first <b>50 clients</b> get <b>50% off</b> the full platform. <a href="#contact">Book a demo →</a></div>
+
+<!-- ===== Nav ===== -->
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="#top">
+        <svg width="44" height="44" viewBox="0 0 100 100"><use href="#unity-full"/></svg>
+        <span class="wm">KIRUKO</span>
+      </a>
+      <div class="navlinks">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#faq">FAQ</a>
+      </div>
+      <div class="navcta">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8"/></svg>
+        </button>
+        <div id="lang-switch" role="group" aria-label="Language / Langue / Fiteny" style="display:inline-flex;align-items:center;height:38px;padding:0 4px;border-radius:10px;border:1px solid var(--gray200);font-size:13px;letter-spacing:.03em;gap:1px">
+          <button type="button" data-lang="en" aria-pressed="true" style="height:30px;padding:0 9px;border:0;border-radius:7px;background:var(--chip-bg);color:var(--ink);font-weight:800;cursor:pointer">EN</button>
+          <span aria-hidden="true" style="color:var(--gray200)">·</span>
+          <button type="button" data-lang="fr" aria-pressed="false" style="height:30px;padding:0 9px;border:0;border-radius:7px;background:transparent;color:var(--gray600);font-weight:700;cursor:pointer">FR</button>
+          <span aria-hidden="true" style="color:var(--gray200)">·</span>
+          <button type="button" data-lang="mg" aria-pressed="false" style="height:30px;padding:0 9px;border:0;border-radius:7px;background:transparent;color:var(--gray600);font-weight:700;cursor:pointer">MG</button>
+        </div>
+        <a class="btn btn-ghost" href="#contact">Book a demo</a>
+        <a class="btn btn-gold" href="#download">Get started</a>
+        <button id="hamburger" class="hamburger" type="button" aria-label="Open menu" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </nav>
+    <div id="mobile-menu" class="mobile-menu">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#faq">FAQ</a>
+      <a href="#download">Get started</a>
+      <a class="cta" href="#contact">Book a demo</a>
+    </div>
+  </div>
+</header>
+
+<!-- ===== Hero ===== -->
+<section class="hero" id="top">
+  <div class="aurora" aria-hidden="true">
+    <div class="blob blob--teal"></div><div class="blob blob--violet"></div><div class="blob blob--blue"></div><div class="blob blob--gold"></div><div class="blob blob--green"></div>
+  </div>
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow"><span class="pulse"></span>Your all-in-one HR department · for SMEs</span>
+      <h1>The whole <span class="accent">HR department</span> your team needs — in one platform.</h1>
+      <p class="lead">Attendance, payroll, leave, planner, incident reporting and <strong>live earnings</strong> — one platform
+        for employers and their team, with <strong>24/7 support</strong> included. Reliable, affordable, instant.</p>
+      <div class="hero-cta">
+        <a class="btn btn-gold" href="#contact">Claim launch offer</a>
+        <a class="btn btn-ghost" href="#how">See how it works →</a>
+      </div>
+      <div class="trust">
+        <span class="pill">🇲🇺 Built for Mauritius</span>
+        <span class="pill">🇲🇬 Madagascar — coming soon</span>
+        <span class="pill">EN · FR · MG</span>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="browser">
+        <div class="browser-bar">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="url"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>app.kiruko.mu</div>
+        </div>
+        <img class="browser-img" src="./assets/screenshots/web-dashboard.png" alt="Kiruko HR web dashboard" loading="eager" />
+      </div>
+      <div class="browser-reflect" aria-hidden="true"></div>
+      <div class="callout"><span class="led"></span>Statutory OT · auto-calculated</div>
+      <div class="gcard card-earn">
+        <div class="gcard-label">Live earnings</div>
+        <div class="gcard-value"><span class="dot-gold"></span> Rs 4,820</div>
+      </div>
+      <div class="gcard card-payroll">
+        <div class="gcard-label">Payroll run</div>
+        <div class="gcard-value"><span class="dot-green"></span> 47 paid</div>
+        <div class="sub">Completed · just now</div>
+      </div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <img src="./assets/screenshots/employee-home.png" alt="Kiruko employee app" loading="eager" />
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Proof bar ===== -->
+<div class="proof">
+  <div class="wrap">
+    <div class="stat"><b>2 apps</b><span>Employer &amp; employee</span></div>
+    <div class="stat"><b>Overtime</b><span>Easy to manage</span></div>
+    <div class="stat"><b>3 languages</b><span>EN · FR · MG</span></div>
+    <div class="stat"><b>Kiosk-ready</b><span>Shared-device clock-in</span></div>
+    <div class="stat"><b>Compliant</b><span>Audit trail + reporting</span></div>
+  </div>
+</div>
+
+<!-- ===== Launch offer (promoted — scarcity near the top) ===== -->
+<section class="block" id="offer" style="padding-bottom:0">
+  <div class="wrap">
+    <div class="cta">
+      <h2>Be one of the first 50.</h2>
+      <p>Claim 50% off for the first 50 clients — the full platform, 24/7 support included, risk-free for 30 days. Together We Can.</p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a class="btn btn-gold" href="#contact">Claim launch price</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Live remuneration (the wow feature) ===== -->
+<section class="block" style="padding-bottom:0">
+  <div class="wrap">
+    <div class="liverem">
+      <div>
+        <span class="eyebrow">The feature everyone talks about</span>
+        <h2>Watch your pay grow — second by second.</h2>
+        <p>Kiruko's live remuneration shows every worker their earnings building in real time — from their salary, overtime and allowances. No more "how much will I make this month?" Just punctuality, motivation and trust.</p>
+      </div>
+      <div class="counter">
+        <div class="lbl">Earned today</div>
+        <div class="amt" id="liveAmt">Rs 0.00</div>
+        <div class="sub">ticking up while the shift runs…</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Features ===== -->
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Everything in one platform</span>
+      <h2>From clock-in to payslip — covered.</h2>
+      <p>Stop stitching together spreadsheets, chat groups and a separate payroll tool. Kiruko does the whole loop.</p>
+    </div>
+    <div class="feat">
+      <div class="card"><div class="ic" style="background:var(--teal-tint);color:var(--teal)">⏱️</div>
+        <h3>Time &amp; attendance</h3><p>Clock in and out from the app or a shared kiosk, with breaks, schedules and a live countdown to shift end.</p></div>
+      <div class="card"><div class="ic" style="background:var(--gold-tint);color:var(--gold)">💸</div>
+        <h3>Payroll, done right</h3><p>Automated payroll runs, payslips, allowances and deductions — with statutory rules applied per country.</p></div>
+      <div class="card"><div class="ic" style="background:var(--blue-tint);color:var(--blue)">📅</div>
+        <h3>Scheduling &amp; tasks</h3><p>Assign shifts and tasks, require photo proof of completion, and watch progress update in real time.</p></div>
+      <div class="card"><div class="ic" style="background:var(--violet-tint);color:var(--violet)">🌴</div>
+        <h3>Leave management</h3><p>Requests, approvals and balances in a few taps — no more paper forms or lost emails.</p></div>
+      <div class="card"><div class="ic" style="background:var(--green-glow);color:var(--ink)">📈</div>
+        <h3>Overtime that follows the law</h3><p>A statutory overtime engine handles weekly thresholds, rest-day and holiday premiums — confirmed by the employer.</p></div>
+      <div class="card"><div class="ic" style="background:#FEE2E2;color:#DC2626">🛡️</div>
+        <h3>Compliance &amp; rights</h3><p>A confidential reporting channel for workers, full audit logs, and fine-grained roles &amp; permissions.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Two apps ===== -->
+<section class="block" id="apps" style="padding-top:0">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">One platform, two interfaces</span>
+      <h2>Built for employers <em>and</em> their teams.</h2>
+      <p>Owners, admins and managers can manage their teams in or out of the office using Kiruko's mobile functions. Employees communicate with their hierarchy directly and efficiently.</p>
+    </div>
+    <div class="split">
+      <div class="panel employer">
+        <span class="tag">For employers</span>
+        <h3>Run the business from one dashboard.</h3>
+        <ul>
+          <li>Live workforce view — who's clocked in, right now</li>
+          <li>Departments, jobs, schedules &amp; rosters</li>
+          <li>Payroll runs, salaries, allowances &amp; payslips</li>
+          <li>Approve leave, confirm overtime, review reports</li>
+          <li>Custom roles &amp; permissions for your managers/HR</li>
+        </ul>
+      </div>
+      <div class="panel employee">
+        <span class="tag">For employees</span>
+        <h3>Their whole work life, in their pocket.</h3>
+        <ul>
+          <li>Clock in/out with a reminder when it's time</li>
+          <li>Payslips, leave requests &amp; a salary calculator</li>
+          <li>Tasks with photo proof, documents &amp; expenses</li>
+          <li>Money transfers &amp; a confidential way to raise a report</li>
+          <li>Everything in their language — English, French &amp; Malagasy</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Languages ===== -->
+<section class="block" id="languages" style="padding-top:0">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Speak everyone's language</span>
+      <h2>Your whole team, in their own words.</h2>
+      <p>Every screen — employer and employee — is fully localised. People work in the language they're most comfortable in, so nothing gets lost in translation.</p>
+    </div>
+    <div class="langs-grid" style="max-width:560px;grid-template-columns:repeat(3,1fr)">
+      <div class="lang-card"><div class="flag">🇬🇧</div><b>English</b><span>EN</span></div>
+      <div class="lang-card"><div class="flag">🇫🇷</div><b>Français</b><span>FR</span></div>
+      <div class="lang-card"><div class="flag">🇲🇬</div><b>Malagasy</b><span>MG</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== How it works ===== -->
+<section class="block" id="how" style="background:var(--surface);border-top:1px solid var(--gray100);border-bottom:1px solid var(--gray100)">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Up and running fast</span>
+      <h2>Three steps to a connected workforce.</h2>
+    </div>
+    <div class="steps">
+      <div class="step"><h3>Set up your company</h3><p>Create your company, add departments and invite your team. Owners are productive on day one.</p></div>
+      <div class="step"><h3>Your team works</h3><p>Employees clock in, follow their schedule, complete tasks and request leave — from the app or a kiosk.</p></div>
+      <div class="step"><h3>Run payroll, stay compliant</h3><p>Approve hours and overtime, run payroll, and keep a clean audit trail — all in Kiruko.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Showcase (DISABLED for now — remove the hidden attribute to restore) ===== -->
+<section class="block" id="showcase" hidden>
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">See it in action</span>
+      <h2>Designed to feel effortless.</h2>
+      <p>A clean, consistent design system across every screen — employer and employee alike.</p>
+    </div>
+    <div class="showcase">
+      <div class="frame"><div class="ph" data-shot="./assets/screenshots/showcase-1.png"><span class="dot">📲</span>showcase-1.png</div></div>
+      <div class="frame"><div class="ph" data-shot="./assets/screenshots/showcase-2.png"><span class="dot">📲</span>showcase-2.png</div></div>
+      <div class="frame"><div class="ph" data-shot="./assets/screenshots/showcase-3.png"><span class="dot">📲</span>showcase-3.png</div></div>
+      <div class="frame"><div class="ph" data-shot="./assets/screenshots/showcase-4.png"><span class="dot">📲</span>showcase-4.png</div></div>
+      <div class="frame"><div class="ph" data-shot="./assets/screenshots/showcase-5.png"><span class="dot">📲</span>showcase-5.png</div></div>
+      <div class="frame"><div class="ph" data-shot="./assets/screenshots/showcase-6.png"><span class="dot">📲</span>showcase-6.png</div></div>
+    </div>
+    <p class="showcase-hint">← scroll for more →</p>
+  </div>
+</section>
+
+<!-- ===== Run it from your desk (web) (DISABLED for now — remove the hidden attribute to restore) ===== -->
+<section class="block" id="desktop" style="padding-top:0" hidden>
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">For managers &amp; owners</span>
+      <h2>Run the whole operation from your desk.</h2>
+      <p>Everything your team does on mobile rolls up into one powerful web dashboard — live attendance, payroll, analytics and compliance, all in your browser.</p>
+    </div>
+    <div class="deskwin">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <div class="ph" data-shot="./assets/screenshots/web-dashboard-reports.png"><span class="dot">🖥️</span>web-dashboard-reports.png</div>
+    </div>
+    <p class="deskcap"><b>Reports &amp; Analytics</b> — headcount, hours worked, overtime cost and dispute resolution over time. One click to CSV.</p>
+    <div class="deskgrid">
+      <div>
+        <div class="deskwin">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div class="ph" data-shot="./assets/screenshots/web-dashboard-attendance.png"><span class="dot">🖥️</span>web-dashboard-attendance.png</div>
+        </div>
+        <p class="deskcap"><b>Live attendance</b> — who's clocked in, where, and for how long, with overtime flagged automatically.</p>
+      </div>
+      <div>
+        <div class="deskwin">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div class="ph" data-shot="./assets/screenshots/web-dashboard-payroll-runs.png"><span class="dot">🖥️</span>web-dashboard-payroll-runs.png</div>
+        </div>
+        <p class="deskcap"><b>Payroll runs</b> — draft, review and finalise monthly pay with a full audit trail.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Why ===== -->
+<section class="block" id="why" style="padding-top:0">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Why teams choose Kiruko</span>
+      <h2>Local by design. Serious about fairness.</h2>
+    </div>
+    <div class="feat">
+      <div class="card"><div class="ic" style="background:var(--gold-tint);color:var(--gold)">🌍</div>
+        <h3>Built for the region</h3><p>Made for Mauritius today, with Madagascar coming soon — built around the languages, currencies and rules that matter here.</p></div>
+      <div class="card"><div class="ic" style="background:var(--teal-tint);color:var(--teal)">⚖️</div>
+        <h3>Fair by default</h3><p>Statutory overtime, transparent payslips and a confidential channel for workers to be heard.</p></div>
+      <div class="card"><div class="ic" style="background:var(--blue-tint);color:var(--blue)">🔒</div>
+        <h3>Secure &amp; auditable</h3><p>Role-based access, device-binding sign-in and an append-only audit trail on sensitive actions.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Pricing (DISABLED for now — remove the hidden attribute to restore) ===== -->
+<section class="block" id="pricing" style="padding-top:0" hidden>
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Pricing</span>
+      <h2>One plan. Your whole HR department.</h2>
+      <p>Simple, transparent, unbeatable — no hidden setup fees, no long-term lock-in (annual, renewable).</p>
+    </div>
+    <div class="price-wrap">
+      <div class="compare">
+        <h3>What SMEs normally pay — without Kiruko</h3>
+        <div class="line"><span>Yearly licence fee</span><b>Rs 800,000</b></div>
+        <div class="line"><span>Payroll software</span><b>Rs 1,500 / month / user</b></div>
+        <div class="line"><span>Attendance / time tracking</span><b>Rs 500 / month / user</b></div>
+        <div class="line"><span>HRIS / leave management</span><b>Rs 1,000 / month / user</b></div>
+        <div class="line"><span>Support &amp; training</span><b>Rs 1,000 / user / intervention</b></div>
+        <div class="line" style="border-bottom:none;margin-top:6px;padding-top:14px;border-top:2px solid var(--gray200);font-size:16px"><span><b>Total yearly</b></span><b>Rs 846,000</b></div>
+      </div>
+      <div class="compare" style="border:2px solid var(--teal);box-shadow:0 18px 50px rgba(20,184,166,.16);position:relative">
+        <span class="badge" style="position:absolute;top:-13px;left:34px;background:linear-gradient(180deg,#FFD84D,var(--gold));color:var(--ink);font-size:12px;font-weight:800;letter-spacing:.03em;padding:6px 14px;border-radius:999px">For the first 50 clients</span>
+        <h3>With Kiruko</h3>
+        <div class="line"><span>Yearly licence fee — incl. attendance, payroll, leave management, support &amp; training</span><b>Rs 70,000</b></div>
+        <div class="line"><span>Monthly connection fee</span><b>Rs 1,500 / user</b></div>
+        <div class="line" style="border-bottom:none;margin-top:6px;padding-top:14px;border-top:2px solid var(--gray200);font-size:16px"><span><b>Total yearly</b></span><b>Rs 88,000</b></div>
+        <div class="save" style="margin-top:18px">One system, one price — for a full suite of functions and services.</div>
+      </div>
+    </div>
+
+    <div class="pricehero" style="margin-top:26px;text-align:center;background:linear-gradient(150deg,var(--ink-fixed),var(--indigo));border-radius:26px;padding:40px 30px;color:#fff">
+      <span class="eyebrow" style="color:var(--green-glow)">Our price</span>
+      <p style="opacity:.85;margin:8px auto 18px;max-width:520px">One system, one price for a full series of functions and services — payroll, attendance, leave, support &amp; training.</p>
+      <div style="display:flex;align-items:baseline;justify-content:center;gap:16px;flex-wrap:wrap">
+        <span style="font-size:24px;font-weight:700;text-decoration:line-through;opacity:.55">Rs 800,000</span>
+        <span style="font-size:54px;font-weight:900;letter-spacing:-.02em;line-height:1;background:linear-gradient(180deg,#7CFF4A,var(--green));-webkit-background-clip:text;background-clip:text;color:transparent">Rs 400,000<span style="font-size:20px;font-weight:700;color:#fff;-webkit-text-fill-color:#fff"> / year</span></span>
+      </div>
+      <div style="margin-top:16px"><span class="badge" style="background:linear-gradient(180deg,#FFD84D,var(--gold));color:var(--ink);font-size:13px;font-weight:800;padding:7px 16px;border-radius:999px">50% launch discount</span></div>
+      <a class="btn btn-gold" href="#contact" style="margin-top:22px">Claim launch price</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FAQ ===== -->
+<section class="block" id="faq" style="background:var(--surface);border-top:1px solid var(--gray100)">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Questions</span>
+      <h2>Frequently asked.</h2>
+      <p>Everything you need to know before bringing your team onto Kiruko.</p>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>Which country is Kiruko built for?</summary>
+        <p>Kiruko is built for anyone who needs to manage attendance, payroll and the work their staff carry out — it isn't tied to a single country or region. It's designed to fit the needs of SMEs in the HR world everywhere, and the app is modular enough to adapt to almost any business situation. Get in touch and we'll tell you where we're headed.</p>
+      </details>
+      <details>
+        <summary>Do my employees need to install an app?</summary>
+        <p>Employees use the Kiruko mobile app for clock-in, payslips, leave, tasks and more. For shared spaces, you can also run a <strong>kiosk</strong> on one device so a whole team clocks in and out from it — no personal phone required.</p>
+      </details>
+      <details>
+        <summary>How does overtime get calculated?</summary>
+        <p>A built-in statutory overtime engine applies the right rules — weekly thresholds, rest-day and public-holiday premiums — instead of a flat guess. Overtime is confirmed by the employer before it's paid, so payslips stay accurate and fair.</p>
+      </details>
+      <details>
+        <summary>Can one person be both an employer and an employee?</summary>
+        <p>Yes. Owners, admins and managers who are also part of the team can switch between the <strong>employer dashboard</strong> and the <strong>employee view</strong> from a single login — pick which side to enter when you sign in.</p>
+      </details>
+      <details>
+        <summary>Which languages are supported?</summary>
+        <p>The app ships in English, French, Malagasy and Hindi — so each person works in the language they're most comfortable with.</p>
+      </details>
+      <details>
+        <summary>Is our data secure?</summary>
+        <p>Access is role-based and configurable per company, sign-in uses trusted-device binding, and sensitive actions are written to an append-only audit trail. Worker reports route through a confidential channel by design. A user's sensitive personal data is never processed without their explicit authorisation.</p>
+      </details>
+      <details>
+        <summary>How much does it cost?</summary>
+        <p>You can start for free and invite your team. For pricing on larger teams and add-ons, <a href="#contact" style="color:var(--teal);font-weight:600">book a demo</a> and we'll put together a plan that fits.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Download the app ===== -->
+<section class="block" id="download" style="padding-top:0">
+  <div class="wrap">
+    <div class="download">
+      <span class="eyebrow">Get the app</span>
+      <h2>Kiruko, in your team's pocket.</h2>
+      <p>Your team clocks in, views payslips, requests leave and watches their <b>live earnings</b> — all from the Kiruko mobile app. <b>Launching soon</b> on iOS &amp; Android.</p>
+      <div class="stores">
+        <!-- TODO when published, swap href to the live store URLs:
+             Google Play (deterministic): https://play.google.com/store/apps/details?id=com.iwugodlabs.kiruko
+             App Store: add the numeric app id once the app record is created. -->
+        <a class="store" href="#contact" aria-label="Kiruko on the App Store — coming soon">
+          <svg viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+          <span class="lbl"><small>Coming soon to the</small><b>App Store</b></span>
+        </a>
+        <a class="store" href="#contact" aria-label="Kiruko on Google Play — coming soon">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 2.6c0-.6.7-1 1.2-.6l15.6 9.4c.5.3.5 1 0 1.3L4.2 22c-.5.3-1.2 0-1.2-.6V2.6z"/></svg>
+          <span class="lbl"><small>Coming soon to</small><b>Google Play</b></span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Contact / Leads ===== -->
+<section class="block" id="contact" style="padding-top:0">
+  <div class="wrap">
+    <div class="contact">
+      <div class="info">
+        <span class="eyebrow">Get in touch</span>
+        <h3>Talk to us.</h3>
+        <p>Tell us about your team and we'll show you Kiruko in action — usually within one business day.</p>
+        <div class="meta">
+          <a href="tel:+23057194590"><span class="ic">📞</span> +230 5719 4590</a>
+          <a href="https://wa.me/23057194590"><span class="ic">💬</span> WhatsApp us</a>
+          <a href="mailto:hello@kiruko.mu"><span class="ic">✉️</span> hello@kiruko.mu</a>
+          <a href="#"><span class="ic">📍</span> Mauritius · Madagascar (coming soon)</a>
+        </div>
+      </div>
+      <div class="reach">
+        <h4>Two quick ways to reach us</h4>
+        <a class="btn btn-gold reach-btn" href="https://wa.me/23057194590?text=Hi%20Kiruko%2C%20I%27d%20like%20a%20demo">💬 Message us on WhatsApp</a>
+        <a class="btn btn-ghost reach-btn" href="mailto:hello@kiruko.mu?subject=Kiruko%20demo%20request">✉️ Email hello@kiruko.mu</a>
+        <p class="formnote">Tell us your team size and what you'd like to see — we usually reply within one business day.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <a class="brand" href="#top">
+          <svg width="40" height="40" viewBox="0 0 100 100"><use href="#unity-full"/></svg>
+          <span class="wm" style="font-size:20px">KIRUKO</span>
+        </a>
+        <p class="muted" style="margin-top:12px;max-width:280px;font-size:14px">A circle of people around one centre — payroll &amp; people, together.</p>
+        <p class="tagline">TOGETHER WE CAN</p>
+        <span class="poweredby"><span class="spark"></span>Powered by <b>Zilwa Eklere Ltd</b></span>
+      </div>
+      <div><h4>Product</h4>
+        <a href="#features">Features</a><a href="#apps">For employers</a><a href="#apps">For employees</a><a href="#how">How it works</a></div>
+      <div><h4>Company</h4>
+        <a href="#why">Why Kiruko</a><a href="#contact">Book a demo</a><a href="#contact">Contact</a><a href="mailto:hello@kiruko.mu">Careers</a></div>
+      <div><h4>Legal</h4>
+        <a href="./privacy.html">Privacy</a><a href="./terms.html">Terms</a><a href="#faq">Compliance</a><a href="#why">Worker rights</a></div>
+    </div>
+    <div class="legal">
+      <span>© 2026 Kiruko. All rights reserved.</span>
+      <div class="langs"><span>EN</span><span>FR</span><span>MG</span></div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  /* Light / dark theme toggle (default light; persisted in localStorage). */
+  (function(){
+    var root = document.documentElement;
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', function(){
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('kiruko-theme', next); } catch(e){}
+    });
+  })();
+
+  /* Mobile nav menu (hamburger). */
+  (function(){
+    var ham = document.getElementById('hamburger');
+    var menu = document.getElementById('mobile-menu');
+    if (!ham || !menu) return;
+    function close(){ menu.classList.remove('open'); ham.setAttribute('aria-expanded','false'); }
+    ham.addEventListener('click', function(){
+      var open = menu.classList.toggle('open');
+      ham.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    menu.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', close); });
+    document.addEventListener('click', function(e){
+      if (menu.classList.contains('open') && !menu.contains(e.target) && !ham.contains(e.target)) close();
+    });
+  })();
+
+  /* Conversion tracking → Umami (no-ops until the analytics script is live).
+     Delegated + label-matched so it covers EN and FR and dynamic buttons. */
+  (function(){
+    function track(name){ try { if (window.umami && window.umami.track) window.umami.track(name); } catch(e){} }
+    document.addEventListener('click', function(e){
+      var el = e.target.closest('a, button'); if (!el) return;
+      var href = (el.getAttribute('href') || '');
+      var txt = (el.textContent || '').trim().toLowerCase();
+      if (el.id === 'lang-toggle') track('lang-toggle');
+      else if (/wa\.me|whatsapp/.test(href)) track('whatsapp-click');
+      else if (href.indexOf('tel:') === 0) track('phone-click');
+      else if (/get started|commencer/.test(txt)) track('cta-get-started');
+      else if (/claim launch|profiter/.test(txt)) track('cta-claim-launch');
+      else if (/book a demo|réserver une démo|demander une démo/.test(txt)) track('cta-book-demo');
+      else if (href.indexOf('mailto:') === 0) track('email-click');
+    });
+  })();
+
+  /* Drop a file named like the slot into ./assets/screenshots/ and it appears
+     automatically; the dashed placeholder stays until then. */
+  document.querySelectorAll('[data-shot]').forEach(function(slot){
+    var img = new Image();
+    img.onload = function(){
+      img.className = 'shot';
+      img.alt = 'Kiruko screenshot';
+      slot.replaceWith(img);
+    };
+    img.src = slot.getAttribute('data-shot');
+  });
+
+  /* Live remuneration demo counter — ticks up like real earnings during a shift. */
+  (function(){
+    var el = document.getElementById('liveAmt');
+    if (!el) return;
+    var amt = 412.60;                // mid-shift "earned today" (MUR)
+    el.textContent = 'Rs ' + amt.toFixed(2);
+    setInterval(function(){ amt += 0.03; el.textContent = 'Rs ' + amt.toFixed(2); }, 80);
+  })();
+
+  /* ── EN / FR language toggle ─────────────────────────────────────────────
+     Caches each visible English text node, then swaps in French from the
+     dictionary (keys = whitespace-normalised English). Persisted in
+     localStorage; toggled by the FR/EN button in the nav. */
+  (function(){
+    var FR = {
+      "Features":"Fonctionnalités","Pricing":"Tarifs","How it works":"Comment ça marche","Book a demo":"Réserver une démo","Get started":"Commencer",
+      "Launch offer":"Offre de lancement","— the first":"— les","50 contracts":"50 premiers contrats","get year one at":"obtiennent la première année à","See pricing →":"Voir les tarifs →",
+      "Your all-in-one HR department · for SMEs":"Votre service RH tout-en-un · pour les PME",
+      "The whole":"Tout le","HR department":"service RH","your team needs — in one platform.":"dont votre équipe a besoin — en une seule plateforme.",
+      "Attendance, payroll, leave, planner, incident reporting and":"Présence, paie, congés, planning, signalement d'incidents et",
+      "live earnings":"revenus en direct","— one platform for employers and their team, with":"— une seule plateforme pour les employeurs et leur équipe, avec",
+      "24/7 support":"une assistance 24/7","included. Reliable, affordable, instant.":"incluse. Fiable, abordable, instantané.",
+      "Claim launch offer":"Profiter de l'offre de lancement","See how it works →":"Voir comment ça marche →",
+      "🇲🇺 Built for Mauritius":"🇲🇺 Conçu pour Maurice","🇲🇬 Madagascar — coming soon":"🇲🇬 Madagascar — bientôt disponible",
+      "Statutory OT · auto-calculated":"Heures sup. légales · calculées automatiquement","Live earnings":"Revenus en direct","Payroll run":"Traitement de la paie","Completed · just now":"Terminé · à l'instant",
+      "2 apps":"2 applis","Employer & employee":"Employeur et employé","Statutory":"Légal","Overtime that follows the law":"Des heures sup. qui respectent la loi","3 languages":"3 langues","Kiosk-ready":"Prêt pour le kiosque","Shared-device clock-in":"Pointage sur appareil partagé","Compliant":"Conforme","Audit trail + reporting":"Journal d'audit + rapports",
+      "The feature everyone talks about":"La fonctionnalité dont tout le monde parle","Watch your pay grow — second by second.":"Regardez votre paie grandir — seconde après seconde.",
+      "Kiruko's live remuneration shows every worker their earnings building in real time — from their salary, overtime and allowances. No more \"how much will I make this month?\" Just punctuality, motivation and trust.":"La rémunération en direct de Kiruko montre à chaque employé ses gains qui s'accumulent en temps réel — salaire, heures sup. et primes. Fini le « combien vais-je gagner ce mois-ci ? ». Juste de la ponctualité, de la motivation et de la confiance.",
+      "Earned today":"Gagné aujourd'hui","ticking up while the shift runs…":"qui augmente pendant le service…",
+      "Everything in one platform":"Tout sur une seule plateforme","From clock-in to payslip — covered.":"Du pointage au bulletin de paie — tout est couvert.",
+      "Stop stitching together spreadsheets, chat groups and a separate payroll tool. Kiruko does the whole loop.":"Fini de jongler entre tableurs, groupes de discussion et un logiciel de paie séparé. Kiruko gère toute la boucle.",
+      "Time & attendance":"Temps et présence","Clock in and out from the app or a shared kiosk, with breaks, schedules and a live countdown to shift end.":"Pointez l'entrée et la sortie depuis l'appli ou un kiosque partagé, avec pauses, horaires et un compte à rebours en direct jusqu'à la fin du service.",
+      "Payroll, done right":"La paie, bien faite","Automated payroll runs, payslips, allowances and deductions — with statutory rules applied per country.":"Traitements de paie automatisés, bulletins, primes et retenues — avec les règles légales appliquées par pays.",
+      "Scheduling & tasks":"Planning et tâches","Assign shifts and tasks, require photo proof of completion, and watch progress update in real time.":"Attribuez les services et les tâches, exigez une preuve photo, et suivez l'avancement en temps réel.",
+      "Leave management":"Gestion des congés","Requests, approvals and balances in a few taps — no more paper forms or lost emails.":"Demandes, approbations et soldes en quelques clics — fini les formulaires papier et les e-mails perdus.",
+      "A statutory overtime engine handles weekly thresholds, rest-day and holiday premiums — confirmed by the employer.":"Un moteur d'heures supplémentaires légal gère les seuils hebdomadaires, les primes de repos et de jours fériés — confirmé par l'employeur.",
+      "Compliance & rights":"Conformité et droits","A confidential reporting channel for workers, full audit logs, and fine-grained roles & permissions.":"Un canal de signalement confidentiel pour les employés, des journaux d'audit complets, et des rôles et permissions précis.",
+      "One platform, two interfaces":"Une plateforme, deux interfaces","Built for employers":"Conçu pour les employeurs","and":"et","their teams.":"leurs équipes.",
+      "Owners, admins and managers can manage their teams in or out of the office using Kiruko's mobile functions. Employees communicate with their hierarchy directly and efficiently.":"Les propriétaires, administrateurs et managers peuvent gérer leurs équipes au bureau ou à distance grâce aux fonctions mobiles de Kiruko. Les employés communiquent directement et efficacement avec leur hiérarchie.",
+      "For employers":"Pour les employeurs","Run the business from one dashboard.":"Pilotez l'entreprise depuis un seul tableau de bord.",
+      "Live workforce view — who's clocked in, right now":"Vue en direct des effectifs — qui est pointé, en ce moment","Departments, jobs, schedules & rosters":"Départements, postes, horaires et plannings","Payroll runs, salaries, allowances & payslips":"Traitements de paie, salaires, primes et bulletins","Approve leave, confirm overtime, review reports":"Approuvez les congés, confirmez les heures sup., consultez les rapports","Custom roles & permissions for your managers/HR":"Rôles et permissions personnalisés pour vos managers/RH",
+      "For employees":"Pour les employés","Their whole work life, in their pocket.":"Toute leur vie professionnelle, dans leur poche.",
+      "Clock in/out with a reminder when it's time":"Pointage entrée/sortie avec un rappel au bon moment","Payslips, leave requests & a salary calculator":"Bulletins, demandes de congé et un calculateur de salaire","Tasks with photo proof, documents & expenses":"Tâches avec preuve photo, documents et dépenses","Money transfers & a confidential way to raise a report":"Transferts d'argent et un moyen confidentiel de faire un signalement","Everything in their language — English, French & Malagasy":"Tout dans leur langue — anglais, français et malgache",
+      "Speak everyone's language":"Parlez la langue de chacun","Your whole team, in their own words.":"Toute votre équipe, dans ses propres mots.",
+      "Every screen — employer and employee — is fully localised. People work in the language they're most comfortable in, so nothing gets lost in translation.":"Chaque écran — employeur et employé — est entièrement traduit. Chacun travaille dans la langue où il est le plus à l'aise, pour que rien ne se perde dans la traduction.",
+      "English":"Anglais","Malagasy":"Malgache",
+      "Up and running fast":"Opérationnel rapidement","Three steps to a connected workforce.":"Trois étapes vers des équipes connectées.",
+      "Set up your company":"Configurez votre entreprise","Create your company, add departments and invite your team. Owners are productive on day one.":"Créez votre entreprise, ajoutez des départements et invitez votre équipe. Les propriétaires sont productifs dès le premier jour.",
+      "Your team works":"Votre équipe travaille","Employees clock in, follow their schedule, complete tasks and request leave — from the app or a kiosk.":"Les employés pointent, suivent leur horaire, accomplissent leurs tâches et demandent des congés — depuis l'appli ou un kiosque.",
+      "Run payroll, stay compliant":"Faites la paie, restez conforme","Approve hours and overtime, run payroll, and keep a clean audit trail — all in Kiruko.":"Approuvez les heures et les heures sup., lancez la paie, et gardez un journal d'audit clair — le tout dans Kiruko.",
+      "See it in action":"Voyez-le en action","Designed to feel effortless.":"Conçu pour être d'une simplicité totale.","A clean, consistent design system across every screen — employer and employee alike.":"Un design épuré et cohérent sur chaque écran — côté employeur comme employé.","← scroll for more →":"← faites défiler →",
+      "For managers & owners":"Pour les managers et propriétaires","Run the whole operation from your desk.":"Pilotez toute l'opération depuis votre bureau.",
+      "Everything your team does on mobile rolls up into one powerful web dashboard — live attendance, payroll, analytics and compliance, all in your browser.":"Tout ce que votre équipe fait sur mobile remonte dans un tableau de bord web puissant — présence en direct, paie, analyses et conformité, le tout dans votre navigateur.",
+      "Reports & Analytics":"Rapports et analyses","— headcount, hours worked, overtime cost and dispute resolution over time. One click to CSV.":"— effectifs, heures travaillées, coût des heures sup. et résolution des litiges dans le temps. Un clic vers CSV.",
+      "Live attendance":"Présence en direct","— who's clocked in, where, and for how long, with overtime flagged automatically.":"— qui est pointé, où, et depuis combien de temps, avec les heures sup. signalées automatiquement.",
+      "Payroll runs":"Traitements de paie","— draft, review and finalise monthly pay with a full audit trail.":"— préparez, vérifiez et finalisez la paie mensuelle avec un journal d'audit complet.",
+      "Why teams choose Kiruko":"Pourquoi les équipes choisissent Kiruko","Local by design. Serious about fairness.":"Local par conception. Sérieux sur l'équité.",
+      "Built for the region":"Conçu pour la région","Made for Mauritius today, with Madagascar coming soon — built around the languages, currencies and rules that matter here.":"Conçu pour Maurice aujourd'hui, avec Madagascar bientôt — pensé autour des langues, des devises et des règles qui comptent ici.",
+      "Fair by default":"Équitable par défaut","Statutory overtime, transparent payslips and a confidential channel for workers to be heard.":"Heures sup. légales, bulletins transparents et un canal confidentiel pour que les employés soient entendus.",
+      "Secure & auditable":"Sécurisé et auditable","Role-based access, device-binding sign-in and an append-only audit trail on sensitive actions.":"Accès basé sur les rôles, connexion liée à l'appareil et un journal d'audit inaltérable sur les actions sensibles.",
+      "One plan. Your whole HR department.":"Un seul forfait. Tout votre service RH.","Simple, transparent, unbeatable — no hidden setup fees, no long-term lock-in (annual, renewable).":"Simple, transparent, imbattable — aucuns frais d'installation cachés, aucun engagement à long terme (annuel, renouvelable).",
+      "Launch offer · first 50 contracts":"Offre de lancement · 50 premiers contrats","Complete HR platform":"Plateforme RH complète","first year":"première année","/ employee / month":"/ employé / mois",
+      "Every feature — attendance, payroll, leave, planner & reports":"Toutes les fonctionnalités — présence, paie, congés, planning et rapports","real-time chat & support":"chat et assistance en temps réel","Tailored training for your team":"Formation sur mesure pour votre équipe","Troubleshooting & setup to fit your operations":"Dépannage et configuration adaptés à votre activité","No setup fees · no long-term lock-in":"Aucuns frais d'installation · aucun engagement à long terme",
+      "Claim launch price":"Profiter du prix de lancement","Risk-free — full refund within 30 days, no questions asked.":"Sans risque — remboursement intégral sous 30 jours, sans condition.",
+      "What SMEs normally pay — without Kiruko":"Ce que les PME paient normalement — sans Kiruko","Yearly licence fee":"Licence annuelle","Payroll software":"Logiciel de paie","Attendance / time tracking":"Présence / suivi du temps","HRIS / leave management":"SIRH / gestion des congés","Support & training":"Assistance et formation","Total yearly":"Total annuel",
+      "With Kiruko":"Avec Kiruko","For the first 50 clients":"Pour les 50 premiers clients","Yearly licence fee — incl. attendance, payroll, leave management, support & training":"Licence annuelle — présence, paie, congés, assistance et formation incluses","Monthly connection fee":"Frais de connexion mensuels","One system, one price — for a full suite of functions and services.":"Un seul système, un seul prix — pour une suite complète de fonctions et de services.",
+      "Our price":"Notre prix","One system, one price for a full series of functions and services — payroll, attendance, leave, support & training.":"Un seul système, un seul prix pour une série complète de fonctions et de services — paie, présence, congés, assistance et formation.","50% launch discount":"Remise de lancement de 50 %",
+      "Questions":"Questions","Frequently asked.":"Questions fréquentes.","Everything you need to know before bringing your team onto Kiruko.":"Tout ce qu'il faut savoir avant d'intégrer votre équipe à Kiruko.",
+      "Which country is Kiruko built for?":"Pour quel pays Kiruko est-il conçu ?","Kiruko is built for anyone who needs to manage attendance, payroll and the work their staff carry out — it isn't tied to a single country or region. It's designed to fit the needs of SMEs in the HR world everywhere, and the app is modular enough to adapt to almost any business situation. Get in touch and we'll tell you where we're headed.":"Kiruko est conçu pour quiconque doit gérer la présence, la paie et le travail confié à son personnel — il n'est lié à aucun pays ni à aucune région en particulier. Il est pensé pour répondre aux besoins des PME du monde des RH partout, et l'appli est assez modulaire pour s'adapter à presque toute situation d'entreprise. Contactez-nous et nous vous dirons vers où nous allons.",
+      "Do my employees need to install an app?":"Mes employés doivent-ils installer une appli ?","Employees use the Kiruko mobile app for clock-in, payslips, leave, tasks and more. For shared spaces, you can also run a":"Les employés utilisent l'appli mobile Kiruko pour le pointage, les bulletins, les congés, les tâches et plus encore. Pour les espaces partagés, vous pouvez aussi lancer un","kiosk":"kiosque","on one device so a whole team clocks in and out from it — no personal phone required.":"sur un seul appareil pour que toute une équipe y pointe — sans téléphone personnel.",
+      "How does overtime get calculated?":"Comment les heures supplémentaires sont-elles calculées ?","A built-in statutory overtime engine applies the right rules — weekly thresholds, rest-day and public-holiday premiums — instead of a flat guess. Overtime is confirmed by the employer before it's paid, so payslips stay accurate and fair.":"Un moteur d'heures sup. légal intégré applique les bonnes règles — seuils hebdomadaires, primes de repos et de jours fériés — au lieu d'une estimation approximative. Les heures sup. sont confirmées par l'employeur avant d'être payées, pour des bulletins justes et exacts.",
+      "Can one person be both an employer and an employee?":"Une même personne peut-elle être à la fois employeur et employé ?","Yes. Owners, admins and managers who are also part of the team can switch between the":"Oui. Les propriétaires, administrateurs et managers qui font aussi partie de l'équipe peuvent basculer entre le","employer dashboard":"tableau de bord employeur","and the":"et la","employee view":"vue employé","from a single login — pick which side to enter when you sign in.":"depuis un seul compte — choisissez de quel côté entrer à la connexion.",
+      "Which languages are supported?":"Quelles langues sont prises en charge ?","The app ships in English, French, Malagasy and Hindi — so each person works in the language they're most comfortable with.":"L'appli est disponible en anglais, français, malgache et hindi — pour que chacun travaille dans la langue où il est le plus à l'aise.",
+      "Is our data secure?":"Nos données sont-elles sécurisées ?","Access is role-based and configurable per company, sign-in uses trusted-device binding, and sensitive actions are written to an append-only audit trail. Worker reports route through a confidential channel by design. A user's sensitive personal data is never processed without their explicit authorisation.":"L'accès est basé sur les rôles et configurable par entreprise, la connexion utilise la liaison à un appareil de confiance, et les actions sensibles sont inscrites dans un journal d'audit inaltérable. Les signalements des employés passent par un canal confidentiel par conception. Les données personnelles sensibles d'un utilisateur ne sont jamais traitées sans son autorisation explicite.",
+      "How much does it cost?":"Combien ça coûte ?","You can start for free and invite your team. For pricing on larger teams and add-ons,":"Vous pouvez commencer gratuitement et inviter votre équipe. Pour les tarifs des grandes équipes et des options,","book a demo":"réservez une démo","and we'll put together a plan that fits.":"et nous élaborerons un forfait adapté.",
+      "Get the app":"Téléchargez l'appli","Kiruko, in your team's pocket.":"Kiruko, dans la poche de votre équipe.","Your team clocks in, views payslips, requests leave and watches their":"Votre équipe pointe, consulte ses bulletins, demande des congés et suit ses","— all from the Kiruko mobile app.":"— le tout depuis l'appli mobile Kiruko.","Launching soon":"Bientôt disponible","on iOS & Android.":"sur iOS et Android.","Coming soon to the":"Bientôt sur le","Coming soon to":"Bientôt sur",
+      "Be one of the first 50.":"Soyez parmi les 50 premiers.","Claim 50% off for the first 50 clients — the full platform, 24/7 support included, risk-free for 30 days. Together We Can.":"Profitez de 50 % de réduction pour les 50 premiers clients — la plateforme complète, assistance 24/7 incluse, sans risque pendant 30 jours. Ensemble, nous pouvons.",
+      "Get in touch":"Contactez-nous","Talk to us.":"Parlons-en.","Tell us about your team and we'll show you Kiruko in action — usually within one business day.":"Parlez-nous de votre équipe et nous vous montrerons Kiruko en action — généralement sous un jour ouvré.","WhatsApp us":"Nous écrire sur WhatsApp","Mauritius · Madagascar (coming soon)":"Maurice · Madagascar (bientôt)",
+      "Two quick ways to reach us":"Deux façons rapides de nous joindre","💬 Message us on WhatsApp":"💬 Écrivez-nous sur WhatsApp","✉️ Email hello@kiruko.mu":"✉️ E-mail hello@kiruko.mu","Tell us your team size and what you'd like to see — we usually reply within one business day.":"Indiquez-nous la taille de votre équipe et ce que vous aimeriez voir — nous répondons généralement sous un jour ouvré.",
+      "A circle of people around one centre — payroll & people, together.":"Un cercle de personnes autour d'un centre — la paie et les personnes, ensemble.","Powered by":"Propulsé par","Product":"Produit","Why Kiruko":"Pourquoi Kiruko","Contact":"Contact","Careers":"Carrières","Legal":"Mentions légales","Privacy":"Confidentialité","Terms":"Conditions","Compliance":"Conformité","Worker rights":"Droits des employés","© 2026 Kiruko. All rights reserved.":"© 2026 Kiruko. Tous droits réservés."
+    };
+
+    var PH = { "Your name":"Votre nom", "Company name":"Nom de l'entreprise", "you@company.com":"vous@entreprise.com", "What would you like to know?":"Que souhaitez-vous savoir ?" };
+    var MG = {
+      "Features":"Endri-javatra","Pricing":"Vidiny","How it works":"Ahoana no fiasany","Book a demo":"Hangataka demo","Get started":"Atombohy",
+      "Launch offer":"Tolotra fanokafana","— the first":"— ny","50 contracts":"50 fifanarahana voalohany","get year one at":"mahazo ny taona voalohany amin'ny","See pricing →":"Hijery ny vidiny →",
+      "Your all-in-one HR department · for SMEs":"Ny departemantan'ny HR manontolo · ho an'ny orinasa kely sy antonony",
+      "The whole":"Ny","HR department":"departemantan'ny HR","your team needs — in one platform.":"ilain'ny ekipanao — amin'ny sehatra iray.",
+      "Attendance, payroll, leave, planner, incident reporting and":"Fanatrehana, karama, fialan-tsasatra, fandaharana, tatitra tranga ary",
+      "live earnings":"vola azony amin'ny fotoana mety","— one platform for employers and their team, with":"— sehatra iray ho an'ny mpampiasa sy ny ekipany, miaraka amin'ny",
+      "24/7 support":"fanampiana 24/7","included. Reliable, affordable, instant.":"ampianarina. Azo itokiana, vidiny mety, aingana.",
+      "Claim launch offer":"Alao ny tolotra fanokafana","See how it works →":"Hijery ny fiasany →",
+      "🇲🇺 Built for Mauritius":"🇲🇺 Natao ho an'i Morisisy","🇲🇬 Madagascar — coming soon":"🇲🇬 Madagascar — ho avy tsy ho ela",
+      "Statutory OT · auto-calculated":"OT ara-dalàna · kajy mandeha ho azy","Live earnings":"Vola azony amin'izao fotoana izao","Payroll run":"Fanatanterahana karama","Completed · just now":"Vita · teo afaka kelin'izay",
+      "2 apps":"2 rindrambaiko","Employer & employee":"Mpampiasa & mpiasa","Statutory":"Ara-dalàna","Overtime that follows the law":"Ora fanampin'ny asa manaraka ny lalàna","3 languages":"3 fiteny","Kiosk-ready":"Vonona ho an'ny kiosque","Shared-device clock-in":"Fidirana amin'ny fitaovana iombonan'ny rehetra","Compliant":"Manaraka ny lalàna","Audit trail + reporting":"Taon-draharaha + tatitra",
+      "The feature everyone talks about":"Ny endri-javatra rehetra miresaka momba azy","Watch your pay grow — second by second.":"Jereo ny karamanao mitombo — segondra aman-segondra.",
+      "Kiruko's live remuneration shows every worker their earnings building in real time — from their salary, overtime and allowances. No more \"how much will I make this month?\" Just punctuality, motivation and trust.":"Ny tambin-karama mivantana an'i Kiruko dia mampiseho amin'ny mpiasa tsirairay ny hareny mitambatra amin'ny fotoana mety — ny karamany, ny ora fanampiny ary ny fanasoavana. Tsy misy intsony hoe \"ohatrinona no ho azoko ity volana ity?\" Fahamatorana, finiavana ary fitokiana ihany.",
+      "Earned today":"Azony androany","ticking up while the shift runs…":"mitombo mandritra ny fiasana…",
+      "Everything in one platform":"Ny zavatra rehetra amin'ny sehatra iray","From clock-in to payslip — covered.":"Hatramin'ny fidirana ka hatramin'ny taratasy karama — voarakitra.",
+      "Stop stitching together spreadsheets, chat groups and a separate payroll tool. Kiruko does the whole loop.":"Atsaharo ny manambatra takelaka isa, vondrona resaka ary fitaovana karama misaraka. Kiruko no manao ny dingana manontolo.",
+      "Time & attendance":"Fotoana & fanatrehana","Clock in and out from the app or a shared kiosk, with breaks, schedules and a live countdown to shift end.":"Midira sy mivoaka amin'ny rindrambaiko na kiosque iombonan'ny rehetra, miaraka amin'ny fitsaharana, fandaharana ary fanisana amin'ny fotoana mety hatramin'ny faramparan'ny asa.",
+      "Payroll, done right":"Karama, natao tsara","Automated payroll runs, payslips, allowances and deductions — with statutory rules applied per country.":"Fanatanterahana karama mandeha ho azy, taratasy karama, fanasoavana ary fitanisana — miaraka amin'ny fitsipika ara-dalàna ampiharina isam-pirenena.",
+      "Scheduling & tasks":"Fandaharana & asa","Assign shifts and tasks, require photo proof of completion, and watch progress update in real time.":"Omeo asa sy anjara asa, mitaky porofo sary ny fahatanterahan'ny asa, ary jereo ny fandrosoan'ny asa amin'ny fotoana mety.",
+      "Leave management":"Fitantanana ny fialan-tsasatra","Requests, approvals and balances in a few taps — no more paper forms or lost emails.":"Fangatahana, fankatoavana ary taova amin'ny tsindry vitsivitsy — tsy misy intsony taratasy na mailaka very.",
+      "A statutory overtime engine handles weekly thresholds, rest-day and holiday premiums — confirmed by the employer.":"Fitaovana faritana ara-dalàna ny ora fanampin'ny asa no mitantana ny fetra herinandro, ny premy andro fialan-tsasatra sy andro fety — voamarina ny mpampiasa.",
+      "Compliance & rights":"Fanajana ny lalàna & zon'ny mpiasa","A confidential reporting channel for workers, full audit logs, and fine-grained roles & permissions.":"Lalana tatitra tsiambaratelo ho an'ny mpiasa, taon-draharaha feno, ary andraikitra sy fahazoan-dalàna voafaritra tsara.",
+      "One platform, two interfaces":"Sehatra iray, endri-javatra roa","Built for employers":"Natao ho an'ny mpampiasa","and":"sy","their teams.":"ny ekipany.",
+      "Owners, admins and managers can manage their teams in or out of the office using Kiruko's mobile functions. Employees communicate with their hierarchy directly and efficiently.":"Ny tompon'orinasa, ny mpandrindra ary ny mpanitsy dia afaka mitantana ny ekipany ao na ivelan'ny biraony amin'ny alalan'ny anjara asa finday an'i Kiruko. Ny mpiasa dia mifandray amin'ny ambaratongany mivantana sy mahomby.",
+      "For employers":"Ho an'ny mpampiasa","Run the business from one dashboard.":"Ampiasao ny orinasa avy amin'ny dashboard iray.",
+      "Live workforce view — who's clocked in, right now":"Fijery ny mpiasa amin'ny fotoana mety — iza no efa niditra, ankehitriny","Departments, jobs, schedules & rosters":"Sampana, asa, fandaharana & lisi-mpiasa","Payroll runs, salaries, allowances & payslips":"Fanatanterahana karama, karama, fanasoavana & taratasy karama","Approve leave, confirm overtime, review reports":"Ekeo ny fialan-tsasatra, ampitoeroana ny ora fanampiny, jereo ny tatitra","Custom roles & permissions for your managers/HR":"Andraikitra & fahazoan-dalàna manokana ho an'ny mpanitsy/HR anao",
+      "For employees":"Ho an'ny mpiasa","Their whole work life, in their pocket.":"Ny fiainan'ny asany manontolo, ao an-kapakiny.",
+      "Clock in/out with a reminder when it's time":"Fidirana/fivoahana miaraka amin'ny fampahatsiahivana amin'ny fotoana mety","Payslips, leave requests & a salary calculator":"Taratasy karama, fangatahana fialan-tsasatra & kajy karama","Tasks with photo proof, documents & expenses":"Asa miaraka amin'ny porofo sary, antontan-taratasy & fandaniana","Money transfers & a confidential way to raise a report":"Famindrana vola & fomba tsiambaratelo hanaovana tatitra","Everything in their language — English, French & Malagasy":"Ny zavatra rehetra amin'ny fiteny iasany — Anglisy, Frantsay & Malagasy",
+      "Speak everyone's language":"Miresaha amin'ny fiteny rehetra","Your whole team, in their own words.":"Ny ekipanao manontolo, amin'ny teniny manokana.",
+      "Every screen — employer and employee — is fully localised. People work in the language they're most comfortable in, so nothing gets lost in translation.":"Ny efijery tsirairay — mpampiasa sy mpiasa — dia voadika tanteraka. Ny olona dia miasa amin'ny fiteny tsara indrindra ho azy, mba tsy hisy zavatra very amin'ny fandikana.",
+      "English":"Anglisy","Malagasy":"Malagasy",
+      "Up and running fast":"Miasa haingana","Three steps to a connected workforce.":"Dingana telo mankany amin'ny mpiasa mifandray.",
+      "Set up your company":"Mametaha ny orinasanao","Create your company, add departments and invite your team. Owners are productive on day one.":"Famorona ny orinasanao, ampiana sampana ary antsoy ny ekipanao. Ny tompon'orinasa dia mahomby amin'ny andro voalohany.",
+      "Your team works":"Ny ekipanao miasa","Employees clock in, follow their schedule, complete tasks and request leave — from the app or a kiosk.":"Ny mpiasa dia miditra, manaraka ny fandaharany, manatanteraka asa ary mangataka fialan-tsasatra — avy amin'ny rindrambaiko na kiosque.",
+      "Run payroll, stay compliant":"Ampiasao ny karama, mitoetra manaraka ny lalàna","Approve hours and overtime, run payroll, and keep a clean audit trail — all in Kiruko.":"Ekeo ny ora sy ny ora fanampiny, ampiasao ny karama, ary mitazona taon-draharaha madio — rehetra ao Kiruko.",
+      "See it in action":"Jereo azy miasa","Designed to feel effortless.":"Natao ho mora tanteraka.","A clean, consistent design system across every screen — employer and employee alike.":"Rindran-java-manao madio sy matotra amin'ny efijery tsirairay — mpampiasa sy mpiasa mitovy.","← scroll for more →":"← soro ho an'ny bebe kokoa →",
+      "For managers & owners":"Ho an'ny mpanitsy & tompon'orinasa","Run the whole operation from your desk.":"Ampiasao ny asa manontolo avy amin'ny latabatrao.",
+      "Everything your team does on mobile rolls up into one powerful web dashboard — live attendance, payroll, analytics and compliance, all in your browser.":"Ny zavatra rehetra nataon'ny ekipanao amin'ny finday dia miakatra ho amin'ny dashboard web mahery vaika iray — fanatrehana mivantana, karama, fanadihadiana ary fanajana ny lalàna, rehetra ao amin'ny navigateur anao.",
+      "Reports & Analytics":"Tatitra & Fanadihadiana","— headcount, hours worked, overtime cost and dispute resolution over time. One click to CSV.":"— isan'ny mpiasa, ora niasana, vidin'ny ora fanampiny ary vahaolana ny fifandirana tamin'ny fotoana. Tsindry iray mankany CSV.",
+      "Live attendance":"Fanatrehana mivantana","— who's clocked in, where, and for how long, with overtime flagged automatically.":"— iza no efa niditra, aiza, ary fotoana firy, miaraka amin'ny ora fanampiny voasondro mandeha ho azy.",
+      "Payroll runs":"Fanatanterahana karama","— draft, review and finalise monthly pay with a full audit trail.":"— vontosy, jereo ary farany ny karama isam-bolana miaraka amin'ny taon-draharaha feno.",
+      "Why teams choose Kiruko":"Nahoana ny ekipa no misafidy an'i Kiruko","Local by design. Serious about fairness.":"Toerana voafaritra. Matotra momba ny fahamarinana.",
+      "Built for the region":"Natao ho an'ny faritra","Made for Mauritius today, with Madagascar coming soon — built around the languages, currencies and rules that matter here.":"Natao ho an'i Morisisy ankehitriny, miaraka amin'i Madagasikara ho avy tsy ho ela — voaorina eo amin'ny fiteny, vola ary fitsipika manan-danja eto.",
+      "Fair by default":"Marina amin'ny voavoatra","Statutory overtime, transparent payslips and a confidential channel for workers to be heard.":"Ora fanampiny ara-dalàna, taratasy karama mazava ary lalana tsiambaratelo mba hihaino ny mpiasa.",
+      "Secure & auditable":"Voaro & azo iverenanana","Role-based access, device-binding sign-in and an append-only audit trail on sensitive actions.":"Fidirana mifototra amin'ny andraikitra, fidiranana mifatotra amin'ny fitaovana ary taon-draharaha tsy azo ovaina ho an'ny asa manan-danja.",
+      "One plan. Your whole HR department.":"Drafitra iray. Ny departemantan'ny HR manontolo.","Simple, transparent, unbeatable — no hidden setup fees, no long-term lock-in (annual, renewable).":"Tsotra, mazava, tsy azo iadian'ohatra — tsy misy saram-pametrahana miery, tsy misy fatoran'ny fe-potoana lava (isan-taona, azo havaozina).",
+      "Launch offer · first 50 contracts":"Tolotra fanokafana · 50 fifanarahana voalohany","Complete HR platform":"Sehatra HR feno","first year":"taona voalohany","/ employee / month":"/ mpiasa / volana",
+      "Every feature — attendance, payroll, leave, planner & reports":"Endri-javatra rehetra — fanatrehana, karama, fialan-tsasatra, fandaharana & tatitra","real-time chat & support":"resaka sy fanampiana amin'ny fotoana mety","Tailored training for your team":"Fanofanana voafehy ho an'ny ekipanao","Troubleshooting & setup to fit your operations":"Vahaolana & fametrahana mifanaraka amin'ny fomba fiasanao","No setup fees · no long-term lock-in":"Tsy misy saram-pametrahana · tsy misy fatoran'ny fe-potoana lava",
+      "Claim launch price":"Alao ny vidiny fanokafana","Risk-free — full refund within 30 days, no questions asked.":"Tsy misy loza — averina feno ao anatin'ny 30 andro, tsy misy fanontaniana.",
+      "What SMEs normally pay — without Kiruko":"Izay alohan'ny orinasa kely sy antonony matetika — tsy misy Kiruko","Yearly licence fee":"Saran'ny fahazoan-dalàna isan-taona","Payroll software":"Rindrambaiko karama","Attendance / time tracking":"Fanatrehana / fanaraha-maso fotoana","HRIS / leave management":"HRIS / fitantanana fialan-tsasatra","Support & training":"Fanampiana & fanofanana","Total yearly":"Totalin'ny isan-taona",
+      "With Kiruko":"Miaraka amin'i Kiruko","For the first 50 clients":"Ho an'ny mpanjifa 50 voalohany","Yearly licence fee — incl. attendance, payroll, leave management, support & training":"Saran'ny fahazoan-dalàna isan-taona — ao anatin'ny fanatrehana, karama, fitantanana fialan-tsasatra, fanampiana & fanofanana","Monthly connection fee":"Sarany fifandraisana isam-bolana","One system, one price — for a full suite of functions and services.":"Rafitra iray, vidiny iray — ho an'ny andiana feno ny asa sy serivisy.",
+      "Our price":"Ny vidiny atolotray","One system, one price for a full series of functions and services — payroll, attendance, leave, support & training.":"Rafitra iray, vidiny iray ho an'ny andiana feno ny asa sy serivisy — karama, fanatrehana, fialan-tsasatra, fanampiana & fanofanana.","50% launch discount":"Fihenam-bidy 50% amin'ny fanokafana",
+      "Questions":"Fanontaniana","Frequently asked.":"Matetika anontaniana.","Everything you need to know before bringing your team onto Kiruko.":"Ny zavatra rehetra ilainao ho fantatra alohan'ny hitondrana ny ekipanao any Kiruko.",
+      "Which country is Kiruko built for?":"Iza no firenena natao ho an'i Kiruko?","Kiruko is built for anyone who needs to manage attendance, payroll and the work their staff carry out — it isn't tied to a single country or region. It's designed to fit the needs of SMEs in the HR world everywhere, and the app is modular enough to adapt to almost any business situation. Get in touch and we'll tell you where we're headed.":"Kiruko dia natao ho an'izay rehetra mila mitantana ny fanatrehana, ny karama ary ny asa ataon'ny mpiasany — tsy mifatotra amin'ny firenena na faritra iray. Natao mifanaraka amin'ny filan'ny orinasa kely sy antonony amin'ny tontolon'ny HR eran-tany, ary ny rindrambaiko dia ampy modular mba hifanaraka amin'ny toe-javatra orinasa saika rehetra. Mifandraisa aminay ary holazainay izay ieren'izao.",
+      "Do my employees need to install an app?":"Mila mametaka rindrambaiko ve ny mpiasako?","Employees use the Kiruko mobile app for clock-in, payslips, leave, tasks and more. For shared spaces, you can also run a":"Ny mpiasa dia mampiasa ny rindrambaiko finday Kiruko ho an'ny fidirana, taratasy karama, fialan-tsasatra, asa ary bebe kokoa. Ho an'ny toerana iombonan'ny rehetra, afaka mampandeha ihany koa","kiosk":"kiosque","on one device so a whole team clocks in and out from it — no personal phone required.":"amin'ny fitaovana iray mba hisian'ny ekipa manontolo hiditra sy hivoaka avy aminy — tsy mila finday manokana.",
+      "How does overtime get calculated?":"Ahoana no kajy ny ora fanampiny?","A built-in statutory overtime engine applies the right rules — weekly thresholds, rest-day and public-holiday premiums — instead of a flat guess. Overtime is confirmed by the employer before it's paid, so payslips stay accurate and fair.":"Fitaovana ora fanampiny ara-dalàna naorina ao anatiny no mampihatra ny fitsipika mety — fetra herinandro, premy andro fialan-tsasatra sy andro fety — fa tsy andatsahana fotsiny. Ny ora fanampiny dia voamarina ny mpampiasa alohan'ny aloa, mba hitoeran'ny taratasy karama marina sy rariny.",
+      "Can one person be both an employer and an employee?":"Mety ho mpampiasa sy mpiasa niarany ve ny olona iray?","Yes. Owners, admins and managers who are also part of the team can switch between the":"Eny. Ny tompon'orinasa, mpandrindra ary mpanitsy izay anisan'ny ekipa ihany koa dia afaka mifamadika eo amin'ny","employer dashboard":"dashboard mpampiasa","and the":"sy ny","employee view":"fijery mpiasa","from a single login — pick which side to enter when you sign in.":"avy amin'ny fidiranana iray — safidio ny lafiny hodirina rehefa miditra.",
+      "Which languages are supported?":"Fiteny inona no tohanan'ny rafitra?","The app ships in English, French, Malagasy and Hindi — so each person works in the language they're most comfortable with.":"Ny rindrambaiko dia ampiana amin'ny Anglisy, Frantsay, Malagasy ary Hindi — mba hiasan'ny olona tsirairay amin'ny fiteny tsara indrindra ho azy.",
+      "Is our data secure?":"Voaro ve ny angon-datsika anay?","Access is role-based and configurable per company, sign-in uses trusted-device binding, and sensitive actions are written to an append-only audit trail. Worker reports route through a confidential channel by design. A user's sensitive personal data is never processed without their explicit authorisation.":"Ny fidirana dia mifototra amin'ny andraikitra ary azo amboarina isam-orinasa, ny fidiranana dia mampiasa fitaovana azo itokiana, ary ny asa manan-danja dia voasoratra amin'ny taon-draharaha tsy azo ovaina. Ny tatitran'ny mpiasa dia mandeha amin'ny lalana tsiambaratelo araka ny drafitra. Ny angon-datsika manokana manan-danja an'ny mpampiasa dia tsy mbola hokarakarainy tsy misy fahazoan-dalàna mazava omen'izy ireo.",
+      "How much does it cost?":"Ohatrinona no sarany?","You can start for free and invite your team. For pricing on larger teams and add-ons,":"Afaka manomboka maimaim-poana ianao ary manasa ny ekipanao. Ho an'ny vidin'ny ekipa lehibe sy fampiana,","book a demo":"mangataha demo","and we'll put together a plan that fits.":"ary hanao drafitra mifanaraka aminao izahay.",
+      "Get the app":"Alao ny rindrambaiko","Kiruko, in your team's pocket.":"Kiruko, ao an-kapaky ny ekipanao.","Your team clocks in, views payslips, requests leave and watches their":"Ny ekipanao dia miditra, mijery taratasy karama, mangataka fialan-tsasatra ary mijery ny","— all from the Kiruko mobile app.":"— rehetra avy amin'ny rindrambaiko finday Kiruko.","Launching soon":"Ho avy tsy ho ela","on iOS & Android.":"amin'ny iOS & Android.","Coming soon to the":"Ho avy tsy ho ela amin'ny","Coming soon to":"Ho avy tsy ho ela amin'ny",
+      "Be one of the first 50.":"Ho anisan'ny 50 voalohany.","Claim 50% off for the first 50 clients — the full platform, 24/7 support included, risk-free for 30 days. Together We Can.":"Alao ny fihenam-bidy 50% ho an'ny mpanjifa 50 voalohany — ny sehatra feno, fanampiana 24/7 ampianarina, tsy misy loza mandritra ny 30 andro. Ny Firaisana Mahatoa.",
+      "Get in touch":"Mifandraisa aminay","Talk to us.":"Miresaha aminay.","Tell us about your team and we'll show you Kiruko in action — usually within one business day.":"Lazao anay ny momba ny ekipanao ary haseho anao Kiruko miasa — matetika ao anatin'ny andro iray amin'ny asa.","WhatsApp us":"Soratao anay amin'ny WhatsApp","Mauritius · Madagascar (coming soon)":"Morisisy · Madagasikara (ho avy tsy ho ela)",
+      "Two quick ways to reach us":"Fomba roa haingana hahitana anay","💬 Message us on WhatsApp":"💬 Soratao anay amin'ny WhatsApp","✉️ Email hello@kiruko.mu":"✉️ Mailaka hello@kiruko.mu","Tell us your team size and what you'd like to see — we usually reply within one business day.":"Lazao anay ny haben'ny ekipanao sy izay tianao ho hita — matetika mamaly ao anatin'ny andro iray amin'ny asa izahay.",
+      "A circle of people around one centre — payroll & people, together.":"Faribolana olona manodidina ivon-toerana iray — karama & olona, miaraka.","Powered by":"Entin'ny","Product":"Vokatra","Why Kiruko":"Nahoana i Kiruko","Contact":"Fifandraisana","Careers":"Asa","Legal":"Ara-dalàna","Privacy":"Tsiambaratelo","Terms":"Fepetra","Compliance":"Fanajana ny lalàna","Worker rights":"Zon'ny mpiasa","© 2026 Kiruko. All rights reserved.":"© 2026 Kiruko. Zo rehetra voatokana."
+    };
+    var PH_MG = { "Your name":"Ny anaranao", "Company name":"Anaran'ny orinasa", "you@company.com":"you@company.com", "What would you like to know?":"Inona no tianao ho fantatra?" };
+    function norm(s){ return s.replace(/\s+/g, ' ').trim(); }
+    var nodes = [];
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n){
+        if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        var pn = n.parentNode ? n.parentNode.nodeName : '';
+        if (pn === 'SCRIPT' || pn === 'STYLE') return NodeFilter.FILTER_REJECT;
+        return Object.prototype.hasOwnProperty.call(FR, norm(n.nodeValue)) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nd; while ((nd = walker.nextNode())) { nd.__en = nd.nodeValue; nodes.push(nd); }
+
+    function dictFor(lang){ return lang === 'fr' ? FR : (lang === 'mg' ? MG : null); }
+    function phFor(lang){ return lang === 'fr' ? PH : (lang === 'mg' ? PH_MG : null); }
+    function apply(lang){
+      var dict = dictFor(lang);
+      nodes.forEach(function(node){
+        var en = node.__en, tr = dict ? dict[norm(en)] : null;
+        if (tr) {
+          var lead = (en.match(/^\s*/) || [''])[0];
+          var trail = (en.match(/\s*$/) || [''])[0];
+          node.nodeValue = lead + tr + trail;   // keep original spacing around inline tags
+        } else {
+          node.nodeValue = en;
+        }
+      });
+      // Placeholders are attributes (not text nodes) — swap them separately.
+      var phDict = phFor(lang);
+      document.querySelectorAll('input[placeholder], textarea[placeholder]').forEach(function(el){
+        if (el.__ph == null) el.__ph = el.getAttribute('placeholder');
+        var p = phDict ? phDict[el.__ph] : null;
+        el.setAttribute('placeholder', p || el.__ph);
+      });
+      document.documentElement.lang = lang;
+      Array.prototype.forEach.call(document.querySelectorAll('#lang-switch [data-lang]'), function(b){
+        var on = b.getAttribute('data-lang') === lang;
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.style.background = on ? 'var(--chip-bg)' : 'transparent';
+        b.style.color = on ? 'var(--ink)' : 'var(--gray600)';
+        b.style.fontWeight = on ? '800' : '700';
+      });
+      try { localStorage.setItem('kiruko-lang', lang); } catch(e){}
+    }
+
+    var saved = 'en';
+    try { saved = localStorage.getItem('kiruko-lang') || 'en'; } catch(e){}
+    if (saved !== 'fr' && saved !== 'mg') saved = 'en';
+    apply(saved);
+
+    Array.prototype.forEach.call(document.querySelectorAll('#lang-switch [data-lang]'), function(b){
+      b.addEventListener('click', function(){ apply(b.getAttribute('data-lang')); });
+    });
+  })();
+</script>
+</body>
+</html>

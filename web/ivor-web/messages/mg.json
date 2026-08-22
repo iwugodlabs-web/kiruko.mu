@@ -1,0 +1,209 @@
+{
+  "_meta": {
+    "_note": "Malagasy placeholder file — keys mirror en.json so the schema stays valid; values are English fallbacks until a Malagasy translator reviews. M19 backfill, the mobile glossary, and a translator review will replace these."
+  },
+
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "create": "Create",
+    "edit": "Edit",
+    "open": "Open",
+    "close": "Close",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "noData": "No data",
+    "yes": "Yes",
+    "no": "No",
+    "search": "Search",
+    "actions": "Actions",
+    "status": "Status",
+    "total": "Total",
+    "amount": "Amount",
+    "period": "Period",
+    "currency": "Currency",
+    "language": "Language"
+  },
+
+  "nav": {
+    "dashboard": "Dashboard",
+    "reports": "Reports",
+    "teams": "Teams",
+    "attendance": "Attendance",
+    "payroll": "Payroll",
+    "payrollRuns": "Payroll Runs",
+    "salaryStructures": "Salary Structures",
+    "salaryOverview": "Salary Overview",
+    "compliance": "Compliance",
+    "disputes": "Disputes",
+    "overtime": "Overtime",
+    "schedule": "Schedule",
+    "leave": "Leave",
+    "notifications": "Notifications",
+    "documents": "Documents",
+    "settings": "Settings",
+    "settingsGeneral": "General",
+    "settingsLeaveTypes": "Leave Types",
+    "settingsDepartments": "Departments",
+    "settingsHolidays": "Holidays",
+    "settingsOrganization": "Organization",
+    "settingsPermissions": "Permissions",
+    "payrollRules": "Payroll Rules",
+    "platform": "Platform",
+    "roles": "Roles",
+    "auditLogs": "Audit Logs",
+    "help": "Help"
+  },
+
+  "auth": {
+    "signIn": "Sign In",
+    "signingIn": "Signing in…",
+    "email": "Email Address",
+    "emailPlaceholder": "Enter your email",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "forgotPassword": "Forgot your password?",
+    "loginFailed": "Login failed. Please check your credentials.",
+    "signInToDashboard": "Sign in to your dashboard"
+  },
+
+  "payrollRuns": {
+    "title": "Payroll Runs",
+    "subtitle": "Generate, review, and finalize monthly payroll for your team.",
+    "startPayroll": "Start payroll",
+    "noRuns": "No payroll runs yet",
+    "noRunsHint": "Start your first payroll for the current month.",
+    "tableHeaders": {
+      "period": "Period",
+      "status": "Status",
+      "payslips": "Payslips",
+      "totalNet": "Total Net",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "status": {
+      "draft": "Draft",
+      "finalized": "Finalized",
+      "cancelled": "Cancelled"
+    },
+    "actions": {
+      "open": "Open",
+      "openTooltip": "Resume the wizard at the review step",
+      "cancel": "Cancel",
+      "cancelling": "Cancelling…",
+      "cancelTooltip": "Discard this draft so the period is free again",
+      "cancelConfirm": "Cancel the {period} draft? You'll be able to start a fresh one for the same period afterwards.",
+      "cancelSuccess": "{period} draft cancelled"
+    },
+    "wizard": {
+      "selectPeriod": "Select period",
+      "review": "Review",
+      "finalize": "Finalize",
+      "createDraft": "Create draft",
+      "creatingDraft": "Creating draft…",
+      "cancelDraft": "Cancel draft",
+      "cancelDraftConfirm": "Cancel this draft run? You can recreate it later.",
+      "draftCancelled": "Draft cancelled",
+      "finalizeConfirm": "Finalize this run? Once finalized, the payslips become immutable.",
+      "finalizeSuccess": "Payroll finalized",
+      "requestOtp": "Request OTP",
+      "otpSent": "OTP sent. Check your email.",
+      "otpLabel": "6-digit OTP code",
+      "otpPlaceholder": "Enter the OTP from your email",
+      "otpInvalid": "Enter the 6-digit OTP from your email",
+      "totalGross": "Total gross",
+      "payslipCount": "{count, plural, one {# payslip} other {# payslips}}"
+    }
+  },
+
+  "salaryStructures": {
+    "title": "Salary Structures",
+    "subtitle": "Define reusable salary templates and assign them to employees.",
+    "components": "Components",
+    "structures": "Structures",
+    "noStructures": "No salary structures yet",
+    "newStructure": "New structure",
+    "newComponent": "New component"
+  },
+
+  "leaveTypes": {
+    "title": "Leave Types",
+    "subtitle": "The catalog of leave types employees can apply for.",
+    "newType": "New type",
+    "seedFromCountry": "Seed from country",
+    "seedConfirm": "Seed leave types from country defaults?\n\nThis adds any missing statutory leave types and refreshes the values of country-linked types. Custom types you've created will be left untouched.",
+    "noTypes": "No leave types yet"
+  },
+
+  "payrollRules": {
+    "title": "Payroll Rules",
+    "subtitle": "Country-level tax bands, statutory deductions, leave defaults, and bonus formulas.",
+    "addVersion": "Add new version"
+  },
+
+  "employees": {
+    "title": "Team Members",
+    "lockProfile": "Lock profile",
+    "unlockProfile": "Unlock profile",
+    "locked": "Locked",
+    "unlocked": "Unlocked",
+    "lockedHint": "Locked — contact HR",
+    "lockReason": "Reason",
+    "oneOffAllowances": {
+      "title": "One-off allowances",
+      "subtitle": "Ad-hoc bonuses, reimbursements, deductions scheduled for a specific month.",
+      "schedule": "Schedule",
+      "noOneOffs": "No one-offs scheduled.",
+      "pending": "pending",
+      "applied": "paid",
+      "deleteConfirm": "Delete the scheduled one-off \"{label}\" for {period}?",
+      "deleteApplied": "Already applied to payslip; cannot delete"
+    }
+  },
+
+  "payslip": {
+    "title": "Payslip",
+    "netPay": "Net pay",
+    "gross": "Gross",
+    "taxableIncome": "Taxable income",
+    "earnings": "Earnings",
+    "deductions": "Deductions",
+    "statutoryEmployee": "Statutory deductions (employee)",
+    "statutoryEmployer": "Employer contributions",
+    "downloadPdf": "Download PDF",
+    "summary": "Summary",
+    "yearToDate": "Net pay · {year}",
+    "noPayslips": "No payslips yet",
+    "noPayslipsHint": "Your payslips will appear here once your employer finalizes a payroll run."
+  },
+
+  "leaveScreen": {
+    "title": "Leave Request",
+    "newRequest": "New Request",
+    "myRequests": "My Requests",
+    "balances": "Your Balances · {year}",
+    "noQuotaSet": "No quota set",
+    "daysOf": "/ {total} days",
+    "used": "{count} used",
+    "leaveType": "Leave Type",
+    "notes": "Notes (Optional)",
+    "notesPlaceholder": "Reason for leave…",
+    "quickSelect": "Quick Select",
+    "today": "Today",
+    "thisWeek": "This Week",
+    "nextWeek": "Next Week",
+    "thisMonth": "This Month",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "noRequests": "No requests yet",
+    "noRequestsHint": "Submit your first leave request using the New Request tab.",
+    "statutoryBadge": "STAT"
+  },
+
+  "profile": {
+    "lockedBanner": "Profile locked",
+    "lockedDescription": "Your identity details (name, date of birth, passport, gender) are read-only. Contact HR to request changes.",
+    "lockedReason": "Reason: {reason}"
+  }
+}

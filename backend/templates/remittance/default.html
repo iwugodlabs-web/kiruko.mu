@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Statutory Remittance · {{ company.name }} · {{ period_label }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 14mm 16mm;
+      @bottom-center {
+        content: "{{ company.name }} · Statutory remittance · {{ period_label }} · Generated {{ generated_at }}";
+        font-size: 8pt; color: #6b7280;
+      }
+      @bottom-right { content: "Page " counter(page) " / " counter(pages); font-size: 8pt; color: #6b7280; }
+    }
+    body { font-family: "Helvetica", "Arial", sans-serif; font-size: 10pt; color: #111827; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start;
+      border-bottom: 2px solid #1d4ed8; padding-bottom: 10pt; margin-bottom: 14pt; }
+    .header h1 { font-size: 16pt; font-weight: 800; margin: 0; letter-spacing: -0.3pt; color: #1e3a8a; }
+    .header h1 .sub { display: block; font-size: 11pt; font-weight: 600; color: #6b7280; margin-top: 2pt; }
+    .header .right { text-align: right; font-size: 9pt; }
+    .header .right strong { display: block; font-size: 11pt; color: #111827; }
+    .section-title { font-size: 11pt; font-weight: 700; margin: 14pt 0 6pt 0; color: #111827;
+      border-left: 3px solid #1d4ed8; padding-left: 8pt; }
+    table.t { width: 100%; border-collapse: collapse; margin-bottom: 6pt; }
+    table.t th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.4pt;
+      color: #6b7280; padding: 5pt 6pt; border-bottom: 1px solid #e5e7eb; font-weight: 700; }
+    table.t th.num, table.t td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.t td { padding: 5pt 6pt; border-bottom: 1px dotted #e5e7eb; }
+    table.t tr.total td { font-weight: 800; border-top: 2px solid #1d4ed8; border-bottom: none;
+      padding-top: 7pt; background: #eff6ff; }
+    .grand { margin-top: 14pt; background: #eff6ff; border: 2px solid #1d4ed8; border-radius: 6pt;
+      padding: 10pt 14pt; display: flex; justify-content: space-between; align-items: center; }
+    .grand .lbl { font-size: 11pt; font-weight: 700; color: #1e3a8a; }
+    .grand .amt { font-size: 18pt; font-weight: 800; color: #1d4ed8; font-variant-numeric: tabular-nums; }
+    .footer-meta { margin-top: 18pt; padding-top: 8pt; border-top: 1px solid #e5e7eb; font-size: 8pt; color: #6b7280; }
+    .footer-meta .hash { font-family: "Menlo", "Courier New", monospace; word-break: break-all; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>Statutory Remittance<span class="sub">PAYE · CSG · NSF — {{ period_label }}</span></h1>
+      <div style="margin-top:4pt; color:#4b5563;">{{ employee_count }} employee{{ '' if employee_count == 1 else 's' }} · {{ currency }}</div>
+    </div>
+    <div class="right">
+      <strong>{{ company.name }}</strong>
+      {% if company.brn %}<div>BRN: {{ company.brn }}</div>{% endif %}
+      {% if company.address %}<div>{{ company.address }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="section-title">Summary</div>
+  <table class="t">
+    <thead>
+      <tr><th>Contribution</th><th class="num">Employee</th><th class="num">Employer</th><th class="num">Total</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>PAYE</td>
+        <td class="num">{{ paye_total }}</td>
+        <td class="num">—</td>
+        <td class="num">{{ paye_total }}</td>
+      </tr>
+      {% for s in statutory %}
+      <tr>
+        <td>{{ s.code }}</td>
+        <td class="num">{{ s.employee }}</td>
+        <td class="num">{{ s.employer }}</td>
+        <td class="num">{{ s.total }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="total">
+        <td colspan="3">Total to remit</td>
+        <td class="num">{{ currency }} {{ grand_total }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="grand">
+    <div class="lbl">Total to remit</div>
+    <div class="amt">{{ currency }} {{ grand_total }}</div>
+  </div>
+
+  {% if employees %}
+  <div class="section-title">Per-employee breakdown</div>
+  <table class="t">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th class="num">PAYE</th>
+        {% for c in stat_codes %}<th class="num">{{ c }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in employees %}
+      <tr>
+        <td>{{ e.name }}</td>
+        <td class="num">{{ e.paye }}</td>
+        {% for c in stat_codes %}<td class="num">{{ e.statutory.get(c, '0.00') }}</td>{% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="footer-meta">
+    Statutory remittance for {{ period_label }} · {{ company.name }}. A guide for filing — verify against the
+    relevant authority. Figures sum the finalized payroll run(s) for this period (corrections included).
+    {% if hash_sha256 %}<br/>Document hash: <span class="hash">{{ hash_sha256 }}</span>{% endif %}
+  </div>
+
+</body>
+</html>

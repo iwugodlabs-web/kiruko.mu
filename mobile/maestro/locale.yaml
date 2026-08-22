@@ -1,0 +1,7 @@
+appId: "com.mur-dev.MyWitnessTree"
+---
+- launchApp
+- tapOn: "Français"
+- assertVisible: "Bienvenue"
+- tapOn: "English"
+- assertVisible: "Welcome"

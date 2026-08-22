@@ -1,0 +1,41 @@
+name: ivor-web
+region: blr
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+
+services:
+  - name: ivor-web
+    dockerfile_path: web/ivor-web/Dockerfile
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: iwugod/ivor-mobile
+    source_dir: .
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      # Build-time: Next.js bakes NEXT_PUBLIC_* into the bundle at build
+      - key: NEXT_PUBLIC_API_URL
+        scope: BUILD_TIME
+        value: "https://kontokaz-app-REPLACE.ondigitalocean.app/api/v1"
+      - key: NEXT_PUBLIC_API_BASE_URL
+        scope: BUILD_TIME
+        value: "https://kontokaz-app-REPLACE.ondigitalocean.app"
+      # Run-time
+      - key: NODE_ENV
+        scope: RUN_TIME
+        value: "production"
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE_WITH_YOUR_JWT_SECRET"
+
+ingress:
+  rules:
+    - component:
+        name: ivor-web
+      match:
+        path:
+          prefix: /

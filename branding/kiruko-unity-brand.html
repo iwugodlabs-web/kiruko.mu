@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kiruko — Unity Ring · Brand Kit</title>
+<style>
+  :root{ --paper:#F9FAFB; --ink:#16203B; --muted:#6B7280; --gold:#F2B705; --green:#33CC11;
+         --indigo:#1E2A52; --teal:#14B8A6; --blue:#4F6BE0; --violet:#8B5CF6; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+       background:var(--paper);color:var(--ink);padding:48px 28px}
+  h1{font-size:30px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 8px;max-width:720px;line-height:1.55}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);
+     margin:40px 0 16px;border-bottom:1px solid #e7e4da;padding-bottom:8px}
+  .row{display:flex;align-items:center;gap:30px;flex-wrap:wrap}
+  .panel{border-radius:16px;padding:30px 36px;display:flex;align-items:center;gap:22px}
+  .light{background:#fff;border:1px solid #e7e4da}
+  .dark{background:var(--indigo)}
+  .wm{font-family:'Trebuchet MS','Segoe UI',sans-serif;font-weight:800;letter-spacing:2px;font-size:40px;
+      background:linear-gradient(180deg,#FFD84D,#F2B705);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1}
+  .tag{display:block;font-weight:700;font-size:13px;letter-spacing:5.5px;color:var(--green);margin-top:4px}
+  .tile{border-radius:22%;display:grid;place-items:center;box-shadow:0 10px 26px rgba(0,0,0,.16)}
+  figure{margin:0;text-align:center}
+  figcaption{font-size:12px;color:var(--muted);margin-top:9px}
+  .sw{display:flex;gap:16px;flex-wrap:wrap}
+  .chip{width:130px;border-radius:12px;overflow:hidden;border:1px solid #e7e4da}
+  .chip .c{height:64px}.chip .l{padding:8px 10px;font-size:12px}
+  .chip .l b{display:block}.chip .l span{color:var(--muted)}
+  svg{display:block}
+  footer{margin:46px 0 0;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+  <h1>Kiruko — Unity Ring</h1>
+  <p class="sub"><b>“Together We Can.”</b> A circle of people around one centre — one highlighted as the individual,
+     <b>K</b> at the heart. Payroll &amp; people. Full brand kit below; all vector.</p>
+
+  <!-- ===== master defs ===== -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBD34D"/><stop offset=".55" stop-color="#F2B705"/><stop offset="1" stop-color="#C99405"/>
+    </linearGradient>
+    <radialGradient id="green" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#7CFF4A"/><stop offset="1" stop-color="#33CC11"/>
+    </radialGradient>
+
+    <!-- people geometry (currentColor) for mono/white variants -->
+    <g id="person-cc"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+    <g id="unity-mono" fill="currentColor" stroke="currentColor">
+      <circle cx="50" cy="50" r="32" fill="none" stroke-width="2.6" opacity=".55"/>
+      <use href="#person-cc" transform="rotate(0 50 50)"/><use href="#person-cc" transform="rotate(45 50 50)"/>
+      <use href="#person-cc" transform="rotate(90 50 50)"/><use href="#person-cc" transform="rotate(135 50 50)"/>
+      <use href="#person-cc" transform="rotate(180 50 50)"/><use href="#person-cc" transform="rotate(225 50 50)"/>
+      <use href="#person-cc" transform="rotate(270 50 50)"/><use href="#person-cc" transform="rotate(315 50 50)"/>
+      <text x="50" y="52" text-anchor="middle" dominant-baseline="central" font-family="'Trebuchet MS',sans-serif" font-size="26" font-weight="800">K</text>
+    </g>
+
+    <!-- full colour -->
+    <g id="person-g" fill="url(#gold)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+    <g id="unity-full">
+      <circle cx="50" cy="50" r="32" fill="none" stroke="url(#gold)" stroke-width="2.6" opacity=".55"/>
+      <use href="#person-g" transform="rotate(45 50 50)"/><use href="#person-g" transform="rotate(90 50 50)"/>
+      <use href="#person-g" transform="rotate(135 50 50)"/><use href="#person-g" transform="rotate(180 50 50)"/>
+      <use href="#person-g" transform="rotate(225 50 50)"/><use href="#person-g" transform="rotate(270 50 50)"/>
+      <use href="#person-g" transform="rotate(315 50 50)"/>
+      <g fill="url(#green)"><circle cx="50" cy="18" r="5.6"/><rect x="45.3" y="24.4" width="9.4" height="12" rx="4.7"/></g>
+      <text x="50" y="52" text-anchor="middle" dominant-baseline="central" font-family="'Trebuchet MS',sans-serif" font-size="26" font-weight="800" fill="url(#green)">K</text>
+    </g>
+  </defs></svg>
+
+  <!-- ===== primary logo ===== -->
+  <h2>Primary logo</h2>
+  <div class="row">
+    <div class="panel light">
+      <svg width="96" height="96" viewBox="0 0 100 100"><use href="#unity-full"/></svg>
+      <span class="wm">KIRUKO<span class="tag">TOGETHER WE CAN</span></span>
+    </div>
+    <div class="panel dark">
+      <svg width="96" height="96" viewBox="0 0 100 100"><use href="#unity-full"/></svg>
+      <span class="wm">KIRUKO<span class="tag">TOGETHER WE CAN</span></span>
+    </div>
+  </div>
+
+  <!-- ===== the mark ===== -->
+  <h2>The mark</h2>
+  <div class="row">
+    <figure><svg width="120" height="120" viewBox="0 0 100 100"><use href="#unity-full"/></svg><figcaption>Full colour</figcaption></figure>
+    <figure><svg width="120" height="120" viewBox="0 0 100 100" style="color:#F2B705"><use href="#unity-mono"/></svg><figcaption>Mono · gold</figcaption></figure>
+    <figure><svg width="120" height="120" viewBox="0 0 100 100" style="color:#16203B"><use href="#unity-mono"/></svg><figcaption>Mono · ink</figcaption></figure>
+    <figure><div style="background:#1E2A52;border-radius:14px;padding:6px"><svg width="108" height="108" viewBox="0 0 100 100" style="color:#fff"><use href="#unity-mono"/></svg></div><figcaption>Reversed · white</figcaption></figure>
+  </div>
+
+  <!-- ===== app icon ===== -->
+  <h2>App icon</h2>
+  <div class="row">
+    <figure><div class="tile" style="background:#fff;border:1px solid #e7e4da;width:120px;height:120px"><svg width="110" height="110" viewBox="0 0 100 100"><use href="#unity-full"/></svg></div><figcaption>Light</figcaption></figure>
+    <figure><div class="tile" style="background:#161616;width:120px;height:120px"><svg width="110" height="110" viewBox="0 0 100 100"><use href="#unity-full"/></svg></div><figcaption>Dark</figcaption></figure>
+    <figure><div class="tile" style="background:linear-gradient(145deg,#1E2A52,#14B8A6);width:120px;height:120px"><svg width="110" height="110" viewBox="0 0 100 100" style="color:#fff"><use href="#unity-mono"/></svg></div><figcaption>Brand gradient</figcaption></figure>
+    <figure><div class="tile" style="background:#fff;border:1px solid #e7e4da;width:64px;height:64px"><svg width="58" height="58" viewBox="0 0 100 100"><use href="#unity-full"/></svg></div><figcaption>64 px</figcaption></figure>
+    <figure><div class="tile" style="background:#fff;border:1px solid #e7e4da;width:32px;height:32px;border-radius:26%"><svg width="28" height="28" viewBox="0 0 100 100"><use href="#unity-full"/></svg></div><figcaption>32 px favicon</figcaption></figure>
+  </div>
+
+  <!-- ===== palette ===== -->
+  <h2>Palette</h2>
+  <div class="sw">
+    <div class="chip"><div class="c" style="background:#F2B705"></div><div class="l"><b>Gold</b><span>#F2B705</span></div></div>
+    <div class="chip"><div class="c" style="background:#33CC11"></div><div class="l"><b>Green</b><span>#33CC11</span></div></div>
+    <div class="chip"><div class="c" style="background:#14B8A6"></div><div class="l"><b>Teal</b><span>#14B8A6</span></div></div>
+    <div class="chip"><div class="c" style="background:#4F6BE0"></div><div class="l"><b>Blue</b><span>#4F6BE0</span></div></div>
+    <div class="chip"><div class="c" style="background:#8B5CF6"></div><div class="l"><b>Violet</b><span>#8B5CF6</span></div></div>
+    <div class="chip"><div class="c" style="background:#1E2A52"></div><div class="l"><b>Indigo</b><span>#1E2A52</span></div></div>
+    <div class="chip"><div class="c" style="background:#16203B"></div><div class="l"><b>Ink</b><span>#16203B</span></div></div>
+  </div>
+
+  <footer>Kiruko · Unity Ring · brand kit v1 · original vector · files: kiruko-unity-icon.svg / -mono / -white / -logo</footer>
+</body>
+</html>

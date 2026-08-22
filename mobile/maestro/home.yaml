@@ -1,0 +1,4 @@
+appId: "com.mur-dev.MyWitnessTree"
+---
+- launchApp
+- assertVisible: "Current Language.*"

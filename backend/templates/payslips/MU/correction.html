@@ -1,0 +1,312 @@
+{#
+  Mauritius payslip CORRECTION NOTE — bilingual EN / FR.
+
+  Rendered for an adjustment payslip (is_adjustment=true). Unlike the regular
+  payslip, every figure here is a signed CHANGE versus the original payslip,
+  plus a "previous → new" net-pay reconciliation so the worker has one
+  authoritative document for the corrected amount.
+
+  Context is supplied by services/payslip_pdf_service._build_correction_context
+  (all amounts pre-formatted, signed where they are deltas).
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Payslip correction · {{ employee.name }} · {{ period.label_en }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 14mm 16mm;
+      @bottom-center {
+        content: "{{ employer.name }} · Correction · {{ period.label_en }} · Generated {{ generated_at }}";
+        font-size: 8pt;
+        color: #6b7280;
+      }
+      @bottom-right {
+        content: "Page " counter(page) " / " counter(pages);
+        font-size: 8pt;
+        color: #6b7280;
+      }
+    }
+    body {
+      font-family: "Helvetica", "Arial", sans-serif;
+      font-size: 10pt;
+      color: #111827;
+      line-height: 1.4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #6d28d9;
+      padding-bottom: 10pt;
+      margin-bottom: 14pt;
+    }
+    .header h1 {
+      font-size: 16pt;
+      font-weight: 800;
+      margin: 0;
+      letter-spacing: -0.3pt;
+      color: #5b21b6;
+    }
+    .header h1 .fr {
+      display: block;
+      font-size: 11pt;
+      font-weight: 600;
+      color: #6b7280;
+      margin-top: 2pt;
+    }
+    .header .right {
+      text-align: right;
+      font-size: 9pt;
+    }
+    .header .right strong {
+      display: block;
+      font-size: 11pt;
+      color: #111827;
+    }
+    .badge {
+      display: inline-block;
+      background: #ede9fe;
+      color: #5b21b6;
+      border: 1px solid #c4b5fd;
+      border-radius: 4pt;
+      padding: 1pt 6pt;
+      font-size: 8pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      margin-top: 4pt;
+    }
+    .callout {
+      background: #f5f3ff;
+      border: 1px solid #ddd6fe;
+      border-radius: 6pt;
+      padding: 9pt 12pt;
+      margin-bottom: 14pt;
+      font-size: 9pt;
+      color: #4c1d95;
+    }
+    .callout .reason {
+      margin-top: 4pt;
+      font-style: italic;
+      color: #6d28d9;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16pt;
+      margin-bottom: 14pt;
+    }
+    .panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 6pt;
+      padding: 10pt 12pt;
+    }
+    .panel h2 {
+      font-size: 9pt;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      color: #6b7280;
+      margin: 0 0 6pt 0;
+      font-weight: 700;
+    }
+    .panel .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 1.5pt 0;
+    }
+    .panel .row .key { color: #4b5563; }
+    .panel .row .val { font-weight: 600; }
+    table.lines {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6pt;
+    }
+    table.lines th {
+      text-align: left;
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      color: #6b7280;
+      padding: 5pt 6pt;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 700;
+    }
+    table.lines th.num,
+    table.lines td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    table.lines td {
+      padding: 5pt 6pt;
+      border-bottom: 1px dotted #e5e7eb;
+    }
+    td.pos { color: #047857; font-weight: 600; }
+    td.neg { color: #b91c1c; font-weight: 600; }
+    .section-title {
+      font-size: 11pt;
+      font-weight: 700;
+      margin: 14pt 0 6pt 0;
+      color: #111827;
+      border-left: 3px solid #6d28d9;
+      padding-left: 8pt;
+    }
+    .section-title .fr {
+      color: #6b7280;
+      font-weight: 500;
+      font-size: 10pt;
+      margin-left: 8pt;
+    }
+    .recon {
+      margin-top: 14pt;
+      border: 1px solid #e5e7eb;
+      border-radius: 6pt;
+      overflow: hidden;
+    }
+    .recon .line {
+      display: flex;
+      justify-content: space-between;
+      padding: 7pt 14pt;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .recon .line .k { color: #4b5563; }
+    .recon .line .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .recon .line.delta .v.pos { color: #047857; }
+    .recon .line.delta .v.neg { color: #b91c1c; }
+    .recon .line.total {
+      background: #f5f3ff;
+      border-bottom: none;
+      padding: 10pt 14pt;
+    }
+    .recon .line.total .k {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #4c1d95;
+    }
+    .recon .line.total .v {
+      font-size: 16pt;
+      font-weight: 800;
+      color: #5b21b6;
+    }
+    .settle-note {
+      margin-top: 10pt;
+      font-size: 8.5pt;
+      color: #6b7280;
+    }
+    .footer-meta {
+      margin-top: 18pt;
+      padding-top: 8pt;
+      border-top: 1px solid #e5e7eb;
+      font-size: 8pt;
+      color: #6b7280;
+    }
+    .footer-meta .hash {
+      font-family: "Menlo", "Courier New", monospace;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>
+        Payslip Correction
+        <span class="fr">Note de correction</span>
+      </h1>
+      <div style="margin-top:4pt; color:#4b5563;">
+        Period · Période · {{ period.label_en }}
+      </div>
+      <span class="badge">Correction · Rectificatif</span>
+    </div>
+    <div class="right">
+      <strong>{{ employer.name }}</strong>
+      {% if employer.brn %}<div>BRN: {{ employer.brn }}</div>{% endif %}
+      {% if employer.address %}<div>{{ employer.address }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="callout">
+    This note corrects the payslip <strong>#{{ original.id }}</strong> issued for {{ period.label_en }}.
+    The amounts below are the <strong>change applied</strong> to that payslip, not full-period totals.
+    <span class="fr" style="display:block; margin-top:3pt; color:#6d28d9;">
+      Cette note rectifie le bulletin #{{ original.id }} de {{ period.label_en }}. Les montants ci-dessous
+      indiquent la variation appliquée, et non les totaux de la période.
+    </span>
+    {% if correction.reason %}<div class="reason">Reason / Motif : {{ correction.reason }}</div>{% endif %}
+  </div>
+
+  <div class="summary-grid">
+    <div class="panel">
+      <h2>Employee · Employé</h2>
+      <div class="row"><span class="key">Name / Nom</span><span class="val">{{ employee.name }}</span></div>
+      {% if employee.role %}<div class="row"><span class="key">Role / Poste</span><span class="val">{{ employee.role }}</span></div>{% endif %}
+      {% if employee.passport %}<div class="row"><span class="key">ID / NIC</span><span class="val">{{ employee.passport }}</span></div>{% endif %}
+    </div>
+    <div class="panel">
+      <h2>Run · Exercice</h2>
+      <div class="row"><span class="key">Run #</span><span class="val">{{ run.id }}</span></div>
+      <div class="row"><span class="key">Original payslip</span><span class="val">#{{ original.id }}</span></div>
+      <div class="row"><span class="key">Currency / Devise</span><span class="val">{{ run.currency }}</span></div>
+      {% if correction.issued_at %}<div class="row"><span class="key">Issued / Émis</span><span class="val">{{ correction.issued_at }}</span></div>{% endif %}
+    </div>
+  </div>
+
+  <div class="section-title">
+    Changes applied
+    <span class="fr">Variations appliquées</span>
+  </div>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Item · Élément</th>
+        <th class="num">Change · Variation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in deltas %}
+      <tr>
+        <td>{{ d.label }}</td>
+        <td class="num {{ 'pos' if d.positive else 'neg' }}">{{ d.amount_str }}</td>
+      </tr>
+      {% endfor %}
+      {% if not deltas %}
+      <tr><td colspan="2" style="color:#6b7280;">No itemized changes.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  <div class="recon">
+    <div class="line">
+      <span class="k">Previous net pay · Salaire net précédent</span>
+      <span class="v">{{ run.currency }} {{ net.before_str }}</span>
+    </div>
+    <div class="line delta">
+      <span class="k">This correction · Cette correction</span>
+      <span class="v {{ 'pos' if net.delta_positive else 'neg' }}">{{ net.delta_str }}</span>
+    </div>
+    <div class="line total">
+      <span class="k">New net pay<span style="display:block; font-size:9pt; font-weight:500; color:#6d28d9;">Nouveau salaire net</span></span>
+      <span class="v">{{ run.currency }} {{ net.after_str }}</span>
+    </div>
+  </div>
+
+  <div class="settle-note">
+    {% if net.delta_positive %}
+      The employee is owed a top-up of {{ run.currency }} {{ net.delta_abs_str }}, settled separately from this note.
+      <br/><span class="fr">L'employé doit recevoir un complément de {{ run.currency }} {{ net.delta_abs_str }}, réglé séparément.</span>
+    {% else %}
+      A net amount of {{ run.currency }} {{ net.delta_abs_str }} is recoverable from the employee, settled separately from this note.
+      <br/><span class="fr">Un montant net de {{ run.currency }} {{ net.delta_abs_str }} est récupérable auprès de l'employé, réglé séparément.</span>
+    {% endif %}
+  </div>
+
+  <div class="footer-meta">
+    Correction note for payslip {{ original.id }} (adjustment {{ payslip.id }}) · {{ employer.name }}
+    {% if hash_sha256 %}<br/>Document hash: <span class="hash">{{ hash_sha256 }}</span>{% endif %}
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,98 @@
+name: Backend Tests
+
+# Runs the pytest suite against a fresh Postgres on every PR and on
+# every push to main. The suite owns its test database (kontokaz_test)
+# via conftest fixtures — it creates, migrates, and seeds it from
+# scratch on each run, so this job is fully self-contained.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'shared/**'
+      - '.github/workflows/backend-tests.yml'
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      # Native libraries: WeasyPrint needs Pango + Cairo (M21); easyocr
+      # needs tesseract + libGL (already in the Docker image, mirrored
+      # here so import-time loading inside main.py succeeds).
+      - name: Install native runtime libs
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 \
+            libpangoft2-1.0-0 \
+            shared-mime-info \
+            fonts-dejavu-core \
+            tesseract-ocr \
+            libtesseract-dev \
+            libgl1
+
+      - name: Install Python deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          # Pin numpy<2 (torch 2.1.0 was compiled against numpy 1.x), then
+          # install CPU-only torch wheels — same pattern as the production
+          # Dockerfile, keeps the install ~hundreds of MB lighter.
+          pip install "numpy<2"
+          pip install torch==2.1.0 torchvision==0.16.0 \
+              --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres did not become ready in time"; exit 1
+
+      - name: Run pytest
+        working-directory: backend
+        env:
+          # conftest.py reads these to bootstrap kontokaz_test on first run.
+          POSTGRES_SERVER: 127.0.0.1
+          POSTGRES_PORT: '5432'
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+          POSTGRES_SSLMODE: disable
+          KONTOKAZ_TEST_DB: kontokaz_test
+          # Test-only — never used to verify a real token.
+          JWT_SECRET: ci-test-secret-not-for-prod
+          JWT_ALGORITHM: HS256
+          STORAGE_TYPE: local
+        run: pytest tests/ -v --tb=short --color=yes

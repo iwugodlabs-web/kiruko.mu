@@ -1,0 +1,364 @@
+{#
+  Estimated payslip template — MU (M4).
+
+  Visual + legal differentiation from the official payslip:
+    * red ESTIMATED PAYSLIP banner full-width, every page
+    * diagonal watermark in the body
+    * pending-review banner equal in visual weight to the gross-pay box
+    * statutory rules version stamp ("preliminary")
+    * disclaimer footer in the user's locale (EN by default; FR/MG via
+      preferred_locale on the User row)
+    * NO payslip number, NO QR, NO signature line, NO MRA-style hash
+
+  Driven by services/payslip_estimate_service.build_context.
+#}
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="utf-8" />
+  <title>Estimated payslip · {{ employee.name }} · {{ period.label }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 22mm 16mm 18mm 16mm;
+      @top-center {
+        content: "{{ banner_top_text }}";
+        font-size: 10pt;
+        font-weight: 700;
+        color: #b91c1c;
+      }
+      @bottom-center {
+        content: "{{ disclaimer_short }}";
+        font-size: 7.5pt;
+        color: #7f1d1d;
+      }
+    }
+    body {
+      font-family: "Helvetica", "Arial", sans-serif;
+      font-size: 10pt;
+      color: #111827;
+      line-height: 1.4;
+      position: relative;
+    }
+    /* Diagonal watermark */
+    .watermark {
+      position: fixed;
+      top: 40%;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      transform: rotate(-28deg);
+      font-size: 90pt;
+      color: rgba(220, 38, 38, 0.10);
+      font-weight: 800;
+      letter-spacing: 6pt;
+      z-index: -1;
+      pointer-events: none;
+    }
+    .red-banner {
+      background: #fef2f2;
+      border: 2px solid #b91c1c;
+      color: #7f1d1d;
+      padding: 10pt 12pt;
+      border-radius: 4pt;
+      font-weight: 700;
+      font-size: 11pt;
+      margin-bottom: 12pt;
+      text-align: center;
+      letter-spacing: 0.5pt;
+    }
+    /* Two banners side by side, equal visual weight per the M4 plan. */
+    .two-cols {
+      display: flex;
+      gap: 12pt;
+      margin-bottom: 14pt;
+    }
+    .two-cols .col {
+      flex: 1;
+      padding: 10pt 12pt;
+      border-radius: 4pt;
+      font-size: 11pt;
+    }
+    .gross-box {
+      background: #f1f5f9;
+      border: 1pt solid #cbd5e1;
+    }
+    .gross-box .label {
+      font-size: 8.5pt;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+    }
+    .gross-box .amount {
+      font-size: 18pt;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 4pt;
+    }
+    .pending-box {
+      background: #fef3c7;
+      border: 1pt solid #d97706;
+    }
+    .pending-box .label {
+      font-size: 8.5pt;
+      color: #92400e;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+    }
+    .pending-box .body {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #92400e;
+      margin-top: 4pt;
+      line-height: 1.3;
+    }
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12pt;
+      margin-bottom: 10pt;
+    }
+    .meta .col h4 {
+      font-size: 8pt;
+      text-transform: uppercase;
+      color: #6b7280;
+      margin: 0 0 4pt 0;
+    }
+    .meta .col p {
+      margin: 0;
+      font-size: 10pt;
+    }
+    table.lines {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8pt;
+    }
+    table.lines th, table.lines td {
+      padding: 5pt 6pt;
+      text-align: left;
+      border-bottom: 0.5pt solid #e5e7eb;
+    }
+    table.lines th {
+      font-size: 8pt;
+      text-transform: uppercase;
+      color: #6b7280;
+      background: #f9fafb;
+    }
+    table.lines td.right {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .preliminary-tag {
+      display: inline-block;
+      font-size: 7.5pt;
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 1pt 4pt;
+      border-radius: 2pt;
+      margin-left: 4pt;
+      letter-spacing: 0.3pt;
+    }
+    .rules-stamp {
+      font-size: 8pt;
+      color: #6b7280;
+      margin-top: 8pt;
+    }
+    .clockin-summary {
+      font-size: 9pt;
+      color: #57534e;
+      margin-top: 6pt;
+    }
+    .disclaimer {
+      margin-top: 16pt;
+      padding: 10pt;
+      border-top: 1pt dashed #b91c1c;
+      font-size: 8.5pt;
+      color: #7f1d1d;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="watermark">ESTIMATE</div>
+
+  <div class="red-banner">
+    {{ banner_top_text }}
+  </div>
+
+  <!-- Equal-weight gross + pending-review boxes (M4 plan, real-world UX). -->
+  <div class="two-cols">
+    <div class="col gross-box">
+      <div class="label">{{ labels.estimated_gross }}</div>
+      <div class="amount">{{ totals.gross_str }} {{ currency }}</div>
+    </div>
+    <div class="col pending-box">
+      {% if not pay_is_hours_driven %}
+        <div class="label">{{ labels.clockins_so_far }}</div>
+        <div class="body">
+          {% if clockin_value_str %}
+            <span style="font-size: 13pt; font-weight: 700;">{{ clockin_value_str }} {{ currency }}</span>
+            <br /><span style="font-size: 8pt; font-weight: 500; color: #6b7280;">
+              {{ clockins.total_hours }} {{ labels.hours }} · {{ labels.clockins_so_far_note }}
+            </span>
+          {% else %}
+            {{ labels.salary_based }}
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="label">{{ labels.pending_review }}</div>
+        <div class="body">
+          {% if clockins.unapproved_count > 0 %}
+            ⚠️ {{ clockins.unapproved_count }} {{ labels.entries }} ·
+            {{ clockins.unapproved_hours }} {{ labels.hours }}
+            <br /><span style="font-size: 8.5pt; font-weight: 500;">{{ labels.may_decrease }}</span>
+          {% else %}
+            {{ labels.all_approved }}
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="meta">
+    <div class="col">
+      <h4>{{ labels.employee }}</h4>
+      <p>{{ employee.name }}</p>
+      {% if employee.passport %}<p style="color: #6b7280;">{{ employee.passport }}</p>{% endif %}
+    </div>
+    <div class="col">
+      <h4>{{ labels.employer }}</h4>
+      <p>{{ employer.name }}</p>
+      {% if employer.brn %}<p style="color: #6b7280;">BRN {{ employer.brn }}</p>{% endif %}
+    </div>
+    <div class="col">
+      <h4>{{ labels.period }}</h4>
+      <p>{{ period.label }}</p>
+    </div>
+  </div>
+
+  <div class="clockin-summary">
+    {{ labels.clockins_used }}: {{ clockins.total_count }} {{ labels.entries }} ·
+    {{ clockins.total_hours }} {{ labels.hours_total }} ·
+    {{ clockins.approved_count }} {{ labels.approved }} ·
+    {{ clockins.unapproved_count }} {{ labels.pending }}
+  </div>
+
+  {% if leave_summary %}
+  <h4 style="margin-top: 14pt; font-size: 9pt; text-transform: uppercase; color: #4b5563;">{{ labels.leave_taken }}</h4>
+  <table class="lines">
+    <thead>
+      <tr><th>{{ labels.code }}</th><th>{{ labels.label }}</th><th class="right">{{ labels.days }}</th></tr>
+    </thead>
+    <tbody>
+      {% for lv in leave_summary %}
+        <tr>
+          <td>{{ lv.code|upper }}</td>
+          <td>{{ lv.label }}{% if not lv.paid %} <span style="color:#92400e;">({{ labels.unpaid }})</span>{% endif %}</td>
+          <td class="right">{{ lv.days }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h4 style="margin-top: 14pt; font-size: 9pt; text-transform: uppercase; color: #4b5563;">{{ labels.earnings }}</h4>
+  <table class="lines">
+    <thead>
+      <tr><th>{{ labels.code }}</th><th>{{ labels.label }}</th><th class="right">{{ labels.amount }}</th></tr>
+    </thead>
+    <tbody>
+      {% for e in earnings %}
+        <tr>
+          <td>{{ e.code }}{% if e.hours_str %} <span style="color:#9ca3af;">· {{ e.hours_str }}</span>{% endif %}</td>
+          <td>{{ e.label }}{% if e.multiplier_badge %} <span style="display:inline-block; background:#fef3c7; color:#b45309; font-weight:700; font-size:7.5pt; padding:0 3pt; border-radius:3pt;">{{ e.multiplier_badge }}</span>{% endif %}</td>
+          <td class="right">{{ e.amount_str }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if deductions %}
+    <h4 style="margin-top: 12pt; font-size: 9pt; text-transform: uppercase; color: #4b5563;">{{ labels.deductions }}</h4>
+    <table class="lines">
+      <thead>
+        <tr><th>{{ labels.code }}</th><th>{{ labels.label }}</th><th class="right">{{ labels.amount }}</th></tr>
+      </thead>
+      <tbody>
+        {% for d in deductions %}
+          <tr>
+            <td>{{ d.code }}{% if d.is_statutory %}<span class="preliminary-tag">{{ labels.preliminary }}</span>{% endif %}</td>
+            <td>{{ d.label }}</td>
+            <td class="right">{{ d.amount_str }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <table class="lines" style="margin-top: 14pt;">
+    <tr>
+      <td style="font-weight: 700;">{{ labels.estimated_net }}</td>
+      <td class="right" style="font-weight: 700; font-size: 12pt;">
+        {{ totals.net_str }} {{ currency }}
+      </td>
+    </tr>
+  </table>
+
+  {% if clockins.details and pay_is_hours_driven %}
+  <h4 style="margin-top: 16pt; font-size: 9pt; text-transform: uppercase; color: #4b5563;">
+    {{ labels.hours_feeding_title }}
+  </h4>
+  <p style="font-size: 7.5pt; color: #6b7280; margin: 2pt 0 6pt 0; font-style: italic;">
+    {{ labels.hours_feeding_note }}
+  </p>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>{{ labels.col_date }}</th>
+        <th>{{ labels.col_start }}</th>
+        <th>{{ labels.col_end }}</th>
+        <th class="right">{{ labels.col_hours }}</th>
+        <th>{{ labels.col_status }}</th>
+        <th class="right">{{ labels.col_est_amount }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in clockins.details %}
+        <tr>
+          <td>{{ d.date }}</td>
+          <td>{{ d.start }}</td>
+          <td>{{ d.end }}</td>
+          <td class="right">{{ d.hours_str }}</td>
+          <td>
+            {% if d.approved %}
+              <span style="color:#047857;">{{ labels.approved }}</span>
+            {% else %}
+              <span style="color:#92400e;">{{ labels.pending }}</span>
+            {% endif %}
+          </td>
+          <td class="right">{{ d.est_amount_str }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if clockins.details_truncated %}
+    <p style="font-size: 7pt; color: #9ca3af; margin-top: 4pt; font-style: italic;">
+      {{ labels.details_truncated_note }}
+    </p>
+  {% endif %}
+  {% if labels.bucket_footnote %}
+    <p style="font-size: 7pt; color: #9ca3af; margin-top: 6pt; font-style: italic;">
+      {{ labels.bucket_footnote }}
+    </p>
+  {% endif %}
+  {% endif %}
+
+  <p class="rules-stamp">
+    {{ labels.statutory_rules_label }}: {{ rules_version }} <em>({{ labels.preliminary_lower }})</em>
+  </p>
+
+  <div class="disclaimer">
+    {{ disclaimer_full }}
+  </div>
+</body>
+</html>

@@ -1,0 +1,357 @@
+{#
+  Mauritius default payslip template — bilingual EN / FR.
+
+  Uses Jinja2 + WeasyPrint. All amounts are pre-formatted strings supplied
+  by services/payslip_pdf_service so the template never has to know about
+  Decimal precision or currency symbols.
+
+  Compliance reference (Workers' Rights Act 2019 §38 & MRA practice):
+    * employee name & address
+    * employer name & BRN
+    * pay period
+    * basic + overtime + allowances itemized (kind=earning, by row)
+    * PAYE deducted
+    * CSG / NSF deducted (statutory_employee dict, expanded)
+    * net pay
+
+  The template is intentionally compact (single page for a typical payslip)
+  with a print-friendly palette so the resulting PDF is also fine when
+  printed on plain paper.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Payslip · {{ employee.name }} · {{ period.label_en }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 14mm 16mm;
+      @bottom-center {
+        content: "{{ employer.name }} · {{ period.label_en }} · Generated {{ generated_at }}";
+        font-size: 8pt;
+        color: #6b7280;
+      }
+      @bottom-right {
+        content: "Page " counter(page) " / " counter(pages);
+        font-size: 8pt;
+        color: #6b7280;
+      }
+    }
+    body {
+      font-family: "Helvetica", "Arial", sans-serif;
+      font-size: 10pt;
+      color: #111827;
+      line-height: 1.4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #111827;
+      padding-bottom: 10pt;
+      margin-bottom: 14pt;
+    }
+    .header h1 {
+      font-size: 16pt;
+      font-weight: 800;
+      margin: 0;
+      letter-spacing: -0.3pt;
+    }
+    .header h1 .fr {
+      display: block;
+      font-size: 11pt;
+      font-weight: 600;
+      color: #6b7280;
+      margin-top: 2pt;
+    }
+    .header .right {
+      text-align: right;
+      font-size: 9pt;
+    }
+    .header .right strong {
+      display: block;
+      font-size: 11pt;
+      color: #111827;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16pt;
+      margin-bottom: 14pt;
+    }
+    .panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 6pt;
+      padding: 10pt 12pt;
+    }
+    .panel h2 {
+      font-size: 9pt;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      color: #6b7280;
+      margin: 0 0 6pt 0;
+      font-weight: 700;
+    }
+    .panel .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 1.5pt 0;
+    }
+    .panel .row .key {
+      color: #4b5563;
+    }
+    .panel .row .val {
+      font-weight: 600;
+    }
+    table.lines {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6pt;
+    }
+    table.lines th {
+      text-align: left;
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      color: #6b7280;
+      padding: 5pt 6pt;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 700;
+    }
+    table.lines th.num,
+    table.lines td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    table.lines td {
+      padding: 5pt 6pt;
+      border-bottom: 1px dotted #e5e7eb;
+    }
+    table.lines tr.subtotal td {
+      font-weight: 700;
+      border-top: 1px solid #111827;
+      border-bottom: none;
+      padding-top: 6pt;
+    }
+    .section-title {
+      font-size: 11pt;
+      font-weight: 700;
+      margin: 14pt 0 6pt 0;
+      color: #111827;
+      border-left: 3px solid #2563eb;
+      padding-left: 8pt;
+    }
+    .section-title .fr {
+      color: #6b7280;
+      font-weight: 500;
+      font-size: 10pt;
+      margin-left: 8pt;
+    }
+    .net-pay {
+      margin-top: 14pt;
+      background: #ecfdf5;
+      border: 2px solid #10b981;
+      border-radius: 6pt;
+      padding: 10pt 14pt;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .net-pay .lbl {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #064e3b;
+    }
+    .net-pay .lbl .fr {
+      display: block;
+      font-size: 9pt;
+      color: #047857;
+      font-weight: 500;
+    }
+    .net-pay .amt {
+      font-size: 18pt;
+      font-weight: 800;
+      color: #047857;
+      font-variant-numeric: tabular-nums;
+    }
+    .footer-meta {
+      margin-top: 18pt;
+      padding-top: 8pt;
+      border-top: 1px solid #e5e7eb;
+      font-size: 8pt;
+      color: #6b7280;
+    }
+    .footer-meta .hash {
+      font-family: "Menlo", "Courier New", monospace;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>
+        Payslip
+        <span class="fr">Bulletin de paie</span>
+      </h1>
+      <div style="margin-top:4pt; color:#4b5563;">
+        Period · Période · {{ period.label_en }}
+      </div>
+    </div>
+    <div class="right">
+      <strong>{{ employer.name }}</strong>
+      {% if employer.brn %}<div>BRN: {{ employer.brn }}</div>{% endif %}
+      {% if employer.address %}<div>{{ employer.address }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="panel">
+      <h2>Employee · Employé</h2>
+      <div class="row"><span class="key">Name / Nom</span><span class="val">{{ employee.name }}</span></div>
+      {% if employee.role %}<div class="row"><span class="key">Role / Poste</span><span class="val">{{ employee.role }}</span></div>{% endif %}
+      {% if employee.passport %}<div class="row"><span class="key">ID / NIC</span><span class="val">{{ employee.passport }}</span></div>{% endif %}
+      <div class="row"><span class="key">Employment / Emploi</span><span class="val">{{ employee.employment_type }}{% if employee.fte and employee.fte != "1.000" %} · FTE {{ employee.fte }}{% endif %}</span></div>
+    </div>
+    <div class="panel">
+      <h2>Run · Exercice</h2>
+      <div class="row"><span class="key">Run #</span><span class="val">{{ run.id }}</span></div>
+      <div class="row"><span class="key">Currency / Devise</span><span class="val">{{ run.currency }}</span></div>
+      <div class="row"><span class="key">Status / Statut</span><span class="val">{{ run.status }}</span></div>
+      {% if run.finalized_at %}<div class="row"><span class="key">Finalized / Validé</span><span class="val">{{ run.finalized_at }}</span></div>{% endif %}
+    </div>
+  </div>
+
+  <div class="section-title">
+    Earnings
+    <span class="fr">Gains</span>
+  </div>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Description</th>
+        <th class="num">Amount · Montant</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in earnings %}
+      <tr>
+        <td>{{ c.code }}</td>
+        <td>{{ c.label }}{% if c.is_basic %} <span style="color:#6b7280;">· basic / de base</span>{% endif %}</td>
+        <td class="num">{{ c.amount_str }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="subtotal">
+        <td colspan="2">Gross / Brut</td>
+        <td class="num">{{ totals.gross_str }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  {% if leave_summary %}
+  <div class="section-title">
+    Leave taken
+    <span class="fr">Congés pris</span>
+  </div>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Description</th>
+        <th class="num">Days · Jours</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lv in leave_summary %}
+      <tr>
+        <td>{{ lv.code|upper }}</td>
+        <td>{{ lv.label }} <span style="color:#6b7280;">· {% if lv.paid %}paid / payé{% else %}unpaid / non payé{% endif %}</span></td>
+        <td class="num">{{ lv.days }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="section-title">
+    Statutory deductions (employee)
+    <span class="fr">Cotisations salariales</span>
+  </div>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Description</th>
+        <th class="num">Amount · Montant</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>PAYE</td>
+        <td>Pay-as-you-earn income tax · Impôt sur le revenu</td>
+        <td class="num">{{ totals.paye_str }}</td>
+      </tr>
+      {% for code, amt in statutory_employee %}
+      <tr>
+        <td>{{ code }}</td>
+        <td>{{ statutory_labels.get(code, code) }}</td>
+        <td class="num">{{ amt }}</td>
+      </tr>
+      {% endfor %}
+      {% for c in deductions %}
+      <tr>
+        <td>{{ c.code }}</td>
+        <td>{{ c.label }}</td>
+        <td class="num">{{ c.amount_str }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="subtotal">
+        <td colspan="2">Total deductions / Total des retenues</td>
+        <td class="num">{{ totals.deductions_str }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="net-pay">
+    <div class="lbl">
+      Net pay
+      <span class="fr">Salaire net</span>
+    </div>
+    <div class="amt">{{ run.currency }} {{ totals.net_pay_str }}</div>
+  </div>
+
+  {% if statutory_employer %}
+  <div class="section-title">
+    Employer contributions (informational)
+    <span class="fr">Cotisations patronales (information)</span>
+  </div>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Description</th>
+        <th class="num">Amount · Montant</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for code, amt in statutory_employer %}
+      <tr>
+        <td>{{ code }}</td>
+        <td>{{ statutory_labels.get(code, code) }}</td>
+        <td class="num">{{ amt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="footer-meta">
+    Payslip {{ payslip.id }} · {{ employer.name }}
+    {% if hash_sha256 %}<br/>Document hash: <span class="hash">{{ hash_sha256 }}</span>{% endif %}
+  </div>
+
+</body>
+</html>

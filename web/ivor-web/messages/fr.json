@@ -1,0 +1,205 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "create": "Créer",
+    "edit": "Modifier",
+    "open": "Ouvrir",
+    "close": "Fermer",
+    "refresh": "Actualiser",
+    "loading": "Chargement…",
+    "noData": "Aucune donnée",
+    "yes": "Oui",
+    "no": "Non",
+    "search": "Rechercher",
+    "actions": "Actions",
+    "status": "Statut",
+    "total": "Total",
+    "amount": "Montant",
+    "period": "Période",
+    "currency": "Devise",
+    "language": "Langue"
+  },
+
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "reports": "Rapports",
+    "teams": "Équipes",
+    "attendance": "Présence",
+    "payroll": "Paie",
+    "payrollRuns": "Cycles de paie",
+    "salaryStructures": "Grilles salariales",
+    "salaryOverview": "Vue d'ensemble salaires",
+    "compliance": "Conformité",
+    "disputes": "Litiges",
+    "overtime": "Heures supplémentaires",
+    "schedule": "Planning",
+    "leave": "Congés",
+    "notifications": "Notifications",
+    "documents": "Documents",
+    "settings": "Paramètres",
+    "settingsGeneral": "Général",
+    "settingsLeaveTypes": "Types de congés",
+    "settingsDepartments": "Départements",
+    "settingsHolidays": "Jours fériés",
+    "settingsOrganization": "Organisation",
+    "settingsPermissions": "Permissions",
+    "payrollRules": "Règles de paie",
+    "platform": "Plateforme",
+    "roles": "Rôles",
+    "auditLogs": "Journaux d'audit",
+    "help": "Aide"
+  },
+
+  "auth": {
+    "signIn": "Se connecter",
+    "signingIn": "Connexion…",
+    "email": "Adresse e-mail",
+    "emailPlaceholder": "Saisissez votre e-mail",
+    "password": "Mot de passe",
+    "passwordPlaceholder": "Saisissez votre mot de passe",
+    "forgotPassword": "Mot de passe oublié ?",
+    "loginFailed": "Échec de connexion. Vérifiez vos identifiants.",
+    "signInToDashboard": "Connectez-vous à votre tableau de bord"
+  },
+
+  "payrollRuns": {
+    "title": "Cycles de paie",
+    "subtitle": "Générer, vérifier et valider la paie mensuelle de votre équipe.",
+    "startPayroll": "Démarrer la paie",
+    "noRuns": "Aucun cycle de paie",
+    "noRunsHint": "Lancez votre premier cycle de paie pour le mois en cours.",
+    "tableHeaders": {
+      "period": "Période",
+      "status": "Statut",
+      "payslips": "Bulletins",
+      "totalNet": "Net total",
+      "created": "Créé le",
+      "actions": "Actions"
+    },
+    "status": {
+      "draft": "Brouillon",
+      "finalized": "Validé",
+      "cancelled": "Annulé"
+    },
+    "actions": {
+      "open": "Ouvrir",
+      "openTooltip": "Reprendre l'assistant à l'étape de vérification",
+      "cancel": "Annuler",
+      "cancelling": "Annulation…",
+      "cancelTooltip": "Supprimer ce brouillon pour libérer la période",
+      "cancelConfirm": "Annuler le brouillon de {period} ? Vous pourrez en créer un nouveau pour la même période ensuite.",
+      "cancelSuccess": "Brouillon de {period} annulé"
+    },
+    "wizard": {
+      "selectPeriod": "Choisir la période",
+      "review": "Vérifier",
+      "finalize": "Valider",
+      "createDraft": "Créer le brouillon",
+      "creatingDraft": "Création du brouillon…",
+      "cancelDraft": "Annuler le brouillon",
+      "cancelDraftConfirm": "Annuler ce brouillon de paie ? Vous pourrez le recréer plus tard.",
+      "draftCancelled": "Brouillon annulé",
+      "finalizeConfirm": "Valider ce cycle ? Une fois validés, les bulletins deviennent immuables.",
+      "finalizeSuccess": "Paie validée",
+      "requestOtp": "Demander un code OTP",
+      "otpSent": "OTP envoyé. Vérifiez votre e-mail.",
+      "otpLabel": "Code OTP à 6 chiffres",
+      "otpPlaceholder": "Saisissez le code OTP reçu par e-mail",
+      "otpInvalid": "Saisissez le code OTP à 6 chiffres reçu par e-mail",
+      "totalGross": "Brut total",
+      "payslipCount": "{count, plural, one {# bulletin} other {# bulletins}}"
+    }
+  },
+
+  "salaryStructures": {
+    "title": "Grilles salariales",
+    "subtitle": "Définissez des modèles de salaire réutilisables et assignez-les aux employés.",
+    "components": "Composants",
+    "structures": "Grilles",
+    "noStructures": "Aucune grille salariale",
+    "newStructure": "Nouvelle grille",
+    "newComponent": "Nouveau composant"
+  },
+
+  "leaveTypes": {
+    "title": "Types de congés",
+    "subtitle": "Le catalogue des types de congés que les employés peuvent demander.",
+    "newType": "Nouveau type",
+    "seedFromCountry": "Importer du pays",
+    "seedConfirm": "Initialiser les types de congés à partir des valeurs par défaut du pays ?\n\nCela ajoute les types de congés statutaires manquants et actualise les valeurs des types liés au pays. Les types personnalisés que vous avez créés ne seront pas modifiés.",
+    "noTypes": "Aucun type de congé"
+  },
+
+  "payrollRules": {
+    "title": "Règles de paie",
+    "subtitle": "Tranches d'imposition, déductions statutaires, congés par défaut et formules de prime, par pays.",
+    "addVersion": "Ajouter une version"
+  },
+
+  "employees": {
+    "title": "Membres de l'équipe",
+    "lockProfile": "Verrouiller le profil",
+    "unlockProfile": "Déverrouiller le profil",
+    "locked": "Verrouillé",
+    "unlocked": "Déverrouillé",
+    "lockedHint": "Verrouillé — contactez les RH",
+    "lockReason": "Motif",
+    "oneOffAllowances": {
+      "title": "Indemnités ponctuelles",
+      "subtitle": "Primes, remboursements ou retenues ponctuels programmés pour un mois précis.",
+      "schedule": "Planifier",
+      "noOneOffs": "Aucune indemnité ponctuelle planifiée.",
+      "pending": "en attente",
+      "applied": "payé",
+      "deleteConfirm": "Supprimer l'indemnité ponctuelle \"{label}\" planifiée pour {period} ?",
+      "deleteApplied": "Déjà appliquée à un bulletin ; suppression impossible"
+    }
+  },
+
+  "payslip": {
+    "title": "Bulletin de paie",
+    "netPay": "Salaire net",
+    "gross": "Brut",
+    "taxableIncome": "Revenu imposable",
+    "earnings": "Gains",
+    "deductions": "Retenues",
+    "statutoryEmployee": "Cotisations salariales",
+    "statutoryEmployer": "Cotisations patronales",
+    "downloadPdf": "Télécharger le PDF",
+    "summary": "Résumé",
+    "yearToDate": "Salaire net · {year}",
+    "noPayslips": "Aucun bulletin de paie",
+    "noPayslipsHint": "Vos bulletins apparaîtront ici une fois que votre employeur aura validé un cycle de paie."
+  },
+
+  "leaveScreen": {
+    "title": "Demande de congé",
+    "newRequest": "Nouvelle demande",
+    "myRequests": "Mes demandes",
+    "balances": "Vos soldes · {year}",
+    "noQuotaSet": "Aucun quota défini",
+    "daysOf": "/ {total} jours",
+    "used": "{count} utilisé(s)",
+    "leaveType": "Type de congé",
+    "notes": "Notes (facultatif)",
+    "notesPlaceholder": "Motif du congé…",
+    "quickSelect": "Sélection rapide",
+    "today": "Aujourd'hui",
+    "thisWeek": "Cette semaine",
+    "nextWeek": "Semaine prochaine",
+    "thisMonth": "Ce mois",
+    "submit": "Envoyer",
+    "submitting": "Envoi…",
+    "noRequests": "Aucune demande",
+    "noRequestsHint": "Soumettez votre première demande de congé via l'onglet Nouvelle demande.",
+    "statutoryBadge": "LÉG"
+  },
+
+  "profile": {
+    "lockedBanner": "Profil verrouillé",
+    "lockedDescription": "Vos informations d'identité (nom, date de naissance, passeport, genre) sont en lecture seule. Contactez les RH pour toute modification.",
+    "lockedReason": "Motif : {reason}"
+  }
+}

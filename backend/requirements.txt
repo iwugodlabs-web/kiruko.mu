@@ -1,0 +1,49 @@
+pydantic[email]
+uvicorn
+fastapi
+slowapi
+sqlalchemy
+alembic
+bcrypt==4.0.1
+PyJWT
+passlib
+cryptography
+python-multipart
+boto3
+google-cloud-storage
+pandas>=2.0
+numpy>=1.18,<2
+openpyxl>=3.0
+psycopg2-binary
+python-dotenv
+python-decouple==3.8
+SQLAlchemy-Utils==0.41.2
+email_validator>=2.1.1
+itsdangerous
+requests>=2.31.0
+easyocr
+Pillow
+google-cloud-vision
+google-cloud-documentai
+pytesseract
+# M1 — Salary formula evaluator (services/formula_evaluator.py) uses
+# simpleeval for safe expression evaluation, with an AST validator on top
+# as defense in depth.
+simpleeval
+# M21 — Payslip PDF generation. WeasyPrint needs system libs Pango,
+# Cairo, GObject Introspection (`brew install pango cairo libffi gdk-pixbuf`
+# on macOS, or `apt install libpango1.0-0 libpangoft2-1.0-0` on Debian).
+# When the native libs aren't present the import fails — services/payslip_pdf
+# logs a warning and skips PDF generation rather than crashing finalize.
+weasyprint
+Jinja2
+# Concerns v2 (M7) — attachment hygiene.
+#   python-magic: thorough MIME detection via libmagic. Falls back to the
+#     manual signature table in services/attachment_scanner.py when libmagic
+#     isn't installed on the host (so dev envs work without it).
+#   pyclamd: ClamAV daemon client. Only used when ENABLE_CLAMAV=true and
+#     a clamav daemon is reachable (see docker-compose --profile scan);
+#     scanner records status='skipped:clamd_lib_missing' when this lib is
+#     absent so the upload still proceeds.
+python-magic>=0.4.27
+pyclamd>=0.4.0

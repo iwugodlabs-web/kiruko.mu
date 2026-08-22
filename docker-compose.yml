@@ -1,0 +1,122 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    image: kontokaz-backend
+    # Default entrypoint (startup.sh) migrates + seeds, then serves — same as
+    # the DO run_command.
+    ports:
+      - "8000:8080"
+    # No host-mount of ./backend — DigitalOcean won't have it, and the
+    # mount lets the host's .env override docker-compose env vars.
+    # Re-enable locally only if you actively want hot-reload + uvicorn --reload.
+    environment:
+      # Point at the host's Postgres (not the docker `db` service).
+      # host.docker.internal resolves to the Mac/Windows host from inside containers.
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=
+      - POSTGRES_SERVER=host.docker.internal
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=ivor_db
+      - POSTGRES_SSLMODE=disable
+      - PORT=8080
+      - JWT_SECRET=951655c17ffe25fb545344a9442a6fd1
+      - JWT_ALGORITHM=HS256
+      - SUPER_ADMIN_EMAILS=admin@example.com
+      # Read by migrate.sh (not by the app). Local dev seeds a super admin
+      # + sectors on every `up`; the seeder resets this admin's password.
+      - RUN_SEEDER=true
+      - SUPER_USER_EMAIL=admin@example.com
+      - SUPER_USER_PASSWORD=ChangeMe123!
+      - SMTP_HOST=sandbox.smtp.mailtrap.io
+      - SMTP_PORT=2525
+      - SMTP_USER=784e7d873b3dc6
+      - SMTP_PASS=d6fc42c6057af7
+      - SMTP_FROM_EMAIL=noreply@ivor.com
+      - FRONTEND_URL=http://localhost:3000
+      - STORAGE_TYPE=local
+      # Local-dev convenience: print step-up OTPs to backend logs so
+      # devs don't need to check Mailtrap. NEVER set in prod — would
+      # leak 5-minute codes into log aggregation.
+      - ENVIRONMENT=dev
+      # M4 — gate the estimated-payslip endpoint. Default false; flipped on
+      # for local/dev. Production must keep this off until counsel signs off
+      # on the EN/FR/MG disclaimer translations.
+      - ESTIMATED_PAYSLIP_ENABLED=true
+    volumes:
+      # Persist PDFs (and any other LocalStorage uploads) across rebuilds.
+      # Without this, /app/uploads gets wiped every `docker-compose build`,
+      # which would 404 the GET /payslips/{id}/pdf endpoint for runs
+      # finalized before the rebuild.
+      - kontokaz_uploads:/app/uploads
+    extra_hosts:
+      # Required on Linux; harmless on Mac/Windows where host.docker.internal already resolves.
+      - "host.docker.internal:host-gateway"
+
+  web:
+    build:
+      # Repo root so the Dockerfile can COPY both `web/ivor-web/` and the
+      # sibling `shared/` dir that web's services/api.tsx imports from.
+      context: .
+      dockerfile: web/ivor-web/Dockerfile
+    image: kontokaz-web
+    profiles:
+      - web
+    ports:
+      - "3000:3000"
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - BACKEND_URL=http://backend:8080
+      # Must match the backend's JWT_SECRET. Web middleware verifies signatures
+      # and audience (aud='web') with this. Missing => middleware fails closed.
+      - JWT_SECRET=951655c17ffe25fb545344a9442a6fd1
+    depends_on:
+      - backend
+
+  # M7 — ClamAV daemon for attachment virus scanning. Opt-in via
+  # `--profile scan`. Required only when `ENABLE_CLAMAV=true` is set on the
+  # backend; otherwise the scanner skips with status='skipped:clamav_disabled'.
+  # Pair with `CLAMAV_HOST=clamav` `CLAMAV_PORT=3310` on the backend service
+  # to reach it.
+  clamav:
+    image: clamav/clamav:stable
+    profiles:
+      - scan
+    restart: always
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_db:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 5m
+
+  # Backend points at the host's Postgres via host.docker.internal, so this
+  # docker `db` service is opt-in only. Run with `--profile db` to start it.
+  db:
+    image: postgres:15-alpine
+    profiles:
+      - db
+    restart: always
+    environment:
+      - POSTGRES_USER=ivor_user
+      - POSTGRES_PASSWORD=ivor_password
+      - POSTGRES_DB=ivor_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ivor_user -d ivor_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  kontokaz_uploads:
+  clamav_db:
