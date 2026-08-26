@@ -1,5 +1,12 @@
 # Root gitignore for ivor-mobile repository
 
+# Claude Code — personal / per-user state, never commit.
+# (Shared config like .claude/settings.json or .claude/agents/ is NOT ignored,
+# so you can still commit those intentionally if you want team-shared setup.)
+.claude/projects/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
 # Local upload sandbox — created by services/storage_service.LocalStorage
 # during dev / tests when STORAGE_TYPE != s3.
 uploads/
