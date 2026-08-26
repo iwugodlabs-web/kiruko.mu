@@ -1,0 +1,2 @@
+- [Railway deploy topology](railway-deploy-topology.md) — 3 services, per-service railway.json, ENVIRONMENT/Build-scope gotchas
+- [No cosmetic refactors](no-cosmetic-refactors.md) — only change files when backed by a concrete finding
