@@ -306,6 +306,32 @@ export default function LeaveScreen() {
     ? { key: selectedTypeRow.code, label: selectedTypeRow.label, color: colorForCode(selectedTypeRow.code) }
     : { key: leaveType, label: leaveType, color: colorForCode(leaveType) };
 
+  // Leave is an employer-mediated feature: an employee requests, the employer
+  // approves against a company quota. A user with no company has no approver
+  // and no quota, so there's no meaningful request flow (and no catalog to
+  // fetch — the leave-types API is company-scoped). Rather than render an
+  // empty picker, show an empty state that points them to join/create a
+  // company. We deliberately do NOT fall back to a hardcoded type list, which
+  // would be fake types with no quota and codes the backend won't recognise.
+  if (!companyId) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: Palette.white }}>
+        <PremiumHeader title={t('leaveScreen.title')} onBack={() => router.back()} />
+        <VStack flex={1} alignItems="center" justifyContent="center" px="$8" space="lg">
+          <Box bg={Palette.gray100} rounded="$full" p="$5">
+            <MaterialIcons name="event-busy" size={40} color={Palette.gray500} />
+          </Box>
+          <Text fontWeight="800" fontSize={Type.title} color={Palette.ink} textAlign="center">
+            {t('leaveScreen.noCompanyTitle')}
+          </Text>
+          <Text fontSize={Type.body} color={Palette.gray600} textAlign="center" lineHeight={22}>
+            {t('leaveScreen.noCompanyBody')}
+          </Text>
+        </VStack>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: Palette.white }}>
       <PremiumHeader title={t('leaveScreen.title')} onBack={() => router.back()} />
@@ -616,26 +642,30 @@ export default function LeaveScreen() {
                 colors={[selectedType?.color ?? Palette.blue, selectedType?.color ?? Palette.blue]}
                 style={{ borderRadius: 16 }}
               >
-                <Button
+                <Pressable
                   onPress={handleSubmit}
-                  isDisabled={submitting || selectedDates.length === 0}
-                  bg="transparent"
+                  disabled={submitting || selectedDates.length === 0}
                   py="$4"
+                  px="$4"
+                  minHeight={56}
+                  alignItems="center"
+                  justifyContent="center"
                   rounded="$2xl"
+                  opacity={submitting || selectedDates.length === 0 ? 0.6 : 1}
                 >
                   {submitting ? (
                     <Spinner color={Palette.white} />
                   ) : (
-                    <ButtonText color={Palette.white} fontWeight="800" fontSize={Type.title}>
+                    <Text color={Palette.white} fontWeight="800" fontSize={Type.title} textAlign="center">
                       {selectedDates.length > 0
                         ? `${t('leaveScreen.submit')} (${t('leaveScreen.daysSelected', {
                             count: selectedDates.length,
                             plural: selectedDates.length === 1 ? '' : 's',
                           })})`
                         : t('leaveScreen.submit')}
-                    </ButtonText>
+                    </Text>
                   )}
-                </Button>
+                </Pressable>
               </LinearGradient>
             </Box>
           </Animated.View>

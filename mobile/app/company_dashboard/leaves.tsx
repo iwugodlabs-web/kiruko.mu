@@ -1,5 +1,6 @@
 import { approveLeaveRequest, getLeaveRequestsByCompany } from '../../services/api';
 import { Palette, Type } from '@/app/constants/theme';
+import { leaveTypes as leaveTypesApi } from '@/services/payroll-api';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
   AlertCircleIcon, Badge, Box, Button, ButtonText, CheckCircleIcon, Heading, HStack,
@@ -58,6 +59,9 @@ export default function LeavesPage() {
   // role can't trigger a 403 on a button it shouldn't see.
   const canApproveLeave = hasCompanyPermission(user, 'approve_leave');
   const [leaves, setLeaves] = useState<any[]>([]);
+  // Map leave-type codes → friendly labels ("maternity" → "Maternity leave (14 weeks)")
+  // so the employer view matches what employees see. Best-effort; falls back to the code.
+  const [typeLabels, setTypeLabels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -227,6 +231,14 @@ export default function LeavesPage() {
     try {
       const res = await getLeaveRequestsByCompany(companyId);
       setLeaves(Array.isArray(res) ? res : []);
+      try {
+        const lts = await leaveTypesApi.list(companyId, false);
+        if (Array.isArray(lts)) {
+          const m: Record<string, string> = {};
+          for (const lt of lts) if (lt?.code) m[lt.code] = lt.label ?? lt.code;
+          setTypeLabels(m);
+        }
+      } catch { /* labels best-effort — fall back to raw code */ }
     } catch (err) {
       console.error('Error loading leaves:', err);
     } finally {
@@ -448,7 +460,7 @@ export default function LeavesPage() {
                                       {lv.requester_name || 'Employee'}
                                     </Text>
                                     <Text color={Palette.gray500} fontSize={Type.label} fontWeight="500">
-                                      {lv.leave_type || ''} • {duration}
+                                      {(typeLabels[lv.leave_type] || lv.leave_type || '')} • {duration}
                                     </Text>
                                   </VStack>
                                 </HStack>
@@ -582,7 +594,7 @@ export default function LeavesPage() {
                 <VStack space="xs">
                   <Text color={Palette.gray400} fontSize={Type.caption} fontWeight="800" textTransform="uppercase">Leave Details</Text>
                   <Text fontWeight="700" color={Palette.ink}>
-                    {selectedLeave?.leave_type || 'General Leave'}
+                    {(selectedLeave && typeLabels[selectedLeave.leave_type]) || selectedLeave?.leave_type || 'General Leave'}
                   </Text>
                   <Text color={Palette.gray700} fontSize={Type.label}>
                     {formatDate(selectedLeave?.start_date)} - {formatDate(selectedLeave?.end_date)} ({calculateDuration(selectedLeave?.start_date, selectedLeave?.end_date)})

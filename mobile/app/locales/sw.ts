@@ -550,6 +550,9 @@ const translationSW: ITranslationSchema = {
 		from: "KUTOKA",
 		to: "KWA",
 		daysShort: "{{count}}d",
+		noCompanyTitle: "Likizo ni kipengele cha kampuni",
+		noCompanyBody:
+			"Utaweza kuomba na kufuatilia likizo pindi utakapojiunga au kuongezwa kwenye kampuni. Muombe mwajiri wako mwaliko, au unda kampuni ili kuanza.",
 	},
 
 	profile: {

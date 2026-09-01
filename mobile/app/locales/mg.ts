@@ -546,6 +546,9 @@ const translationMG: ITranslationSchema = {
 		from: "MANOMBOKA",
 		to: "MIFARANA",
 		daysShort: "{{count}}a",
+		noCompanyTitle: "Fialan-tsasatra dia asan'ny orinasa",
+		noCompanyBody:
+			"Afaka hangataka sy hanara-maso ny fialan-tsasatranao ianao rehefa miditra na ampidirina ao anaty orinasa iray. Mangataha fanasana amin'ny mpampiasa anao, na mamorona orinasa mba hanombohana.",
 	},
 
 	profile: {

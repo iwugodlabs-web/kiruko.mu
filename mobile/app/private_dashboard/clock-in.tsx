@@ -1853,7 +1853,13 @@ export default function ClockInPage() {
             {/* Clock-In Mode Tabs */}
             <ClockInModeTabs
               clockInMode={clockInMode}
-              setClockInMode={setClockInMode}
+              setClockInMode={(mode) => {
+                // Unify leave UX: the "Leave" tab opens the single canonical
+                // Leave screen (leave.tsx) — same types (Maternity/Paternity/Sick),
+                // button and design — instead of a divergent inline copy.
+                if (mode === 'leave') { router.push('/private_dashboard/leave'); return; }
+                setClockInMode(mode);
+              }}
               primary={primary}
             />
 

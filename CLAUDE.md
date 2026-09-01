@@ -122,24 +122,3 @@ User roles: `CompanyUserRole`, `PlatformRole` (defined in backend models).
 - Mobile env: configured in `mobile/app.json` and Expo env vars
 
 PostgreSQL runs on port 5432 (via Docker in dev). Backend must be running for mobile/web to function.
-
----
-
-## Deployment (Railway)
-
-Deploy the backend + web to Railway. The mobile app is not deployed to Railway (build via EAS).
-
-### Services
-1. **PostgreSQL** — Railway managed database.
-2. **Backend** — built from `backend/Dockerfile`. Uses `backend/railway.json`.
-3. **Web** — built from `web/ivor-web/Dockerfile` with repo-root context. Uses `web/ivor-web/railway.json`.
-
-### Env templates
-- `backend/.env.railway.example` — backend variables for Railway.
-- `web/ivor-web/.env.railway.example` — web variables for Railway (note `NEXT_PUBLIC_*` need Build scope).
-
-### Critical gotchas
-- `STORAGE_TYPE=local` is **ephemeral** on Railway. Switch to `s3` or `gcs` before production.
-- The backend `startup.sh` runs migrations on boot. This is safe for 1 replica; scale carefully.
-- `JWT_SECRET` must match between backend and web.
-- Verify `SMTP_FROM_EMAIL` with your email provider before sending live emails.

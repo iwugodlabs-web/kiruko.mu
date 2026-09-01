@@ -540,6 +540,9 @@ const translationFR: ITranslationSchema = {
 		from: "DU",
 		to: "AU",
 		daysShort: "{{count}}j",
+		noCompanyTitle: "Le congé est une fonction d'entreprise",
+		noCompanyBody:
+			"Vous pourrez demander et suivre vos congés une fois que vous aurez rejoint une entreprise ou y aurez été ajouté. Demandez une invitation à votre employeur, ou créez une entreprise pour commencer.",
 	},
 
 	profile: {

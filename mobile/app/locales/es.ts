@@ -546,6 +546,9 @@ const translationES: ITranslationSchema = {
 		from: "FROM",
 		to: "TO",
 		daysShort: "{{count}}d",
+		noCompanyTitle: "Leave is a company feature",
+		noCompanyBody:
+			"You'll be able to request and track leave once you join or are added to a company. Ask your employer for an invite, or create a company to get started.",
 	},
 
 	profile: {

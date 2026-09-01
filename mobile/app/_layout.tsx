@@ -1,3 +1,5 @@
+// RN 0.81 compat shim — must run before any GlueStack overlay mounts.
+import "@/shims/backHandlerCompat";
 import LanguageProvider from "@/app/context/LanguageProvider";
 import { config } from "@/config/gluestack-ui.config";
 import migrations from "@/drizzle/migrations";

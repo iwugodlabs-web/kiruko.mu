@@ -549,6 +549,8 @@ interface ITranslationSchema {
 		from: string;
 		to: string;
 		daysShort: string;
+		noCompanyTitle: string;
+		noCompanyBody: string;
 	};
 
 	profile: {
