@@ -54,6 +54,7 @@ export function LegalPage({
           className="space-y-8 rounded-2xl border border-gray-200 bg-white p-6 text-[15px] leading-7 shadow-sm sm:p-10
             [&_a]:font-semibold [&_a]:!text-primary-700 [&_a]:underline [&_a]:underline-offset-2
             [&_h2]:text-xl [&_h2]:font-bold [&_h2]:tracking-tight [&_h2]:!text-gray-900
+            [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3]:!text-gray-900
             [&_li]:!text-gray-700
             [&_p]:!text-gray-700
             [&_strong]:!text-gray-900
