@@ -1081,7 +1081,7 @@ const Dashboard = () => {
   // Live ticker to update "Today" stats every minute — paused when app is backgrounded
   const [ticker, setTicker] = useState(0);
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
 
     const startTicker = () => {
       if (interval) clearInterval(interval);

@@ -645,7 +645,7 @@ function PinView({
   onComplete: (pin: string) => void;
   onCancel: () => void;
   onChangePin: () => void;
-  cameraRef: RefObject<KioskCameraHandle>;
+  cameraRef: RefObject<KioskCameraHandle | null>;
 }) {
   return (
     <View style={styles.section}>
