@@ -746,15 +746,23 @@ async def get_current_user_info(
         logger.error("Unexpected Error:", sys.exc_info())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@router.get('/by-email/{email}', status_code=200, response_model=showUser)
+@router.get('/by-email/{email}', status_code=200)
 async def get_user_by_email_endpoint(email: str, db: Session = Depends(config.get_db)):
-    """Get user by email address"""
+    """Check whether a user with this email exists (signup availability probe).
+
+    Intentionally unauthenticated — the mobile signup flow calls this before the
+    user has a session. Because it's public, it must NOT return user data; the
+    previous `response_model=showUser` leaked full PII (passport, DOB, salary,
+    employer details) to anyone who knew an email. Returns a bare presence
+    signal only.
+    """
     try:
         user = get_user_by_email(email, db)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        
-        return user
+        return {"email": email, "exists": True}
+    except HTTPException:
+        raise
     except SQLAlchemyError as e:
         logger.error(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -764,11 +772,33 @@ async def get_user_by_email_endpoint(email: str, db: Session = Depends(config.ge
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @router.get('/by_user_id/{user_id}', status_code=200, response_model=showUser)
-async def get_user_by_id(user_id: int, db: Session = Depends(config.get_db)):
+async def get_user_by_id(user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         user = get_user_by_user_id(user_id, db)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Authorization — previously unauthenticated (IDOR): anyone could fetch
+        # any user's full showUser (passport, DOB, gender, jobs, salaries,
+        # employer PII) by guessing an id. Allow self, platform admins, and a
+        # company admin/manager who may view this employee.
+        is_self = current_user.user_id == user_id
+        is_platform_admin = getattr(current_user, 'is_superuser', False)
+
+        is_company_admin = False
+        company_id = None
+        try:
+            company_id = _resolve_employee_company(user, db).company_id
+        except HTTPException:
+            company_id = user.company.company_id if user.company else None
+        if company_id:
+            from core.permission_guards import has_company_permission
+            is_company_admin = has_company_permission(current_user, company_id, 'view_employee', db)
+
+        if not (is_self or is_platform_admin or is_company_admin):
+            raise HTTPException(status_code=403, detail="Not permitted to view this user")
+    except HTTPException:
+        raise
     except SQLAlchemyError as e:
         logger.error(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
