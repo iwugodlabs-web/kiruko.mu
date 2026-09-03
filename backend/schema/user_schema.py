@@ -200,6 +200,51 @@ class ShowPrivateUser(PrivateUser):
     # timelogs and leaves; the employee list never needs them inline.
     model_config = {"from_attributes": True, "arbitrary_types_allowed": True}
 
+class MePrivateUser(BaseModel):
+    """Slim `private_user` for GET /user/me — identical to `ShowPrivateUser`
+    EXCEPT it omits `jobs` (and the nested salaries, immigration/compliance
+    flags, and employer PII that `jobs` drags in).
+
+    /user/me is polled constantly (mobile re-evaluates navigation on it, web
+    calls it on every load + refreshUser), so shipping the full job history +
+    salary + compliance record on every tick is both a payload problem and an
+    unnecessary PII surface. None of /user/me's consumers read `jobs` — job
+    detail comes from dedicated endpoints (mobile `getJobById`, the web
+    employee-detail page). Omitting it also avoids a lazy-load of the job
+    history on every session tick (same rationale as `ShowPrivateUser` dropping
+    `time_logs`/`leaves`).
+
+    Keep the remaining fields in sync with `ShowPrivateUser`.
+    """
+    private_user_id: int
+    user_id: int
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    gender: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    pass_port_number: Optional[str] = None
+    company_id: Optional[int] = None
+    department_id: Optional[int] = None
+    home_geofence_id: Optional[int] = None
+    home_site_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    department: Optional[ShowDepartment] = None
+    company: Optional[ShowCompanyBasic] = None
+    country_code: Optional[str] = None
+    effective_country_code: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    model_config = {"from_attributes": True, "arbitrary_types_allowed": True}
+
+
+class MeResponse(showUser):
+    """Slim response for GET /user/me — same shape as `showUser` but with
+    `private_user` serialized as `MePrivateUser` (no `jobs`). Used ONLY by
+    /user/me; login and employee-list endpoints keep the full `showUser`.
+    """
+    private_user: Optional[MePrivateUser] = None
+
 class ShowCompany(Company):
     company_id: int
     user_id: int
