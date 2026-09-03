@@ -76,6 +76,16 @@ function refreshTokenOnce() {
   return _refreshPromise;
 }
 
+// Set by AuthContext.logout() before it clears the session. The response
+// interceptor checks it so an in-flight 401-triggered refresh can't re-mint a
+// token after the user has clicked "Sign out" (the "logged out but not really"
+// bug). The flag resets on the next full page load, which logout always forces
+// via window.location.href = '/'.
+let _loggingOut = false;
+export function beginLogout() {
+  _loggingOut = true;
+}
+
 // Raw session probe (bypasses THIS interceptor to avoid recursion). Confirms the
 // session is truly dead before redirecting to login — a single endpoint's 401 or
 // a refresh hiccup must not log the user out while the session is still valid
@@ -93,6 +103,10 @@ api.interceptors.response.use(
   (resp) => resp,
   async (error) => {
     const originalRequest = error.config;
+
+    // User is signing out — never refresh/re-mint a token or bounce to login
+    // from an error that raced the logout call. Short-circuit to a plain reject.
+    if (_loggingOut) return Promise.reject(error);
 
     // Silent refresh on 401: attempt one token refresh, then retry the original
     // request. Runs in all environments (cookies are sent via withCredentials).

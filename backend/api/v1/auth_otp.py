@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -38,7 +39,7 @@ from core.dependencies import get_current_user
 from core.limiter import RATE_LIMITING_ENABLED, limiter
 from core.model import User, VerificationToken
 from core.phone_utils import normalize_phone
-from core.security import create_access_token
+from core.security import create_access_token, ACCESS_TOKEN_EXPIRY
 from db_models.crud.user import get_user_by_phone
 from schema.user_schema import showUser
 from services.otp_providers import get_provider
@@ -298,13 +299,48 @@ async def verify_otp_login(
     user_data["roles"] = roles
     user_data["is_superuser"] = is_super
 
-    return {
-        "status": "success",
-        "message": "OTP verified",
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "data": user_data,
-    }
+    # Mirror /user/login's cookie handling so phone-OTP logins on the web
+    # establish the SAME server-side session as password logins. Without this,
+    # an OTP-logged-in web user has no HttpOnly access_token/refresh_token
+    # cookie — the middleware can't admit them on full-page loads and /user/logout
+    # has nothing to clear (the "OTP users never really log out/in" bug). The
+    # response body stays identical, so mobile (which reads the tokens from the
+    # JSON body) is unaffected.
+    from core.settings import config as settings_config
+    cookie_secure = settings_config("COOKIE_SECURE", default="False").lower() == "true"
+
+    response = JSONResponse(
+        status_code=200,
+        content={
+            "status": "success",
+            "message": "OTP verified",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "data": user_data,
+        },
+    )
+
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        path="/",
+        max_age=ACCESS_TOKEN_EXPIRY,
+    )
+
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * REFRESH_TOKEN_EXPIRY,
+    )
+
+    return response
 
 
 # ---------------------------------------------------------------------------
