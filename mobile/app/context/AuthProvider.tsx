@@ -11,7 +11,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const router = useRouter();
     const [user, setUser] = useState<IUser | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
-    const tokenCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const tokenCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Function to check if token is expired
     const isTokenExpired = (token: string): boolean => {

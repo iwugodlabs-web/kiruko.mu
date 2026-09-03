@@ -944,7 +944,10 @@ interface ITranslationSchema {
 		fromSessionsPlural: string;
 		totalHours: string;
 		baseRate: string;
+		referenceRate: string;
 		perHour: string;
+		payTypeFixed: string;
+		payTypeHourly: string;
 		detailedBreakdown: string;
 		regular: string;
 		overtime: string;

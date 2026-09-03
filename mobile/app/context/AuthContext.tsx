@@ -30,6 +30,7 @@ interface IUser {
         last_name: string;
         gender?: string;
         date_of_birth?: string;
+        phone?: string;
         pass_port_number?: string;
         company_id?: number;
         // Branch/site this employee is assigned to (shown on profile + payslips).

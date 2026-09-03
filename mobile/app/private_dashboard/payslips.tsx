@@ -18,7 +18,7 @@ import {
 } from '@gluestack-ui/themed';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import Animated, { FadeIn, FadeInUp } from '@/app/utils/animated';
 import { useRouter } from 'expo-router';
 import { Alert, RefreshControl, StyleSheet } from 'react-native';

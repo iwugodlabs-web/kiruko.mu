@@ -4,7 +4,7 @@ import { AppState } from 'react-native';
 const IDLE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 export default function useIdleTimeout(onIdle: () => void, enabled: boolean) {
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const backgroundedAtRef = useRef<number | null>(null);
 

@@ -41,7 +41,7 @@ import {
 } from '@gluestack-ui/themed';
 import { useFocusEffect } from '@react-navigation/native';
 import { format } from 'date-fns';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Sharing from 'expo-sharing';
@@ -322,7 +322,7 @@ function SalariesInner() {
 
     const csvString = `${header}${rows}`;
     const filename = `salaries_export_${new Date().toISOString().split('T')[0]}.csv`;
-    const fileUri = FileSystem.cacheDirectory + filename;
+    const fileUri = `${FileSystem.cacheDirectory}${filename}`;
 
     try {
       await FileSystem.writeAsStringAsync(fileUri, csvString, {

@@ -38,7 +38,8 @@ function handleNotificationNavigation(data: any, isAuthenticated: boolean) {
 // Set up the notification handler
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -47,8 +48,8 @@ Notifications.setNotificationHandler({
 export default function usePushNotifications() {
   const [expoPushToken, setExpoPushToken] = useState<string | undefined>();
   const [notification, setNotification] = useState<Notifications.Notification | undefined>();
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>(undefined);
+  const responseListener = useRef<any>(undefined);
   const { isAuthenticated } = useAuth();
   // The notification listeners are registered once (empty-deps effect below);
   // read auth through a ref so their callbacks always see the current value
@@ -89,8 +90,8 @@ export default function usePushNotifications() {
     });
 
     return () => {
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
   }, []);
 
