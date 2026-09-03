@@ -2,6 +2,7 @@
 
 import { createContext, useContext, ReactNode, useState, useEffect, useRef } from 'react';
 import { api } from '@/services/apiClient';
+import { beginLogout } from '@/services/apiClient';
 
 interface Company {
   company_id: number;
@@ -284,6 +285,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    // Stop the response interceptor from refreshing (and thereby re-minting a
+    // session) while we clear cookies — otherwise an in-flight poll that 401s
+    // right as the user signs out can leave a fresh access_token cookie behind.
+    beginLogout();
     try {
       await api.post('/user/logout');
     } catch (e) {
