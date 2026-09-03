@@ -13,7 +13,7 @@ from db_models.crud.leave_quota import create_leave_quota, get_leave_quotas_by_u
 
 from schema.user_schema import (
     Purchase as PurchaseSchema, CreatePurchase, Subscription, CreateSubscription, Loan, CreateLoan, Transfer, CreateTransfer, CreateLeave, ShowLeave, Repayment,
-    CompanySignupRequest, CreateUser, User as UserSchema, UserLoginModel, showUser, LoanWithRepayments, UserRight as UserRightSchema, RefreshToken, UpdateUser,
+    CompanySignupRequest, CreateUser, User as UserSchema, UserLoginModel, showUser, MeResponse, LoanWithRepayments, UserRight as UserRightSchema, RefreshToken, UpdateUser,
     CreateRent, CreateBudgetGoal, CreateLeaveQuota, CreatePublicHoliday,
 )
 from schema.job_schema import CreateSalary, OnboardJob, ShowJob, CreateJob, ShowSchedule, ApproveLeaveRequest
@@ -660,7 +660,7 @@ async def get_company_user_roles(company_id: int, user_id: int, current_user: Us
     roles = get_roles_for_private_user(company_id, private.private_user_id, db)
     return {'user_id': user_id, 'roles': roles}
 
-@router.get('/me', status_code=200, response_model=showUser)
+@router.get('/me', status_code=200, response_model=MeResponse)
 async def get_current_user_info(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(config.get_db)
