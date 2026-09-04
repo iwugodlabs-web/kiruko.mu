@@ -1,14 +1,18 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIdleTimeout } from "@/hooks/useIdleTimeout";
 import Sidebar from "./dashboard/components/Sidebar";
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const { user, loading } = useAuth();
+    const { user, loading, logout } = useAuth();
     const router = useRouter();
+    const isAuthenticated = !!user?.isAuthenticated;
+    const handleIdle = useCallback(() => { logout(); }, [logout]);
+    const { isWarning, secondsLeft, reset } = useIdleTimeout(handleIdle, isAuthenticated);
 
     // Redirect AFTER commit, not during render. Calling router.push() in the
     // render body of a client component races with React's state propagation:
@@ -63,6 +67,18 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     </div>
                 </main>
             </div>
+            {isWarning && isAuthenticated && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 p-6 max-w-sm w-full text-center">
+                        <h3 className="text-base font-bold text-gray-900 dark:text-white">Still there?</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">You will be signed out for inactivity in <b className="text-gray-900 dark:text-white tabular-nums">{secondsLeft}s</b>.</p>
+                        <div className="mt-4 flex gap-2 justify-center">
+                            <button onClick={reset} className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-black">Stay signed in</button>
+                            <button onClick={() => logout()} className="px-4 py-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm font-semibold">Sign out now</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
