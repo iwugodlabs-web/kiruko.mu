@@ -299,6 +299,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = '/';
   };
 
+  // Keep a ref to the latest checkAuthStatus so the storage listener (mounted
+  // once) never closes over a stale closure.
+  const checkAuthRef = useRef(checkAuthStatus);
+  useEffect(() => { checkAuthRef.current = checkAuthStatus; }, [checkAuthStatus]);
+
+  // Cross-tab sync: login in one tab → other tabs re-check auth; logout in
+  // one tab → other tabs clear state + bounce to login. StorageEvent only
+  // fires in *other* tabs, so the tab that wrote auth_hint doesn't get it.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'auth_hint') return;
+      if (e.newValue === '1') {
+        checkAuthRef.current();
+      } else {
+        setUser(null);
+        setLoading(false);
+        const p = window.location.pathname;
+        if (p.startsWith('/dashboard') || p.startsWith('/admin')) {
+          window.location.replace('/');
+        }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   return (
     <AuthContext.Provider value={{
       user,

@@ -102,6 +102,16 @@ export async function middleware(request: NextRequest) {
             }
         }
 
+        // Platform admins belong in /admin, not /dashboard. If a platform admin
+        // manually types a company dashboard URL (e.g. /dashboard/employees),
+        // bounce them to /admin so the company dashboard never renders for them.
+        if (pathname.startsWith('/dashboard')) {
+            const isPlatformAdmin = isSuperUser || roles.includes('platform_admin');
+            if (isPlatformAdmin) {
+                return NextResponse.redirect(new URL('/admin', request.url));
+            }
+        }
+
         // Role check for /admin routes — must hold the literal platform_admin
         // role (or be a superuser). Earlier this accepted any non-empty roles
         // array, which let unrelated roles through.
