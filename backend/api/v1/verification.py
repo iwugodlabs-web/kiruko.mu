@@ -77,6 +77,19 @@ def verify_signup(email: str, otp: str, db: Session = Depends(config.get_db)):
     user.user_verified = True
     db.commit()
 
+    # Welcome employers into the web dashboard — they have no other way to learn
+    # it exists (the marketing site links the store apps, not the dashboard).
+    # Only for company (employer) accounts; employees get their context from the
+    # mobile app and their employer's invite flow.
+    user_type = getattr(user.user_type, "value", user.user_type)
+    if user_type == "company":
+        try:
+            from services.email_service import send_welcome_email
+            company_name = user.company.company_name if user.company else None
+            send_welcome_email(email, company_name)
+        except Exception as e:
+            logger.warning("Welcome email failed for %s: %s", email, e)
+
     return {"status": "success", "message": "Email verified successfully. You can now log in."}
 
 

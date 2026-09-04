@@ -101,6 +101,45 @@ def send_signup_otp_email(email: str, otp: str):
     email_queue.enqueue_email(email, subject, html, kind="signup_otp")
 
 
+def send_welcome_email(email: str, company_name: str | None = None):
+    """Welcome a newly verified COMPANY (employer) account and point them at the
+    web dashboard — the place where every employer operates: payroll, employees,
+    schedules, approvals. Enqueued onto the durable email queue.
+
+    Only the web dashboard link matters here (not a deep action link), so this
+    is a discoverability/onboarding email, not a token-bearing one.
+    """
+    from services import email_queue
+
+    _app = _app_name()
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    dashboard_url = frontend_url  # the web app root IS the dashboard sign-in
+
+    subject = f"Welcome to {_app} — your dashboard is ready"
+    company_line = f" for <strong>{company_name}</strong>" if company_name else ""
+
+    html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; max-width: 520px; margin: 0 auto; padding: 24px; background: #f8fafc;">
+      <div style="background: white; border-radius: 12px; padding: 36px 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.07);">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1e2a52; margin: 0 0 6px 0; font-size: 24px;">Welcome to {_app}!</h2>
+          <p style="color: #64748b; margin: 0; font-size: 14px;">Your employer account{company_line} is verified and ready.</p>
+        </div>
+        <p style="color: #475569; line-height: 1.6;">Everything you'll do as an employer — <strong>payroll, employees, schedules, leave approval and reports</strong> — lives in your web dashboard.</p>
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="{dashboard_url}" style="display: inline-block; background: linear-gradient(180deg, #FFD84D, #F2B705); color: #1e2a52; text-decoration: none; font-weight: 700; padding: 13px 34px; border-radius: 999px; font-size: 15px;">Open your dashboard</a>
+        </div>
+        <p style="color: #64748b; font-size: 13px; text-align: center;">Bookmark this address — you'll sign in here every time.</p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+        <p style="color: #94a3b8; font-size: 12px; text-align: center;">If the button doesn't work, open<br><a href="{dashboard_url}" style="color: #64748b;">{dashboard_url}</a></p>
+      </div>
+    </body>
+    </html>
+    """
+    email_queue.enqueue_email(email, subject, html, kind="welcome_company")
+
+
 def render_invite_html(company_name: str | None, role: str | None, token: str | None):
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     link = f"{frontend_url}/invite?token={token}" if token else f"{frontend_url}/invite"
