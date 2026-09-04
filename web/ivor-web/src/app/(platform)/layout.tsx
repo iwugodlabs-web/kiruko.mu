@@ -20,8 +20,16 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     useEffect(() => {
         if (!loading && !user?.isAuthenticated) {
             router.replace('/');
+            return;
         }
-    }, [loading, user?.isAuthenticated, router]);
+        // Platform admins must not render the company dashboard — even via
+        // client-side navigation that bypasses middleware. Mirror the server
+        // guard so typing /dashboard/employees while signed in as platform admin
+        // bounces to /admin.
+        if (!loading && user?.isAuthenticated && user?.isPlatformAdmin) {
+            router.replace('/admin');
+        }
+    }, [loading, user?.isAuthenticated, user?.isPlatformAdmin, router]);
 
     return (
         <div className="h-screen w-screen overflow-hidden bg-white dark:bg-gray-950">
