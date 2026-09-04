@@ -284,7 +284,7 @@ export default function TasksSection() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, authCompanyId]);
 
   useEffect(() => {
     loadSchedules();
@@ -607,20 +607,20 @@ export default function TasksSection() {
         {/* KPI row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: 'Total', value: schedules?.length || 0,                                                              iconBg: 'bg-gray-100',   iconText: 'text-gray-600',    Icon: Target },
-            { label: 'Draft', value: schedules?.filter((s: any) => (s.status || s.state) === 'draft').length || 0,       iconBg: 'bg-gray-50',    iconText: 'text-gray-500',    Icon: Edit3 },
-            { label: 'Pending', value: schedules?.filter((s: any) => (s.status || s.state) === 'pending').length || 0,   iconBg: 'bg-amber-50',   iconText: 'text-amber-600',   Icon: Clock },
-            { label: 'In Progress', value: schedules?.filter((s: any) => (s.status || s.state) === 'started').length || 0, iconBg: 'bg-blue-50', iconText: 'text-blue-600',    Icon: Activity },
-            { label: 'Completed', value: schedules?.filter((s: any) => (s.status || s.state) === 'completed').length || 0, iconBg: 'bg-emerald-50', iconText: 'text-emerald-600', Icon: CheckCircle },
+            { label: 'Total', value: schedules?.length || 0,                                                              iconBg: 'bg-gray-100 dark:bg-gray-800',   iconText: 'text-gray-600 dark:text-gray-300',    Icon: Target },
+            { label: 'Draft', value: schedules?.filter((s: any) => (s.status || s.state) === 'draft').length || 0,       iconBg: 'bg-gray-50 dark:bg-gray-800',    iconText: 'text-gray-500 dark:text-gray-400',    Icon: Edit3 },
+            { label: 'Pending', value: schedules?.filter((s: any) => (s.status || s.state) === 'pending').length || 0,   iconBg: 'bg-amber-50 dark:bg-amber-900/30',   iconText: 'text-amber-600 dark:text-amber-400',   Icon: Clock },
+            { label: 'In Progress', value: schedules?.filter((s: any) => (s.status || s.state) === 'started').length || 0, iconBg: 'bg-blue-50 dark:bg-blue-900/30', iconText: 'text-blue-600 dark:text-blue-400',    Icon: Activity },
+            { label: 'Completed', value: schedules?.filter((s: any) => (s.status || s.state) === 'completed').length || 0, iconBg: 'bg-emerald-50 dark:bg-emerald-900/30', iconText: 'text-emerald-600 dark:text-emerald-400', Icon: CheckCircle },
           ].map((stat) => (
             <div key={stat.label} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
               <div className="flex items-center gap-2.5 mb-3">
                 <div className={`w-7 h-7 ${stat.iconBg} rounded-lg flex items-center justify-center`}>
                   <stat.Icon size={13} className={stat.iconText} />
                 </div>
-                <span className="text-xs font-medium text-gray-500">{stat.label}</span>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{stat.label}</span>
               </div>
-              <p className="text-xl font-bold text-gray-900 tabular-nums">{loading ? '—' : stat.value}</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white tabular-nums">{loading ? '—' : stat.value}</p>
             </div>
           ))}
         </div>
