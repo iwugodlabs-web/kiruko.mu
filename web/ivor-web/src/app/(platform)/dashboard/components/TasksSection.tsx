@@ -284,7 +284,7 @@ export default function TasksSection() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, authCompanyId]);
 
   useEffect(() => {
     loadSchedules();
