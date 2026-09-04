@@ -13,6 +13,8 @@ export function useIdleTimeout(onIdle: () => void, enabled: boolean) {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isWarning, setIsWarning] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(60);
+  const onIdleRef = useRef(onIdle);
+  useEffect(() => { onIdleRef.current = onIdle; }, [onIdle]);
 
   const clear = useCallback(() => {
     if (idleRef.current) clearTimeout(idleRef.current);
@@ -41,9 +43,9 @@ export function useIdleTimeout(onIdle: () => void, enabled: boolean) {
     }, IDLE_TIMEOUT_MS - WARNING_MS);
     idleRef.current = setTimeout(() => {
       clear();
-      onIdle();
+      onIdleRef.current();
     }, IDLE_TIMEOUT_MS);
-  }, [enabled, onIdle, clear]);
+  }, [enabled, clear]);
 
   useEffect(() => {
     if (!enabled) {
