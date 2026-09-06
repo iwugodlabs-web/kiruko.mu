@@ -16,7 +16,7 @@ interface Props {
 function SkeletonRow() {
   return (
     <tr className="border-t border-gray-100 dark:border-gray-700">
-      {[...Array(6)].map((_, i) => (
+      {[...Array(7)].map((_, i) => (
         <td key={i} className="px-4 py-3">
           <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
         </td>
@@ -24,6 +24,20 @@ function SkeletonRow() {
     </tr>
   );
 }
+
+const VISIBILITY_LABEL: Record<string, string> = {
+  employer_only: "Shared",
+  company_admin: "Admins only",
+  employee_only: "Employee only",
+  private: "Private",
+};
+
+const VISIBILITY_CHIP: Record<string, string> = {
+  employer_only: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
+  company_admin: "bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400",
+  employee_only: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",
+  private: "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400",
+};
 
 export default function DocumentListTable({ docs, loading, filterType, onDelete }: Props) {
   const filtered = filterType ? docs.filter((d) => d.doc_type === filterType) : docs;
@@ -46,6 +60,7 @@ export default function DocumentListTable({ docs, loading, filterType, onDelete 
           <tr className="text-left text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
             <th className="px-4 py-3 font-semibold">Document</th>
             <th className="px-4 py-3 font-semibold">Type</th>
+            <th className="px-4 py-3 font-semibold">Visibility</th>
             <th className="px-4 py-3 font-semibold">Employee</th>
             <th className="px-4 py-3 font-semibold">Expiry</th>
             <th className="px-4 py-3 font-semibold">Uploaded</th>
@@ -84,6 +99,13 @@ export default function DocumentListTable({ docs, loading, filterType, onDelete 
                     <td className="px-4 py-3">
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-400 capitalize">
                         {cfg.label}
+                      </span>
+                    </td>
+
+                    {/* Visibility */}
+                    <td className="px-4 py-3">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${VISIBILITY_CHIP[doc.visibility ?? ""] ?? VISIBILITY_CHIP.private}`}>
+                        {VISIBILITY_LABEL[doc.visibility ?? ""] ?? doc.visibility ?? "—"}
                       </span>
                     </td>
 

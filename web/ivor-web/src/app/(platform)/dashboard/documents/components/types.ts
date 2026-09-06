@@ -9,6 +9,7 @@ export interface VaultDoc {
   file_url: string | null;
   file_name: string | null;
   file_mime: string | null;
+  visibility: string | null;    // private | employee_only | employer_only | company_admin
   created_at: string | null;
   updated_at: string | null;
 }
