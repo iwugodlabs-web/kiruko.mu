@@ -4046,6 +4046,11 @@ async def get_vault_documents(
         raise HTTPException(status_code=404, detail="Employee not found")
     allowed = _vault_allowed_visibilities(current_user, emp, db)
     if not allowed:
+        logger.warning(
+            "VAULT_DIAG denied user_id=%s vault=%s owner=%s company=%s",
+            getattr(current_user, "user_id", None), private_user_id,
+            getattr(emp, "user_id", None), getattr(emp, "company_id", None),
+        )
         raise HTTPException(status_code=403, detail="Not permitted to view this vault")
 
     docs = db.query(DocumentVault).filter(
@@ -4060,6 +4065,11 @@ async def get_vault_documents(
     # Hand out same-origin proxy URLs (see _rewrite_vault_file_urls) so the
     # shipped mobile app previews S3/Spaces files without a new build.
     _rewrite_vault_file_urls(request, serialized, docs, current_user.user_id)
+    logger.info(
+        "VAULT_DIAG served user_id=%s vault=%s allowed=%s returned=%s",
+        getattr(current_user, "user_id", None), private_user_id,
+        sorted(allowed), len(serialized),
+    )
     # M22 — record one access log per doc surfaced. Bulk insert kept simple
     # (one row per doc); avoids per-doc round-trips later when an auditor
     # asks "who saw this doc on date X".
