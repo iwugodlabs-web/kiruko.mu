@@ -4129,12 +4129,22 @@ def _vault_proxy_origin(request: Request) -> str:
 
     PUBLIC_API_ORIGIN override (e.g. https://api.kiruko.mu) wins — required
     behind proxies that don't forward the external host. Falls back to the
-    request's own base URL.
+    request's own base URL, honoring X-Forwarded-Proto/Host so Railway-style
+    proxies don't yield internal http:// URLs (mobile WebViews block
+    cleartext http via ATS / cleartext-traffic policy).
     """
     env_origin = (os.getenv("PUBLIC_API_ORIGIN") or "").strip().rstrip("/")
     if env_origin:
         return env_origin
-    return str(request.base_url).rstrip("/")
+    scheme = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    if host:
+        scheme = scheme or request.base_url.scheme
+        return f"{scheme}://{host}".rstrip("/")
+    base = str(request.base_url).rstrip("/")
+    if scheme == "https" and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base
 
 
 def _vault_proxy_url(request: Request, doc_id: int, view_token: str) -> str:
