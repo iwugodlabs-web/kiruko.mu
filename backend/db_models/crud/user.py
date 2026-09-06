@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, and_
 from typing import Iterable, List, Optional
 from fastapi import HTTPException, status
 from core.model import *
@@ -152,6 +152,26 @@ async def register_user(request: CompanySignupRequest, db: Session) -> User:
             company_id=None
         )
         db.add(private_user)
+        # Persist the employer the user typed at self-signup as a PLACEHOLDER job
+        # instead of discarding it. This (a) lets onboarding PRE-FILL the employer
+        # fields and (b) surfaces the claim in the employer's verify list
+        # (verification_status='pending'). `is_onboarding_draft=True` keeps it OUT
+        # of the employee's own onboarding gate, so they still complete their
+        # profile/salary. Cleared to False when they finish onboarding.
+        cd = getattr(request, 'company_data', None)
+        cd_name = (getattr(cd, 'company_name', None) or '').strip() if cd else ''
+        cd_brn = (getattr(cd, 'brn', None) or '').strip() if cd else ''
+        if cd_name or cd_brn:
+            db.flush()  # need private_user_id for the FK below
+            db.add(Job(
+                private_user_id=private_user.private_user_id,
+                job_title='',                  # required str in ShowJob; user sets the real one at onboarding
+                employer_name=cd_name or None,
+                employer_brn=cd_brn or None,   # the BRN, not the name (fixes prior mismap)
+                work_days={},                  # NOT NULL on jobs; real schedule set at onboarding
+                is_onboarding_draft=True,
+                verification_status='pending',
+            ))
     # Server-authoritative onboarding flag. Company signups already supply
     # company_name/brn/address and we auto-seed Management + Operations
     # departments above, so a well-formed company signup is onboard-complete
@@ -289,7 +309,18 @@ def get_users_by_company(company_id: int, db: Session, status: Optional[str] = N
 
     link_filter = or_(PrivateUser.company_id == company_id, Job.company_id == company_id)
     if company_brn:
-        link_filter = or_(link_filter, func.lower(Job.employer_brn) == company_brn.lower())
+        # Match jobs carrying only the employer BRN — but EXCLUDE self-signup
+        # placeholder (draft) jobs. A draft claimant belongs in the employer's
+        # verify list (GET /company-brn, its own query), NOT the payroll /
+        # earnings / attendance roster: they haven't finished onboarding and
+        # have no salary row yet (a null-salary phantom would skew totals).
+        link_filter = or_(
+            link_filter,
+            and_(
+                func.lower(Job.employer_brn) == company_brn.lower(),
+                Job.is_onboarding_draft.is_(False),
+            ),
+        )
 
     # with_loader_criteria scopes the secondary loader emitted by
     # subqueryload(PrivateUser.jobs) so it filters by Job.company_id. Without

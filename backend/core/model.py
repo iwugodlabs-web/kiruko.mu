@@ -592,6 +592,14 @@ class Job(Base) :
     verified_at = Column(DateTime, nullable=True)
     verified_by = Column(String, nullable=True)  # Who verified the employee
     rejection_reason = Column(String, nullable=True)
+    # Placeholder job created at self-signup to carry the employer name/BRN the
+    # user typed (so onboarding can PRE-FILL it and the employer's verify list
+    # sees the claim). It is NOT the employee's completed setup: onboarding's
+    # `_evaluate_private` must NOT count a draft job, or the user would skip
+    # their own profile/salary step and land on a rate-less home. Cleared to
+    # false when the employee finishes onboarding (onboard_job). Independent of
+    # `verification_status` (employer approve/reject) — different concern.
+    is_onboarding_draft = Column(Boolean, nullable=False, server_default='false')
     # M26 — per-job override for the missed-clockout auto-close chain
     # (Job → PrivateUser → Company → 12h). A delivery driver job might be 6h;
     # a security/night-watch job 14h. NULL means "fall through to

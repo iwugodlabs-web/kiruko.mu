@@ -108,7 +108,20 @@ async def get_salary_by_job_id(job_id: int, current_user: User = Depends(get_cur
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salary not found for this job")
         from core.model import Job as JobORM
         _job = db.query(JobORM).filter(JobORM.job_id == job_id).first()
-        assert_company_access(current_user, getattr(_job, 'company_id', None), db)
+        # A private user may always read the salary on their OWN job, even when the
+        # job has no company. Independent/self-employed users have company_id=None,
+        # which the company-scoped guard rejects outright — that's what stranded them
+        # on "Configure Salary" despite a saved salary. Only fall back to company-
+        # scoped access control when the caller is NOT the job's owner.
+        pu = getattr(current_user, 'private_user', None)
+        is_owner = bool(_job and pu and _job.private_user_id == pu.private_user_id)
+        if not is_owner:
+            assert_company_access(current_user, getattr(_job, 'company_id', None), db)
+    except HTTPException:
+        # Preserve intended 4xx (403/404). The broad `except Exception` below would
+        # otherwise relabel them as 500 and hide the real reason from the client —
+        # which is why an authz denial surfaced as an opaque server error.
+        raise
     except SQLAlchemyError as e:
         logger.error(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

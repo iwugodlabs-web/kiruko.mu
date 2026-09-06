@@ -1746,6 +1746,13 @@ async def onboard_job(job_info: OnboardJob, db: Session = Depends(config.get_db)
             job_pydantic = CreateJob(**job_data_dict)
             job_obj = await create_job(job_pydantic, db)
 
+        # Finishing onboarding promotes a self-signup placeholder to a real job:
+        # clear the draft flag so it now counts toward the employee's completed
+        # setup (onboarding.py `_evaluate_private`). No-op for jobs that were
+        # never drafts (employer-created employees).
+        if job_obj is not None and getattr(job_obj, 'is_onboarding_draft', False):
+            job_obj.is_onboarding_draft = False
+
         db.flush()  # Ensure job_obj has an ID for new jobs
 
         # Upsert Salary — skipped for a company-locked self-edit (salary is a
