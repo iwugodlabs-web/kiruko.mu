@@ -3884,7 +3884,7 @@ async def upload_vault_document(
     db: Session = Depends(config.get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if visibility not in ("private", "employee_only", "employer_only", "company_admin"):
+    if visibility not in ("private", "employee_only", "employer_only", "shared", "company_admin"):
         raise HTTPException(status_code=400, detail=f"Invalid visibility {visibility!r}")
     # Authorize the target vault (was an IDOR — any authenticated user could
     # upload to any private_user_id). Permission-controlled: the employee
@@ -3953,8 +3953,8 @@ async def get_company_vault_documents(
         has_doc_perm = "view_documents" in _perms
     if not (is_admin or has_doc_perm):
         raise HTTPException(status_code=403, detail="Not permitted to view this company's documents")
-    # Admins also see admin-only docs; plain doc-viewers see employer docs only.
-    visibilities = ["employer_only", "company_admin"] if is_admin else ["employer_only"]
+    # Admins also see admin-only docs; plain doc-viewers see shared docs only.
+    visibilities = ["shared", "employer_only", "company_admin"] if is_admin else ["shared", "employer_only"]
     try:
         from core.model import DocumentVault as VaultORM
         docs = (
@@ -4001,11 +4001,11 @@ def _vault_allowed_visibilities(current_user: User, emp: PrivateUser, db: Sessio
     so all three enforce identical rules. Returns an empty set when the
     caller may not read the vault at all (→ 403).
 
-    Semantics (kept stable — the mobile/web "shared with employee" option
-    maps to `employer_only`, which the owner CAN see):
-      owner (the employee)       → private, employee_only, employer_only
-      company admin              → employer_only, company_admin
-      `view_documents` role      → employer_only
+    Semantics (`shared` is the explicit shared value the web uploads;
+    legacy `employer_only` rows and mobile uploads carry identical access):
+      owner (the employee)       → private, employee_only, shared, employer_only
+      company admin              → shared, employer_only, company_admin
+      `view_documents` role      → shared, employer_only
     """
     from core.roles import is_company_admin_for
     from core.permission_guards import _company_permissions_for_user
@@ -4022,12 +4022,12 @@ def _vault_allowed_visibilities(current_user: User, emp: PrivateUser, db: Sessio
         return set()
     allowed: set = set()
     if is_owner:
-        allowed |= {"private", "employee_only", "employer_only"}
+        allowed |= {"private", "employee_only", "shared", "employer_only"}
     if is_admin:
-        allowed |= {"employer_only", "company_admin"}
+        allowed |= {"shared", "employer_only", "company_admin"}
     if has_doc_perm:
         # Doc-viewers see employer-visible docs, but not admin-only ones.
-        allowed |= {"employer_only"}
+        allowed |= {"shared", "employer_only"}
     return allowed
 
 

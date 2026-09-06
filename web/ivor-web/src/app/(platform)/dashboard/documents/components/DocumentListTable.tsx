@@ -26,6 +26,7 @@ function SkeletonRow() {
 }
 
 const VISIBILITY_LABEL: Record<string, string> = {
+  shared: "Shared",
   employer_only: "Shared",
   company_admin: "Admins only",
   employee_only: "Employee only",
@@ -33,6 +34,7 @@ const VISIBILITY_LABEL: Record<string, string> = {
 };
 
 const VISIBILITY_CHIP: Record<string, string> = {
+  shared: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
   employer_only: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
   company_admin: "bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400",
   employee_only: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",

@@ -25,7 +25,7 @@ export default function UploadDocumentModal({ employees, onUpload, onClose }: Pr
   const [employeeId, setEmployeeId] = useState<number | "">(employees[0]?.private_user_id ?? "");
   const [expiryDate, setExpiryDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [visibility, setVisibility] = useState("employer_only");
+  const [visibility, setVisibility] = useState("shared");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -162,7 +162,7 @@ export default function UploadDocumentModal({ employees, onUpload, onClose }: Pr
             <div>
               <label className={labelCls}>Visibility</label>
               <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className={inputCls}>
-                <option value="employer_only">Shared with employee (employee + admins)</option>
+                <option value="shared">Shared with employee (employee + admins)</option>
                 <option value="company_admin">Admins only (HR)</option>
                 <option value="private">Employee only (hidden from you)</option>
               </select>
