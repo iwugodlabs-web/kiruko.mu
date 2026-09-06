@@ -28,6 +28,17 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _req():
+    # Minimal starlette Request so list endpoints can mint same-origin proxy
+    # URLs (PUBLIC_API_ORIGIN unset in tests → falls back to base_url).
+    from starlette.requests import Request
+    return Request({
+        "type": "http", "http_version": "1.1", "method": "GET",
+        "scheme": "https", "server": ("api.kiruko.mu", 443),
+        "path": "/", "headers": [(b"host", b"api.kiruko.mu")],
+    })
+
+
 def _setup(db: Session):
     db.execute(sql_text("SELECT set_config('app.company_id', '*', false)"))
     db.commit()
@@ -59,31 +70,31 @@ def _names(resp):
 
 def test_owner_sees_own_private_and_employer_docs(db: Session):
     owner, co, a_user, a, b_user, b = _setup(db)
-    resp = _run(get_vault_documents(a.private_user_id, request=None, db=db, current_user=a_user))
+    resp = _run(get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=a_user))
     assert _names(resp) == {"Private Note", "Contract"}
 
 
 def test_other_employee_blocked_idor(db: Session):
     owner, co, a_user, a, b_user, b = _setup(db)
     with pytest.raises(HTTPException) as ei:
-        _run(get_vault_documents(a.private_user_id, request=None, db=db, current_user=b_user))
+        _run(get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=b_user))
     assert ei.value.status_code == 403
 
 
 def test_admin_sees_employer_not_private(db: Session):
     owner, co, a_user, a, b_user, b = _setup(db)
-    resp = _run(get_vault_documents(a.private_user_id, request=None, db=db, current_user=owner))
+    resp = _run(get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=owner))
     assert _names(resp) == {"Contract"}  # NOT "Private Note"
 
 
 def test_company_endpoint_excludes_private_and_gates_non_admin(db: Session):
     owner, co, a_user, a, b_user, b = _setup(db)
     # admin (owner) sees only employer-visible docs
-    resp = _run(get_company_vault_documents(co.company_id, doc_type=None, db=db, current_user=owner))
+    resp = _run(get_company_vault_documents(co.company_id, request=_req(), doc_type=None, db=db, current_user=owner))
     assert _names(resp) == {"Contract"}
     # a regular employee is blocked
     with pytest.raises(HTTPException) as ei:
-        _run(get_company_vault_documents(co.company_id, doc_type=None, db=db, current_user=a_user))
+        _run(get_company_vault_documents(co.company_id, request=_req(), doc_type=None, db=db, current_user=a_user))
     assert ei.value.status_code == 403
 
 
@@ -103,7 +114,7 @@ def test_view_documents_role_can_read_employer_docs(db: Session):
     # employer-visible docs — but NOT A's private ones.
     owner, co, a_user, a, b_user, b = _setup(db)
     _grant(db, co.company_id, b.private_user_id, ["view_documents"])
-    resp = _run(get_vault_documents(a.private_user_id, request=None, db=db, current_user=b_user))
+    resp = _run(get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=b_user))
     assert _names(resp) == {"Contract"}  # employer_only, NOT "Private Note"
 
 
@@ -112,7 +123,7 @@ def test_no_doc_permission_still_blocked(db: Session):
     owner, co, a_user, a, b_user, b = _setup(db)
     _grant(db, co.company_id, b.private_user_id, ["view_leave"])  # unrelated perm
     with pytest.raises(HTTPException) as ei:
-        _run(get_vault_documents(a.private_user_id, request=None, db=db, current_user=b_user))
+        _run(get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=b_user))
     assert ei.value.status_code == 403
 
 
@@ -128,5 +139,5 @@ def test_company_endpoint_view_documents_role_allowed(db: Session):
     # The company-wide vault (web) honors view_documents too — employer docs only.
     owner, co, a_user, a, b_user, b = _setup(db)
     _grant(db, co.company_id, b.private_user_id, ["view_documents"])
-    resp = _run(get_company_vault_documents(co.company_id, doc_type=None, db=db, current_user=b_user))
+    resp = _run(get_company_vault_documents(co.company_id, request=_req(), doc_type=None, db=db, current_user=b_user))
     assert _names(resp) == {"Contract"}
