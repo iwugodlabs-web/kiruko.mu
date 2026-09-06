@@ -28,32 +28,6 @@ logger = logging.getLogger(__name__)
 
 REFRESH_TOKEN_EXPIRY = 7
 
-
-def resolve_token_identity(user) -> dict:
-    """Tenant/person claims baked into every access token at login.
-
-    The global `bind_tenant_context` dependency reads ONLY these claims
-    (no DB lookup) to set Postgres RLS (`app.company_id` /
-    `app.private_user_id`). Every login path (password AND phone-OTP) must
-    use this so mobile OTP sessions bind the same tenant as password
-    sessions — without them the request binds NO_TENANT and the RLS bridge
-    goes fail-open permissive. Resolution mirrors the dashboard logic:
-    the employee/role-holder's private_user.company_id first, then the
-    owner's own Company.
-    """
-    company_id = None
-    private_user = getattr(user, "private_user", None)
-    if private_user is not None and getattr(private_user, "company_id", None):
-        company_id = private_user.company_id
-    elif getattr(user, "company", None) is not None:
-        company_id = user.company.company_id
-    return {
-        "company_id": company_id,
-        "private_user_id": (
-            private_user.private_user_id if private_user is not None else None
-        ),
-    }
-
 class UserService:
     @staticmethod
     async def signup_user(request: CreateUser, db: Session):
@@ -190,9 +164,12 @@ class UserService:
         # M5b RLS: resolve the user's company FIRST — employee/role-holder's
         # private_user.company_id, then the owner's own Company. This is the tenant
         # the token binds RLS to, and everything below (admin check, dashboard) must
-        # agree with it. Shared helper so the OTP login path binds identically.
-        _identity = resolve_token_identity(user)
-        _company_id = _identity["company_id"]
+        # agree with it.
+        _company_id = None
+        if user.private_user and getattr(user.private_user, "company_id", None):
+            _company_id = user.private_user.company_id
+        elif getattr(user, "company", None):
+            _company_id = user.company.company_id
 
         # Admin status is scoped to the RESOLVED company (not global ownership).
         # is_company_admin_for(user, cid, db) returns True for the OWNER of that
@@ -221,7 +198,7 @@ class UserService:
 
         # private_user_id drives person-scoped RLS (the worker's own personal-
         # finance rows: loans/budget/etc.).
-        _private_user_id = _identity["private_user_id"]
+        _private_user_id = user.private_user.private_user_id if user.private_user else None
 
         # Session binding claims (device + IP) so a leaked token can't be
         # replayed silently from another device. Only minted when the feature

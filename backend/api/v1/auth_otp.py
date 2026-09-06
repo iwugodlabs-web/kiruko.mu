@@ -55,17 +55,6 @@ _OTP_TTL_MINUTES = 10
 _otp_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
 
 
-def _otp_token_identity(user) -> dict:
-    """Tenant/person claims for OTP-minted access tokens.
-
-    Thin wrapper over the shared login helper so both login paths bind
-    identical RLS claims. Local import: services.user_service loads
-    api.v1.verification at module import (cycle risk at this module's load).
-    """
-    from services.user_service import resolve_token_identity
-    return resolve_token_identity(user)
-
-
 class RequestOtpBody(BaseModel):
     phone: str = Field(min_length=4, max_length=40)
 
@@ -278,14 +267,6 @@ async def verify_otp_login(
             "user_type": user.user_type.value if hasattr(user.user_type, "value") else user.user_type,
             "roles": roles,
             "company_web_access": company_web_access,
-            # M5b RLS: bind the same tenant/person claims as the password
-            # login path (services/user_service.resolve_token_identity).
-            # Without them the global bind_tenant_context dependency binds
-            # NO_TENANT for OTP sessions — which mobile employees use — and
-            # the RLS bridge goes fail-open permissive instead of scoping
-            # to the employee's company. Deferred import: services.user_service
-            # pulls in api.v1.verification at module load (cycle risk).
-            **_otp_token_identity(user),
         },
         audience=client_platform,
     )

@@ -508,9 +508,7 @@ async def health_check():
 # is fully static — the `?file=` URL is read CLIENT-SIDE and fetched by pdf.js,
 # so there's no server-side reflection (no XSS) and no SSRF (the server never
 # fetches the file). For local storage the file is same-origin (no CORS); for
-# S3/Spaces prefer the authenticated vault file proxy
-# (GET /user/vault/doc/{id}/file?token=…) as the `?file=` value — it is
-# same-origin (no bucket CORS needed) and enforces doc visibility per view.
+# S3/Spaces the bucket needs CORS allowing the app to GET the object.
 _PDF_VIEWER_HTML = """<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8"/>

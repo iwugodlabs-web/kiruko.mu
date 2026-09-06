@@ -3935,7 +3935,6 @@ async def upload_vault_document(
 @router.get('/vault/company/{company_id}', status_code=200)
 async def get_company_vault_documents(
     company_id: int,
-    request: Request,
     doc_type: Optional[str] = Query(None, description="Filter by doc_type"),
     db: Session = Depends(config.get_db),
     current_user: User = Depends(get_current_user),
@@ -3982,53 +3981,13 @@ async def get_company_vault_documents(
                 "file_url": doc.file_url,
                 "file_name": doc.file_name,
                 "file_mime": doc.file_mime,
-                "visibility": doc.visibility,
                 "created_at": doc.created_at.isoformat() if doc.created_at else None,
                 "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
             })
-        # Same-origin proxy URLs so mobile previews work with no app update.
-        _rewrite_vault_file_urls(request, result, docs, current_user.user_id)
         return JSONResponse(status_code=200, content={"status": "success", "data": result})
     except Exception as e:
         logger.error(f"Error fetching company vault: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch documents")
-
-
-def _vault_allowed_visibilities(current_user: User, emp: PrivateUser, db: Session) -> set:
-    """Visibility values `current_user` may read from `emp`'s vault.
-
-    Shared by the list endpoint, the view-token minter, and the file proxy
-    so all three enforce identical rules. Returns an empty set when the
-    caller may not read the vault at all (→ 403).
-
-    Semantics (kept stable — the mobile/web "shared with employee" option
-    maps to `employer_only`, which the owner CAN see):
-      owner (the employee)       → private, employee_only, employer_only
-      company admin              → employer_only, company_admin
-      `view_documents` role      → employer_only
-    """
-    from core.roles import is_company_admin_for
-    from core.permission_guards import _company_permissions_for_user
-    is_owner = current_user.user_id == emp.user_id
-    is_admin = emp.company_id is not None and is_company_admin_for(current_user, emp.company_id, db)
-    # Permission-controlled: a delegated role granted `view_documents` may read
-    # employer-visible docs (admin already covered above). Owner-of-the-vault
-    # (the employee) always sees their own.
-    has_doc_perm = False
-    if not is_owner and not is_admin and emp.company_id is not None:
-        _perms, _roles = _company_permissions_for_user(current_user, emp.company_id, db)
-        has_doc_perm = "view_documents" in _perms
-    if not (is_owner or is_admin or has_doc_perm):
-        return set()
-    allowed: set = set()
-    if is_owner:
-        allowed |= {"private", "employee_only", "employer_only"}
-    if is_admin:
-        allowed |= {"employer_only", "company_admin"}
-    if has_doc_perm:
-        # Doc-viewers see employer-visible docs, but not admin-only ones.
-        allowed |= {"employer_only"}
-    return allowed
 
 
 @router.get('/vault/{private_user_id}', status_code=200)
@@ -4041,12 +4000,30 @@ async def get_vault_documents(
     # Owner-scope: only the employee themselves, or an admin of their company,
     # may read this vault (was an IDOR — any authenticated user could pass any
     # private_user_id). Visibility then decides WHICH docs each role sees.
+    from core.roles import is_company_admin_for
+    from core.permission_guards import _company_permissions_for_user
     emp = db.query(PrivateUser).filter(PrivateUser.private_user_id == private_user_id).one_or_none()
     if emp is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    allowed = _vault_allowed_visibilities(current_user, emp, db)
-    if not allowed:
+    is_owner = current_user.user_id == emp.user_id
+    is_admin = emp.company_id is not None and is_company_admin_for(current_user, emp.company_id, db)
+    # Permission-controlled: a delegated role granted `view_documents` may read
+    # employer-visible docs (admin already covered above). Owner-of-the-vault
+    # (the employee) always sees their own.
+    has_doc_perm = False
+    if not is_owner and not is_admin and emp.company_id is not None:
+        _perms, _roles = _company_permissions_for_user(current_user, emp.company_id, db)
+        has_doc_perm = "view_documents" in _perms
+    if not (is_owner or is_admin or has_doc_perm):
         raise HTTPException(status_code=403, detail="Not permitted to view this vault")
+    allowed: set = set()
+    if is_owner:
+        allowed |= {"private", "employee_only", "employer_only"}
+    if is_admin:
+        allowed |= {"employer_only", "company_admin"}
+    if has_doc_perm:
+        # Doc-viewers see employer-visible docs, but not admin-only ones.
+        allowed |= {"employer_only"}
 
     docs = db.query(DocumentVault).filter(
         DocumentVault.private_user_id == private_user_id,
@@ -4057,9 +4034,6 @@ async def get_vault_documents(
     # empty __dict__ and returns [{}, …] with no doc_id — which silently breaks
     # the client list (no doc_type/name) and delete (DELETE /vault/doc/undefined).
     serialized = jsonable_encoder(docs)
-    # Hand out same-origin proxy URLs (see _rewrite_vault_file_urls) so the
-    # shipped mobile app previews S3/Spaces files without a new build.
-    _rewrite_vault_file_urls(request, serialized, docs, current_user.user_id)
     # M22 — record one access log per doc surfaced. Bulk insert kept simple
     # (one row per doc); avoids per-doc round-trips later when an auditor
     # asks "who saw this doc on date X".
@@ -4104,154 +4078,3 @@ async def delete_vault_document(
     db.delete(doc)
     db.commit()
     return JSONResponse(status_code=200, content={"status": "success"})
-
-
-# Lifetime for vault view tokens: long enough to browse the list and open a
-# preview minutes later, short enough that a leaked URL dies quickly. These
-# tokens are single-document scoped (not session tokens).
-VAULT_VIEW_TOKEN_TTL = timedelta(minutes=30)
-
-
-def _mint_vault_view_token(user_id: int, doc_id: int) -> str:
-    """Mint a short-lived token scoped to (user, doc) for the file proxy."""
-    return create_access_token(
-        user_data={
-            "purpose": "vault_view",
-            "doc_id": doc_id,
-            "user_id": user_id,
-        },
-        expiry=VAULT_VIEW_TOKEN_TTL,
-    )
-
-
-def _vault_proxy_origin(request: Request) -> str:
-    """Public API origin for absolute proxy URLs.
-
-    PUBLIC_API_ORIGIN override (e.g. https://api.kiruko.mu) wins — required
-    behind proxies that don't forward the external host. Falls back to the
-    request's own base URL.
-    """
-    env_origin = (os.getenv("PUBLIC_API_ORIGIN") or "").strip().rstrip("/")
-    if env_origin:
-        return env_origin
-    return str(request.base_url).rstrip("/")
-
-
-def _vault_proxy_url(request: Request, doc_id: int, view_token: str) -> str:
-    from urllib.parse import quote
-    return (
-        f"{_vault_proxy_origin(request)}"
-        f"/api/v1/user/vault/doc/{doc_id}/file"
-        f"?token={quote(view_token, safe='')}"
-    )
-
-
-def _rewrite_vault_file_urls(request: Request, items: list, docs: list, actor_user_id: int) -> list:
-    """Swap stored object-store URLs for same-origin proxy URLs (in place).
-
-    Backend-only fix for mobile previews: the shipped app loads `file_url`
-    in a WebView (images) / wraps it in /pdf-view (pdf.js fetch). Raw
-    S3/Spaces URLs fail there on CORS while loading fine in a browser tab,
-    so the API hands out proxy URLs that stream bytes same-origin with
-    visibility enforced per view. No mobile build required.
-    """
-    if request is None:  # internal/test callers without an HTTP request
-        return items
-    for item, doc in zip(items, docs):
-        if not isinstance(item, dict) or not doc.file_url:
-            continue
-        item["file_url"] = _vault_proxy_url(
-            request, doc.doc_id, _mint_vault_view_token(actor_user_id, doc.doc_id)
-        )
-    return items
-
-
-@router.post('/vault/doc/{doc_id}/view-token', status_code=200)
-async def mint_vault_view_token(
-    doc_id: int,
-    db: Session = Depends(config.get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Mint a short-lived, single-document view token for the file proxy below.
-
-    Mobile WebViews (and the pdf.js fetch inside /pdf-view) cannot attach the
-    caller's Authorization header, so previews carry auth as `?token=`. The
-    full session JWT must NOT go in the URL (WebView history, logs) — this
-    mints a short-lived token scoped to (user, doc) instead. Visibility is
-    enforced here AND re-checked at serve time.
-    """
-    doc = db.query(DocumentVault).filter(DocumentVault.doc_id == doc_id).one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    emp = db.query(PrivateUser).filter(PrivateUser.private_user_id == doc.private_user_id).one_or_none()
-    if emp is None:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    allowed = _vault_allowed_visibilities(current_user, emp, db)
-    if not allowed or (doc.visibility or "employer_only") not in allowed:
-        raise HTTPException(status_code=403, detail="Not permitted to view this document")
-    view_token = _mint_vault_view_token(current_user.user_id, doc.doc_id)
-    return JSONResponse(status_code=200, content={"status": "success", "data": {"view_token": view_token}})
-
-
-@router.get('/vault/doc/{doc_id}/file', status_code=200)
-async def serve_vault_file(
-    doc_id: int,
-    request: Request,
-    token: str = Query(..., description="View token from POST /user/vault/doc/{id}/view-token"),
-    db: Session = Depends(config.get_db),
-):
-    """Stream a vault file's bytes same-origin (authenticated via view token).
-
-    Why this exists: vault files live on S3-compatible object storage. The
-    web app links them directly (top-level navigation — no CORS), but the
-    mobile in-app viewer fetches them with XHR from the /pdf-view page
-    (pdf.js) / WebView, which the bucket's CORS policy blocks — so S3
-    previews load on web and fail on mobile. Serving bytes from the API
-    origin removes the CORS dependency entirely, and (unlike the public
-    object URL) enforces the doc's visibility on every view.
-    """
-    payload = decode_token(token) if token else None
-    claims = (payload or {}).get("user") or {}
-    if (
-        not payload
-        or payload.get("refresh", False)
-        or claims.get("purpose") != "vault_view"
-        or claims.get("doc_id") != doc_id
-    ):
-        raise HTTPException(status_code=401, detail="Invalid or expired view token")
-    doc = db.query(DocumentVault).filter(DocumentVault.doc_id == doc_id).one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    if not doc.file_url:
-        raise HTTPException(status_code=404, detail="No file attached to this document")
-    # Re-check visibility at serve time against the CURRENT doc row, so a doc
-    # narrowed to admin-only after the token was minted stops serving.
-    actor = db.query(User).filter(User.user_id == claims.get("user_id")).one_or_none()
-    if actor is None:
-        raise HTTPException(status_code=401, detail="Invalid view token")
-    emp = db.query(PrivateUser).filter(PrivateUser.private_user_id == doc.private_user_id).one_or_none()
-    if emp is None:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    allowed = _vault_allowed_visibilities(actor, emp, db)
-    if not allowed or (doc.visibility or "employer_only") not in allowed:
-        raise HTTPException(status_code=403, detail="Not permitted to view this document")
-    data = get_storage_service().download_bytes(doc.file_url)
-    if data is None:
-        raise HTTPException(status_code=502, detail="Could not retrieve the stored file")
-    media_type = doc.file_mime or None
-    if not media_type and doc.file_name:
-        import mimetypes
-        media_type = mimetypes.guess_type(doc.file_name)[0] or "application/octet-stream"
-    _audit_doc_access(
-        db, doc_id=doc.doc_id, actor_user_id=actor.user_id,
-        action="view", request=request,
-    )
-    db.commit()
-    from fastapi.responses import StreamingResponse
-    import io
-    filename = (doc.file_name or f"document-{doc.doc_id}").replace('"', "")
-    return StreamingResponse(
-        io.BytesIO(data),
-        media_type=media_type or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
-    )
