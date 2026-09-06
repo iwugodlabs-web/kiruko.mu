@@ -210,6 +210,31 @@ def test_file_proxy_rechecks_visibility_at_serve_time(db: Session, tmp_path, mon
     assert ei.value.status_code == 403
 
 
+# ── explicit `shared` visibility ──────────────────────────────────────────────
+
+def test_shared_visibility_seen_by_owner_and_admin_not_stranger(db: Session):
+    """Web uploads save `shared`; owner + admin see it, strangers 403."""
+    owner, co, a_user, a, b_user, b, shared, admin_only, meta_only = _setup(db)
+    doc = DocumentVault(
+        private_user_id=a.private_user_id, doc_type="contract", name="Shared Doc",
+        visibility="shared", file_url="https://files.example.test/vault/s.pdf",
+        file_name="s.pdf", file_mime="application/pdf",
+    )
+    db.add(doc)
+    db.commit()
+    owner_names = {d["name"] for d in _data(_run(
+        get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=a_user)))}
+    assert "Shared Doc" in owner_names
+    admin_names = {d["name"] for d in _data(_run(
+        get_vault_documents(a.private_user_id, request=_req(), db=db, current_user=owner)))}
+    assert "Shared Doc" in admin_names
+    with pytest.raises(HTTPException) as ei:
+        _run(mint_vault_view_token(doc.doc_id, db=db, current_user=b_user))
+    assert ei.value.status_code == 403
+    # Legacy employer_only rows keep identical access.
+    assert "Contract" in owner_names and "Contract" in admin_names
+
+
 # ── OTP sessions bind the same tenant claims as password logins ───────────────
 
 def test_resolve_token_identity_mirrors_login_paths():
