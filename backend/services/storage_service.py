@@ -35,6 +35,18 @@ class BaseStorage(ABC):
             f"{type(self).__name__} does not implement upload_bytes"
         )
 
+    def download_bytes(self, file_url: Optional[str]) -> Optional[bytes]:
+        """Fetch the raw bytes behind a previously-stored file_url.
+
+        Used by the authenticated vault file proxy
+        (GET /user/vault/doc/{id}/file) so mobile clients read S3/Spaces
+        objects same-origin instead of cross-origin — the object store
+        would otherwise need CORS for the API origin (pdf.js fetches the
+        file with XHR from the /pdf-view page). Default returns None
+        (no content); subclasses override.
+        """
+        return None
+
     def delete_file(self, file_url: Optional[str]) -> bool:
         """Best-effort deletion of a previously-stored file (used by account
         deletion to scrub uploaded documents/receipts). Returns True on success.
@@ -79,6 +91,38 @@ class LocalStorage(BaseStorage):
 
     def get_file_url(self, file_path: str) -> str:
         return file_path
+
+    def download_bytes(self, file_url: Optional[str]) -> Optional[bytes]:
+        if not file_url:
+            return None
+        try:
+            rel = file_url
+            for prefix in ("/uploads/", "uploads/"):
+                if rel.startswith(prefix):
+                    rel = rel[len(prefix):]
+                    break
+            # Absolute same-origin URLs (http://host/uploads/...) may also
+            # reach us; strip down to the path under /uploads/.
+            if "://" in rel:
+                _, _, path = rel.partition("://")
+                _, _, path = path.partition("/")
+                if path.startswith("uploads/"):
+                    rel = path[len("uploads/"):]
+                else:
+                    return None
+            # Guard against path traversal — the URL must resolve inside base.
+            base = os.path.abspath(self.base_path)
+            path = os.path.abspath(os.path.join(base, rel))
+            if not path.startswith(base + os.sep):
+                logger.warning(f"LocalStorage download_bytes refused path escape: {file_url}")
+                return None
+            if not os.path.isfile(path):
+                return None
+            with open(path, "rb") as buf:
+                return buf.read()
+        except Exception as e:
+            logger.error(f"LocalStorage download error for {file_url}: {e}")
+            return None
 
     def delete_file(self, file_url: Optional[str]) -> bool:
         if not file_url:
@@ -175,13 +219,40 @@ class S3Storage(BaseStorage):
     def get_file_url(self, file_path: str) -> str:
         return file_path
 
+    def _key_from_url(self, file_url: str) -> Optional[str]:
+        """Object key behind a public URL previously returned by this class
+        (virtual-hosted style https://{bucket}.{host}/{key})."""
+        if not file_url:
+            return None
+        key = file_url
+        if file_url.startswith("http"):
+            if file_url.count("/") < 3:
+                return None
+            # Strip scheme + authority: https://bucket.host/key → key
+            key = file_url.split("/", 3)[3]
+        return key or None
+
+    def download_bytes(self, file_url: Optional[str]) -> Optional[bytes]:
+        if not self.s3_client:
+            logger.error("S3 client not initialized")
+            return None
+        key = self._key_from_url(file_url or "")
+        if not key:
+            return None
+        try:
+            resp = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+            return resp["Body"].read()
+        except Exception as e:
+            logger.error(f"S3Storage download error for {file_url}: {e}")
+            return None
+
     def delete_file(self, file_url: Optional[str]) -> bool:
         if not file_url or not self.s3_client:
             return False
         try:
-            key = file_url
-            if file_url.startswith("http") and file_url.count("/") >= 3:
-                key = file_url.split("/", 3)[3]
+            key = self._key_from_url(file_url)
+            if not key:
+                return False
             self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
             return True
         except Exception as e:
@@ -222,6 +293,19 @@ class GCSStorage(BaseStorage):
 
     def get_file_url(self, file_path: str) -> str:
         return file_path
+
+    def download_bytes(self, file_url: Optional[str]) -> Optional[bytes]:
+        if not file_url or not self.client:
+            return None
+        try:
+            blob_name = file_url
+            marker = f"{self.bucket_name}/"
+            if marker in file_url:
+                blob_name = file_url.split(marker, 1)[-1]
+            return self.client.bucket(self.bucket_name).blob(blob_name).download_as_bytes()
+        except Exception as e:
+            logger.error(f"GCSStorage download error for {file_url}: {e}")
+            return None
 
     def delete_file(self, file_url: Optional[str]) -> bool:
         if not file_url or not self.client:
