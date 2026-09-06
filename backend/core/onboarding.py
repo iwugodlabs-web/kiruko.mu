@@ -63,7 +63,13 @@ def _evaluate_private(user: User, db: Session) -> List[str]:
     # Employer link: either a job exists, or the user explicitly told us
     # they have no current employer. Either is acceptable — onboarding
     # cannot block users between jobs from using the calculator.
-    has_job = db.query(Job).filter(Job.private_user_id == pu.private_user_id).count() > 0
+    # A placeholder job (created at self-signup to carry the typed employer /
+    # pre-fill) is NOT the employee's completed setup — exclude drafts so it
+    # doesn't skip the user past their own profile/salary step.
+    has_job = db.query(Job).filter(
+        Job.private_user_id == pu.private_user_id,
+        Job.is_onboarding_draft.is_(False),
+    ).count() > 0
     acked_no_employer = bool(getattr(pu, "onboarding_acknowledged_no_employer", False))
     if not (has_job or acked_no_employer):
         missing.append(MISSING_EMPLOYER_LINK)
@@ -96,11 +102,19 @@ def evaluate_missing(user: User, db: Session) -> List[str]:
     the user meets the onboarding threshold."""
     if not user:
         return []
-    if user.user_type == UserType.company:
+    # Compare by VALUE, not enum identity. At signup the User carries the
+    # Pydantic `schema.UserType` (a different class than `core.model.UserType`),
+    # so `user.user_type == UserType.private` was False → both branches were
+    # skipped → fell through to "nothing missing = complete", persisting a wrong
+    # onboard_complete=True. Normalizing to the string value handles the ORM
+    # enum, the Pydantic enum, and a raw string uniformly.
+    ut = getattr(user.user_type, 'value', user.user_type)
+    if ut == UserType.company.value:
         return _evaluate_company(user, db)
-    if user.user_type == UserType.private:
+    if ut == UserType.private.value:
         return _evaluate_private(user, db)
-    # Other user_types (e.g. platform-admin support accounts) skip onboarding.
+    # Genuinely other user_types (e.g. platform-admin support accounts) skip
+    # onboarding — they have no private/company profile to complete.
     return []
 
 
