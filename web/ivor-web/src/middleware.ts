@@ -73,8 +73,12 @@ export async function middleware(request: NextRequest) {
 
     try {
         const secret = new TextEncoder().encode(jwtSecret);
+        // Algorithm must match what the backend uses to sign. The backend reads
+        // JWT_ALGORITHM (default HS256) from its env; read the same key here so
+        // a rotated algorithm doesn't silently break every login redirect.
+        const algorithm = process.env.JWT_ALGORITHM || 'HS256';
         const { payload } = await jwtVerify(token, secret, {
-            algorithms: ['HS256'],
+            algorithms: [algorithm],
             audience: 'web',
         });
 
@@ -124,7 +128,10 @@ export async function middleware(request: NextRequest) {
         }
 
     } catch (e) {
-        console.error("Middleware JWT verification failed:", e);
+        console.error(
+            "Middleware JWT verification failed (check JWT_SECRET and JWT_ALGORITHM match the backend):",
+            (e as Error)?.message ?? e,
+        );
         // Invalid token (bad signature, wrong audience, expired, etc.) -> login
         return NextResponse.redirect(new URL('/', request.url));
     }

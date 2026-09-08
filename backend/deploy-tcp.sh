@@ -35,7 +35,7 @@ docker run --rm \
     -e 'POSTGRES_PORT=5432' \
     -e 'POSTGRES_DB=ivorapp' \
     -e 'POSTGRES_SSLMODE=require' \
-    -e 'JWT_SECRET=951655c17ffe25fb545344a9442a6fd1' \
+    -e 'JWT_SECRET='"$JWT_SECRET"'' \
     -e 'JWT_ALGORITHM=HS256' \
     -e 'TIME_ZONE_LOCAL=Indian/Mauritius' \
     $IMAGE_NAME \
@@ -60,7 +60,7 @@ gcloud run deploy $SERVICE_NAME \
   --timeout 300 \
   --max-instances 10 \
   --set-env-vars \
-    "ENVIRONMENT=development,POSTGRES_USER=postgres,POSTGRES_PASSWORD=IvorApp2024!,POSTGRES_SERVER=136.114.194.181,POSTGRES_PORT=5432,POSTGRES_DB=ivorapp,POSTGRES_SSLMODE=require,JWT_SECRET=951655c17ffe25fb545344a9442a6fd1,JWT_ALGORITHM=HS256,TIME_ZONE_LOCAL=Indian/Mauritius"
+    "ENVIRONMENT=development,POSTGRES_USER=postgres,POSTGRES_PASSWORD=IvorApp2024!,POSTGRES_SERVER=136.114.194.181,POSTGRES_PORT=5432,POSTGRES_DB=ivorapp,POSTGRES_SSLMODE=require,JWT_SECRET=$JWT_SECRET,JWT_ALGORITHM=HS256,TIME_ZONE_LOCAL=Indian/Mauritius"
 
 # Get service URL
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --platform managed --region $REGION --format 'value(status.url)')

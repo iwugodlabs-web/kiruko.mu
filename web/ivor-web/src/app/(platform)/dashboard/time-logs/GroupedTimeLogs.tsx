@@ -17,6 +17,8 @@ import {
   ACTIVITY_ORDER,
   type ActivityType,
   type EmployeeDayGroup,
+  clockOutLocation,
+  formatLocationValue,
   needsOvertimeConfirmation,
   sessionStatus,
   sumHours,
@@ -28,6 +30,8 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  LogOut,
+  MapPin,
   ShieldAlert,
   Timer,
   XCircle,
@@ -89,7 +93,9 @@ function GroupBlock({
   onConfirmOvertime,
   onResolveDispute,
   onEdited,
+  onClockOut,
   confirmingId,
+  clockingOutId,
 }: {
   group: EmployeeDayGroup;
   selected: Set<number>;
@@ -98,7 +104,9 @@ function GroupBlock({
   onConfirmOvertime: (id: number) => void;
   onResolveDispute: (l: TimeLogReviewItem) => void;
   onEdited: () => void;
+  onClockOut: (id: number) => void;
   confirmingId: number | null;
+  clockingOutId: number | null;
 }) {
   const [open, setOpen] = useState(true);
   const pendingIds = group.sessions.filter((s) => sessionStatus(s) === "pending").map((s) => s.timelog_id);
@@ -191,6 +199,9 @@ function GroupBlock({
                   {rows.map((l) => {
                     const pending = sessionStatus(l) === "pending";
                     const disputed = sessionStatus(l) === "disputed";
+                    const inLoc = formatLocationValue(l.location);
+                    const outLoc = clockOutLocation(l.location);
+                    const stillActive = !l.end_time;
                     return (
                       <div
                         key={l.timelog_id}
@@ -228,6 +239,18 @@ function GroupBlock({
                             )}
                             <StatusBadge l={l} />
                             <EditTimeLogButton log={l} onSaved={onEdited} />
+                            {stillActive && (
+                              <button
+                                type="button"
+                                onClick={() => onClockOut(l.timelog_id)}
+                                disabled={clockingOutId === l.timelog_id}
+                                title="Clock this employee out now. The session's end time is set to the current time."
+                                className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                              >
+                                <LogOut className="h-3 w-3" />
+                                {clockingOutId === l.timelog_id ? "Clocking out…" : "Clock out"}
+                              </button>
+                            )}
                             {needsOvertimeConfirmation(l) && (
                               <button
                                 type="button"
@@ -251,6 +274,31 @@ function GroupBlock({
                             )}
                           </div>
                         </div>
+                        {/* Clock-in / clock-out location — read from the TimeLog
+                            `location` JSONB. Clock-out fix is absent for
+                            admin-forced and auto-closed sessions. */}
+                        {(inLoc || outLoc) && (
+                          <div className="mt-1.5 ml-7 flex items-start gap-1.5 text-[11px] text-zinc-500 dark:text-gray-400">
+                            <MapPin className="h-3 w-3 shrink-0 mt-0.5" />
+                            <span className="min-w-0">
+                              {inLoc && (
+                                <span className="block">
+                                  <span className="font-semibold text-zinc-600 dark:text-gray-300">In:</span> {inLoc}
+                                </span>
+                              )}
+                              {outLoc && (
+                                <span className="block">
+                                  <span className="font-semibold text-zinc-600 dark:text-gray-300">Out:</span> {outLoc}
+                                </span>
+                              )}
+                              {inLoc && !outLoc && (
+                                <span className="block text-zinc-400 dark:text-gray-500">
+                                  No clock-out location recorded
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        )}
                         {/* Employee's own explanation, collected via the mobile
                             late-start prompt — shown directly, not buried in a
                             hover tooltip, so HR doesn't miss it during review. */}
@@ -281,7 +329,9 @@ export default function GroupedTimeLogs({
   onConfirmOvertime,
   onResolveDispute,
   onEdited,
+  onClockOut,
   confirmingId,
+  clockingOutId,
 }: {
   groups: EmployeeDayGroup[];
   selected: Set<number>;
@@ -290,7 +340,9 @@ export default function GroupedTimeLogs({
   onConfirmOvertime: (id: number) => void;
   onResolveDispute: (l: TimeLogReviewItem) => void;
   onEdited: () => void;
+  onClockOut: (id: number) => void;
   confirmingId: number | null;
+  clockingOutId: number | null;
 }) {
   if (groups.length === 0) {
     return (
@@ -311,7 +363,9 @@ export default function GroupedTimeLogs({
           onConfirmOvertime={onConfirmOvertime}
           onResolveDispute={onResolveDispute}
           onEdited={onEdited}
+          onClockOut={onClockOut}
           confirmingId={confirmingId}
+          clockingOutId={clockingOutId}
         />
       ))}
     </div>

@@ -28,7 +28,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import date, datetime, timezone, timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -110,6 +110,14 @@ class TimeLogReviewItem(BaseModel):
     # beyond it. Display-only context; payroll OT stays threshold-driven.
     scheduled_start: Optional[str] = None
     scheduled_end: Optional[str] = None
+    # Clock-in + clock-out location, stored on the TimeLog `location` JSONB
+    # column. Top level holds the clock-in fix (address / latitude / longitude);
+    # `clock_out` sub-key holds the clock-out fix when the employee clocked out
+    # from a location-capable device. Admin-forced and auto-closed sessions have
+    # no clock-out fix (absent device), so the UI must tolerate a missing
+    # `clock_out` key. `Any` (not `dict`) so a legacy string location can't fail
+    # response validation and 500 the whole list.
+    location: Optional[Any] = None
 
 
 class TimeLogPatch(BaseModel):
@@ -204,6 +212,7 @@ def _to_review_item(tl: TimeLog, employee_name: str, employee_code: Optional[str
         out_of_geofence=bool(getattr(tl, "out_of_geofence", False)),
         scheduled_start=sched_start,
         scheduled_end=sched_end,
+        location=tl.location,
     )
 
 
