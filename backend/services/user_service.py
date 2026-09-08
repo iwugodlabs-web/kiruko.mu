@@ -57,6 +57,18 @@ def resolve_token_identity(user) -> dict:
 class UserService:
     @staticmethod
     async def signup_user(request: CreateUser, db: Session):
+        # Block plus-addressed / sub-addressed emails (e.g. you+test@gmail.com).
+        # A single inbox can mint unlimited "+tag" variants to farm the free
+        # trial and create duplicate accounts, so reject them at this single
+        # signup choke point (covers both /sign-up and /company-sign-up). The
+        # HTTPException detail surfaces in the app's existing signup-error
+        # toast — no app rebuild needed.
+        local_part = str(request.email).split("@", 1)[0] if request.email else ""
+        if "+" in local_part:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please sign up with your primary email address — addresses containing a '+' aren't accepted.",
+            )
         try:
             user = await register_user(request, db)
 
