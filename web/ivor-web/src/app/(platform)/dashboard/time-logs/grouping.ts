@@ -176,3 +176,28 @@ export function groupByEmployeeDay(
 export function sumHours(sessions: TimeLogReviewItem[]): number {
   return sessions.reduce((acc, s) => acc + (s.hours_worked ?? 0), 0);
 }
+
+/** Human-readable label for a single location fix (address preferred, then
+ *  lat/lng). Returns null when there's nothing to show. */
+export function formatLocationValue(
+  location: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!location || typeof location !== "object") return null;
+  const address = (location as Record<string, unknown>).address;
+  if (typeof address === "string" && address.trim()) return address.trim();
+  const lat = (location as Record<string, unknown>).latitude;
+  const lng = (location as Record<string, unknown>).longitude;
+  if (lat != null && lng != null) return `${lat}, ${lng}`;
+  return null;
+}
+
+/** The clock-out fix, stored under `location.clock_out`. Absent when the
+ *  session was admin-forced closed or auto-closed (no device involved). */
+export function clockOutLocation(
+  location: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!location || typeof location !== "object") return null;
+  return formatLocationValue(
+    (location as Record<string, unknown>).clock_out as Record<string, unknown> | undefined,
+  );
+}

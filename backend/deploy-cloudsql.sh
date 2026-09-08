@@ -44,7 +44,7 @@ docker run --rm \
     -e 'DB_USER=postgres' \
     -e 'DB_PASSWORD=IvorApp2024!' \
     -e 'DB_NAME=ivorapp' \
-    -e 'JWT_SECRET=951655c17ffe25fb545344a9442a6fd1' \
+    -e 'JWT_SECRET='"$JWT_SECRET"'' \
     -e 'JWT_ALGORITHM=HS256' \
     -e 'TIME_ZONE_LOCAL=Indian/Mauritius' \
     $IMAGE_NAME \
@@ -69,7 +69,7 @@ gcloud run deploy $SERVICE_NAME \
   --max-instances 10 \
   --add-cloudsql-instances $CLOUD_SQL_CONNECTION \
   --set-env-vars \
-    "ENVIRONMENT=production,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION,DB_USER=postgres,DB_PASSWORD=IvorApp2024!,DB_NAME=ivorapp,JWT_SECRET=951655c17ffe25fb545344a9442a6fd1,JWT_ALGORITHM=HS256,TIME_ZONE_LOCAL=Indian/Mauritius"
+    "ENVIRONMENT=production,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION,DB_USER=postgres,DB_PASSWORD=IvorApp2024!,DB_NAME=ivorapp,JWT_SECRET=$JWT_SECRET,JWT_ALGORITHM=HS256,TIME_ZONE_LOCAL=Indian/Mauritius"
 
 # Get service URL
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --platform managed --region $REGION --format 'value(status.url)')

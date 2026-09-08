@@ -20,7 +20,10 @@ services:
       - POSTGRES_DB=ivor_db
       - POSTGRES_SSLMODE=disable
       - PORT=8080
-      - JWT_SECRET=951655c17ffe25fb545344a9442a6fd1
+      # No committed secret — read from the shell environment (was previously
+      # committed in plain text; the value is dead + revoked). Set it before `up`:
+      #   export JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - JWT_ALGORITHM=HS256
       - SUPER_ADMIN_EMAILS=admin@example.com
       # Read by migrate.sh (not by the app). Local dev seeds a super admin
@@ -70,7 +73,8 @@ services:
       - BACKEND_URL=http://backend:8080
       # Must match the backend's JWT_SECRET. Web middleware verifies signatures
       # and audience (aud='web') with this. Missing => middleware fails closed.
-      - JWT_SECRET=951655c17ffe25fb545344a9442a6fd1
+      # Same value as the backend env above — never commit a literal secret.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
       - backend
 

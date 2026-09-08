@@ -941,6 +941,10 @@ export interface TimeLogReviewItem {
   // "scheduled 09:00–17:00" annotation beside beyond-shift sessions.
   scheduled_start?: string | null;
   scheduled_end?: string | null;
+  // Clock-in + clock-out location from the TimeLog `location` JSONB. Top level
+  // is the clock-in fix; `clock_out` sub-key is the clock-out fix (present only
+  // when the employee clocked out from a location-capable device).
+  location?: Record<string, unknown> | null;
 }
 
 export type TimeLogStatus = 'all' | 'pending' | 'approved' | 'rejected' | 'disputed';

@@ -85,6 +85,18 @@ export default function TimeLogDetailDrawer({ log, onClose }: Props) {
       `${(log.location as Record<string, unknown>).latitude}, ${(log.location as Record<string, unknown>).longitude}`
     : null;
 
+  // Clock-out fix, stored under location.clock_out by update_time_log. Absent
+  // for admin-forced and auto-closed sessions (no device involved).
+  const clockOutRaw = log.location
+    ? (log.location as Record<string, unknown>).clock_out as Record<string, unknown> | undefined
+    : undefined;
+  const clockOutLocationLabel = clockOutRaw
+    ? ((clockOutRaw.address as string) ??
+      (clockOutRaw.latitude != null && clockOutRaw.longitude != null
+        ? `${clockOutRaw.latitude}, ${clockOutRaw.longitude}`
+        : null))
+    : null;
+
   return (
     <>
       {/* Backdrop */}
@@ -236,14 +248,35 @@ export default function TimeLogDetailDrawer({ log, onClose }: Props) {
           )}
 
           {/* Location */}
-          {locationLabel && (
+          {(locationLabel || clockOutLocationLabel) && (
             <section>
               <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3">
                 Location
               </h3>
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 flex items-start gap-3">
-                <MapPin size={16} className="text-red-500 shrink-0 mt-0.5" />
-                <span className="text-sm text-gray-700 dark:text-gray-300 break-words">{locationLabel}</span>
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 space-y-2">
+                {locationLabel && (
+                  <div className="flex items-start gap-3">
+                    <MapPin size={16} className="text-red-500 shrink-0 mt-0.5" />
+                    <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
+                      <span className="block text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">Clock in</span>
+                      {locationLabel}
+                    </div>
+                  </div>
+                )}
+                {clockOutLocationLabel && (
+                  <div className="flex items-start gap-3">
+                    <MapPin size={16} className="text-green-600 shrink-0 mt-0.5" />
+                    <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
+                      <span className="block text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">Clock out</span>
+                      {clockOutLocationLabel}
+                    </div>
+                  </div>
+                )}
+                {locationLabel && !clockOutLocationLabel && (
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                    No clock-out location recorded.
+                  </p>
+                )}
               </div>
             </section>
           )}

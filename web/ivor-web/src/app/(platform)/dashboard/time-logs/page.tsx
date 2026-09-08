@@ -29,6 +29,7 @@ import {
   Zap,
   ShieldQuestion,
   Timer,
+  LogOut,
 } from "lucide-react";
 import RoleGuard from "../../components/RoleGuard";
 
@@ -261,6 +262,7 @@ export default function TimeLogsPage() {
     try { localStorage.setItem("kiruko_timelog_help_dismissed", "1"); } catch { /* ignore */ }
   }
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [clockingOutId, setClockingOutId] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!companyId) return;
@@ -322,6 +324,19 @@ export default function TimeLogsPage() {
     setConfirmingId(null);
     if (isError(r)) { toast.error(r.error); return; }
     toast.success("Overtime confirmed");
+    refresh();
+  }
+
+  // Admin-forced clock-out for an employee who forgot to clock out. Sets the
+  // session's end_time to now via the existing review PATCH — hours_worked is
+  // recomputed server-side, and no device location is captured (there's no
+  // device involved in an admin clock-out).
+  async function clockOutEmployee(id: number) {
+    setClockingOutId(id);
+    const r = await timeLogReview.patch(id, { end_time: new Date().toISOString() });
+    setClockingOutId(null);
+    if (isError(r)) { toast.error(r.error); return; }
+    toast.success("Employee clocked out");
     refresh();
   }
 
@@ -646,7 +661,9 @@ export default function TimeLogsPage() {
             onConfirmOvertime={confirmOvertime}
             onResolveDispute={setDisputeLog}
             onEdited={refresh}
+            onClockOut={clockOutEmployee}
             confirmingId={confirmingId}
+            clockingOutId={clockingOutId}
           />
         )
       ) : (
@@ -779,6 +796,18 @@ export default function TimeLogsPage() {
                   <td className="px-3 py-2 text-right">
                     <div className="inline-flex items-center gap-2">
                       <EditTimeLogButton log={l} onSaved={refresh} />
+                      {!l.end_time && (
+                        <button
+                          type="button"
+                          onClick={() => clockOutEmployee(l.timelog_id)}
+                          disabled={clockingOutId === l.timelog_id}
+                          title="Clock this employee out now. The session's end time is set to the current time."
+                          className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          <LogOut className="h-3 w-3" />
+                          {clockingOutId === l.timelog_id ? "…" : "Clock out"}
+                        </button>
+                      )}
                       {isDisputed && (
                         <button
                           type="button"
