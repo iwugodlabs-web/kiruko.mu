@@ -233,14 +233,57 @@ def send_via_sendgrid(to_email: str, html: str, subject: str, from_email: str, a
     raise Exception('SendGrid send failed after retries')
 
 
+def send_via_brevo(to_email: str, html: str, subject: str, from_email: str, api_key: str, max_retries: int = 3):
+    """Send via Brevo's HTTP API over HTTPS (port 443).
+
+    Required on hosts that block outbound SMTP (Railway, and most PaaS block
+    25/465/587/2525) — there SMTP relays always time out, so email must go
+    over 443. Uses a Brevo API key (xkeysib-...), which is DIFFERENT from the
+    SMTP key (xsmtpsib-...)."""
+    if requests is None:
+        raise Exception("The 'requests' package is required for Brevo HTTP API sending")
+    url = 'https://api.brevo.com/v3/smtp/email'
+    payload = {
+        'sender': {'email': from_email, 'name': _app_name()},
+        'to': [{'email': to_email}],
+        'subject': subject,
+        'htmlContent': html,
+    }
+    headers = {'api-key': api_key, 'content-type': 'application/json', 'accept': 'application/json'}
+
+    import time
+    attempt = 0
+    last_exc: Exception | None = None
+    while attempt < max_retries:
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=15)
+            if resp.status_code >= 400:
+                raise Exception(f"Brevo API {resp.status_code}: {resp.text[:200]}")
+            return
+        except Exception as e:
+            last_exc = e
+            attempt += 1
+            wait = 2 ** attempt
+            logger.warning(f"Brevo API send attempt {attempt} failed: {e}; retrying in {wait}s")
+            time.sleep(wait)
+    raise Exception(f"Brevo API send failed after {max_retries} attempts: {type(last_exc).__name__}: {last_exc}")
+
+
 def deliver(to_email: str, subject: str, html: str):
     """Actually send one email NOW (called by the email_queue worker, not by
-    request handlers). Picks SendGrid if configured, else SMTP, else logs a
-    dev fallback. Raises on a configured-provider failure so the queue retries;
-    returns normally when delivered or when no provider is configured (dev)."""
+    request handlers). Prefers Brevo HTTP API (works on hosts that block SMTP,
+    e.g. Railway), then SendGrid, then SMTP, else logs a dev fallback. Raises on
+    a configured-provider failure so the queue retries; returns normally when
+    delivered or when no provider is configured (dev)."""
+    brevo_key = os.getenv('BREVO_API_KEY')
     sendgrid_key = os.getenv('SENDGRID_API_KEY')
     sendgrid_from = os.getenv('SENDGRID_FROM_EMAIL')
     smtp_host = os.getenv('SMTP_HOST')
+
+    if brevo_key:
+        send_via_brevo(to_email, html, subject, _from_email(), brevo_key)
+        logger.info(f"Email delivered via Brevo API to {to_email} — {subject!r}")
+        return
 
     if sendgrid_key and sendgrid_from:
         send_via_sendgrid(to_email, html, subject, sendgrid_from, sendgrid_key)
