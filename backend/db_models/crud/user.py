@@ -54,11 +54,22 @@ logger = logging.getLogger(__name__)
 
 async def register_user(request: CompanySignupRequest, db: Session) -> User:
     """Register a new company user"""
-    # Check if user already exists
+    # Check if user already exists by email
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
         # Raise EmailExist custom exception if email already exists
         raise EmailExist(request.email)
+
+    # Check if phone is already registered — prevent duplicate accounts
+    # Only check when phone is provided (skip for signups without phone)
+    if request.phone:
+        existing_by_phone = db.query(User).filter(User.phone == request.phone).first()
+        if existing_by_phone and existing_by_phone.email != request.email:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A user with phone '{request.phone}' is already registered. "
+                       "Please use a different phone number or contact your administrator.",
+            )
 
     # Create user
     user = User(
