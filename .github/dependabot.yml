@@ -1,0 +1,40 @@
+# Dependabot — automated dependency & security update PRs.
+# Grouped weekly so we get one PR per ecosystem instead of a flood.
+# Security updates are always raised immediately regardless of schedule.
+version: 2
+updates:
+  # Backend (FastAPI / Python)
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      backend-deps:
+        patterns: ["*"]
+
+  # Web (Next.js)
+  - package-ecosystem: "npm"
+    directory: "/web/ivor-web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      web-deps:
+        patterns: ["*"]
+
+  # Mobile (Expo / React Native)
+  - package-ecosystem: "npm"
+    directory: "/mobile"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      mobile-deps:
+        patterns: ["*"]
+
+  # GitHub Actions themselves
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

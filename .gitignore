@@ -271,3 +271,16 @@ bower_components
 # Temporary files
 *.tmp
 *.temp
+
+# Secrets / credentials — never commit service-account keys or cert material.
+# GCP service-account keys land in backend/ during local dev (e.g. Vision/
+# Document AI). They contain live private keys — keep them out of git.
+backend/*.json
+!backend/railway.json
+!backend/spaces-cors.json
+*-service-account*.json
+*serviceaccount*.json
+gcp-*.json
+*.pem
+*.p12
+*.key
