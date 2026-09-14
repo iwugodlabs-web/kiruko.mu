@@ -71,7 +71,9 @@
           "useSQLCipher": true,
           "android": {
             "enableFTS": false,
-            "useSQLCipher": false
+            "useSQLCipher": false,
+            "useLibSQL": false,
+            "withSQLiteVecExtension": false
           },
           "ios": {
             "customBuildFlags": [
