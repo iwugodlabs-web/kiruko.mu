@@ -7,12 +7,13 @@ import "@/global.css";
 import { GluestackUIProvider } from "@gluestack-ui/themed";
 import { drizzle } from "drizzle-orm/expo-sqlite";
 import { useMigrations } from "drizzle-orm/expo-sqlite/migrator";
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 import { SQLiteProvider, openDatabaseSync } from "expo-sqlite";
-import { Suspense, useState, useCallback } from "react";
+import { Suspense, useState, useCallback, useEffect } from "react";
 import { View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BrandSplash from "@/components/BrandSplash";
+import { PostHogProvider, usePostHog } from "posthog-react-native";
 
 // FONTS — Kiruko brand display font (Orbitron, matches the logo wordmark)
 import { Orbitron_500Medium } from "@expo-google-fonts/orbitron/500Medium";
@@ -34,6 +35,25 @@ import IdleLockScreen from "@/components/IdleLockScreen";
 import useAuth from "./hooks/useAuth";
 
 export const DATABASE_NAME = "mywitnesstree.db";
+
+// PostHog analytics — public project key + host injected at build time via EAS
+// env (EXPO_PUBLIC_*). When the key is absent (e.g. a local build without it),
+// `disabled` short-circuits the SDK so nothing is sent and nothing errors.
+const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
+const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
+
+// Manual screen tracking. expo-router doesn't expose a NavigationContainer, so
+// PostHog's automatic captureScreens can't hook it — we emit a $screen event on
+// each pathname change instead. This is what reveals the onboarding/signup
+// funnel (which screens users reach before dropping off).
+function ScreenTracker() {
+  const pathname = usePathname();
+  const posthog = usePostHog();
+  useEffect(() => {
+    if (pathname) posthog?.screen(pathname);
+  }, [pathname, posthog]);
+  return null;
+}
 
 // Registers push token once at app root — not re-created on every tab switch
 function PushNotificationRegistrar() {
@@ -108,6 +128,30 @@ export default function RootLayout() {
   if (!fontsLoaded) return <BrandSplash />;
   return (
     <Suspense fallback={<BrandSplash />}>
+      <PostHogProvider
+        apiKey={POSTHOG_API_KEY}
+        autocapture={{
+          // expo-router: automatic screen capture can't hook the router, so we
+          // capture screens manually in <ScreenTracker/>. Touch autocapture is
+          // off to avoid noise and to keep from capturing PII in labels.
+          captureScreens: false,
+          captureTouches: false,
+        }}
+        options={{
+          host: POSTHOG_HOST,
+          // No key configured -> SDK is a no-op (safe for local/dev builds).
+          disabled: !POSTHOG_API_KEY,
+          // Application Installed / Updated / Opened — the top of the funnel
+          // (install -> first open) we're currently blind on.
+          captureAppLifecycleEvents: true,
+          errorTracking: {
+            autocapture: {
+              uncaughtExceptions: true,
+              unhandledRejections: true,
+            },
+          },
+        }}
+      >
       <SQLiteProvider
         databaseName={DATABASE_NAME}
         options={{
@@ -121,6 +165,7 @@ export default function RootLayout() {
               <OnBoardProvider>
                 <AuthProvider>
                   <IdleManager>
+                    <ScreenTracker />
                     <PushNotificationRegistrar />
                     <ClockReminderResync />
                     <Stack screenOptions={{
@@ -133,6 +178,7 @@ export default function RootLayout() {
           </GluestackUIProvider>
         </LanguageProvider>
       </SQLiteProvider>
+      </PostHogProvider>
     </Suspense>
   );
 }
