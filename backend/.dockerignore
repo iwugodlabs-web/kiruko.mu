@@ -12,6 +12,18 @@ venv/
 # production credentials come from DO env vars at runtime
 .env
 .env.*
+# Service-account keys / cert material — never bake into the image.
+# COPY . . in the Dockerfile would otherwise ship any *.json key sitting
+# in backend/ into the built image. Prod creds come from env at runtime.
+*.json
+!railway.json
+!spaces-cors.json
+*-service-account*.json
+*serviceaccount*.json
+gcp-*.json
+*.pem
+*.p12
+*.key
 .DS_Store
 .pytest_cache
 *.log
