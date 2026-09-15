@@ -26,6 +26,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as Haptics from "expo-haptics";
 import { BlurView } from 'expo-blur';
 import { useRouter } from "expo-router";
+import { usePostHog } from "posthog-react-native";
 import {
   ArrowLeft,
   Check,
@@ -227,6 +228,7 @@ const CountryPickerField = ({
 
 export default function CompanySignupPage() {
   const router = useRouter();
+  const posthog = usePostHog();
   const { t } = useTranslation();
   const companySignupSchema = useMemo(() => makeCompanySignupSchema(t), [t]);
   const strengthLabel = (s: string) =>
@@ -383,6 +385,8 @@ export default function CompanySignupPage() {
       };
       const result = await postSignUpCompany(form_data);
       if (result.status === "success") {
+        // Funnel: company account created (pre-verification).
+        posthog?.capture("signup_completed", { method: "company", user_type: "company" });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(t("signup.welcomeTitle"), t("signup.companyWelcomeBody"), [
           { text: t("auth.verifyNow"), onPress: () => router.push({ pathname: "/signup/verify-signup", params: { email: data.companyEmail } }) }

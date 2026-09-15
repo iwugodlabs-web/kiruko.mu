@@ -7,6 +7,7 @@ import { Box, Button, ButtonText, Checkbox, CheckboxIcon, CheckboxIndicator, Che
 import { zodResolver } from '@hookform/resolvers/zod';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { usePostHog } from 'posthog-react-native';
 import * as React from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -170,6 +171,7 @@ const Profile = () => {
   const { user, isLoading: isAuthLoading, checkAuth, login } = useAuth();
   const { currencyInfo } = useCurrency();
   const router = useRouter();
+  const posthog = usePostHog();
 
   // Country edit — only independent (no-employer) users, editable until the
   // profile locks (identity_verified / is_locked). Company employees' country
@@ -542,6 +544,12 @@ const Profile = () => {
         const serverOnboardComplete = Boolean(
           (onboardRes as any).data?.onboard_complete,
         );
+
+        // Funnel: activation. Fire only on the first->complete transition so
+        // profile edits by an already-onboarded user don't inflate the count.
+        if (!wasAlreadyOnboarded && serverOnboardComplete) {
+          posthog?.capture("onboarding_completed", { user_type: "private" });
+        }
         const missing: string[] = Array.isArray((onboardRes as any).missing)
           ? (onboardRes as any).missing
           : [];

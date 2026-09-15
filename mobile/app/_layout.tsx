@@ -150,6 +150,17 @@ export default function RootLayout() {
               unhandledRejections: true,
             },
           },
+          // Session replay — watch real sessions to diagnose UX friction /
+          // where users get stuck. This is a payroll app, so mask everything
+          // sensitive by default (these are the SDK defaults, set explicitly
+          // to make the privacy stance unmistakable). Recording must ALSO be
+          // enabled in PostHog project settings ("Record user sessions").
+          enableSessionReplay: true,
+          sessionReplayConfig: {
+            maskAllTextInputs: true,
+            maskAllImages: true,
+            maskAllSandboxedViews: true,
+          },
         }}
       >
       <SQLiteProvider
