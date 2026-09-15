@@ -24,6 +24,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useRouter } from "expo-router";
+import { usePostHog } from "posthog-react-native";
 import {
   ArrowLeft,
   Check,
@@ -168,6 +169,7 @@ const InputFieldWrapper = ({
 
 export default function SignupPage() {
   const router = useRouter();
+  const posthog = usePostHog();
   const { t } = useTranslation();
   const signupSchema = useMemo(() => makeSignupSchema(t), [t]);
   const strengthLabel = (s: string) =>
@@ -298,6 +300,9 @@ export default function SignupPage() {
       };
       const result = await postSignUpUser(user_data);
       if (result.status === "success") {
+        // Funnel: account created (pre-verification). Lets us measure the
+        // signup-form completion rate vs. drop-off before verify/login.
+        posthog?.capture("signup_completed", { method: "private", user_type: data.userType });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(t("signup.welcomeTitle"), t("signup.verifyEmailSent"), [
           { text: t("auth.verifyNow"), onPress: () => router.push({ pathname: "/signup/verify-signup", params: { email: data.email } }) }

@@ -126,7 +126,8 @@
           }
         }
       ],
-      "./plugins/withFmtConstevalFix"
+      "./plugins/withFmtConstevalFix",
+      "posthog-react-native/expo"
     ],
     "experiments": {
       "typedRoutes": true

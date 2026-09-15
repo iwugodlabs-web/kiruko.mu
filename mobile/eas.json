@@ -13,7 +13,8 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1",
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
       },
       "android": {
         "buildType": "apk"
@@ -26,7 +27,8 @@
       "autoIncrement": true,
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1",
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
       },
       "android": {
         "buildType": "app-bundle"
