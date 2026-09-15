@@ -304,7 +304,20 @@ export default function SignupPage() {
         ]);
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert(t("signup.signupFailed"), (result as any).message || t("signup.unableToCreate"));
+        const status = (result as any).status;
+        // The error object exposes `.error` (not `.message`) — reading
+        // `.message` previously dropped the backend's detail entirely.
+        const detail = (result as any).error || (result as any).message;
+        if (status === 409) {
+          // Duplicate account (email/phone already registered). Don't
+          // dead-end the user on a failure alert — offer a path to log in.
+          Alert.alert(t("signup.signupFailed"), detail || t("signup.unableToCreate"), [
+            { text: t("common.cancel"), style: "cancel" },
+            { text: t("signup.logIn"), onPress: () => router.push({ pathname: "/login", params: { email: data.email } }) },
+          ]);
+        } else {
+          Alert.alert(t("signup.signupFailed"), detail || t("signup.unableToCreate"));
+        }
       }
     } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
