@@ -23,18 +23,23 @@ updates:
       web-deps:
         patterns: ["*"]
 
-  # Mobile (Expo / React Native)
+  # Mobile (Expo / React Native) — SECURITY-ONLY.
+  # open-pull-requests-limit: 0 disables routine version-bump PRs while STILL
+  # allowing Dependabot to raise security-advisory fixes. Routine Expo/RN
+  # version currency is done as a deliberate, tested SDK upgrade — not a
+  # 100-package auto-batch that breaks the build.
   - package-ecosystem: "npm"
     directory: "/mobile"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-    groups:
-      mobile-deps:
-        patterns: ["*"]
+    open-pull-requests-limit: 0
 
-  # GitHub Actions themselves
+  # GitHub Actions — grouped so bumps arrive as ONE PR, not one-per-action.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
