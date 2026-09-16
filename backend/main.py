@@ -406,6 +406,7 @@ def get_application():
 app = get_application()
 
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from core.exceptions import IvorServiceException
 from fastapi.exceptions import RequestValidationError
 logger = logging.getLogger(__name__)
@@ -420,9 +421,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         (await request.body()).decode("utf-8", errors="replace")[:2000],
         exc.errors(),
     )
+    # jsonable_encoder is required: for validators that `raise ValueError`
+    # (Pydantic model/field validators), exc.errors() embeds the raw
+    # ValueError object under ctx['error'], which json.dumps cannot serialize.
+    # Without this the intended 422 blows up into a 500 (this is exactly what
+    # FastAPI's default validation handler does).
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors()},
+        content={"detail": jsonable_encoder(exc.errors())},
     )
 
 
