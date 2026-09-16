@@ -6,9 +6,13 @@ import { api } from '../../services/apiClient';
 import AuthContext, { type IUser } from './AuthContext';
 
 import { useRouter } from 'expo-router';
+import { usePostHog } from 'posthog-react-native';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const router = useRouter();
+    // PostHog is a no-op when no API key is configured (see _layout.tsx),
+    // so these calls are safe in every environment.
+    const posthog = usePostHog();
     const [user, setUser] = useState<IUser | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
     const tokenCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -132,6 +136,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await AsyncStorage.setItem('userType', freshUser.user_type);
                 setUser(freshUser);
 
+                // Tie analytics events to this user so we can build funnels
+                // (install -> signup -> onboarding -> retention) per person.
+                if (freshUser.user_id) {
+                    posthog?.identify(freshUser.user_id, {
+                        email: freshUser.email,
+                        user_type: freshUser.user_type,
+                        onboard_complete: freshUser.onboard_complete,
+                    });
+                }
+
                 console.log('🎉 AuthProvider: Authentication successful.');
                 return true;
             } else {
@@ -250,6 +264,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(authenticatedUser);
             setIsLoading(false);
 
+            // Identify + mark the login conversion for funnel analysis.
+            if (authenticatedUser.user_id) {
+                posthog?.identify(String(authenticatedUser.user_id), {
+                    email: authenticatedUser.email,
+                    user_type: authenticatedUser.user_type,
+                });
+            }
+            posthog?.capture('user_logged_in', { user_type: authenticatedUser.user_type });
+
             console.log('✅ AuthProvider: Login successful');
         } catch (error) {
             console.error('❌ AuthProvider: Login failed:', error);
@@ -289,6 +312,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Reset user state completely
             setUser(undefined);
             setIsLoading(false);
+
+            // Detach analytics identity so a shared device doesn't attribute
+            // the next session's events to the logged-out user.
+            posthog?.reset();
 
             console.log('✅ AuthProvider: Logout and cache clearing successful');
 
