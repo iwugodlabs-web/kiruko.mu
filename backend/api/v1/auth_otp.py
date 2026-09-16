@@ -311,6 +311,12 @@ async def verify_otp_login(
     except Exception:
         db.rollback()
 
+    # commit()/rollback() above expire the instance's attributes
+    # (expire_on_commit defaults to True). Without reloading, jsonable_encoder
+    # sees an empty object and showUser.model_validate fails on the required
+    # user_id/user_type — turning a successful OTP login into a 500.
+    db.refresh(user)
+
     user_dict = jsonable_encoder(user)
     user_data = jsonable_encoder(showUser.model_validate(user_dict))
     if user.private_user:

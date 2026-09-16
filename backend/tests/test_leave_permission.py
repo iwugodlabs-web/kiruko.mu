@@ -23,9 +23,14 @@ def test_catalogue_and_seed_include_leave():
         assert perm in owner["permissions"], f"Owner missing {perm}"
         assert perm in admin["permissions"], f"Company Admin missing {perm}"
 
-    # Bare-by-default management roles must NOT auto-receive it.
+    # HR Manager is a curated people-ops + payroll operator role, so by design
+    # it DOES carry leave management (only compliance, disputes and role
+    # management stay Owner/Admin-only — see SYSTEM_ROLES in company_roles.py).
+    # (This previously asserted HR Manager was bare-by-default; that model no
+    # longer matches the seeded role.)
     hr = next(r for r in SYSTEM_ROLES if r["name"] == "HR Manager")
-    assert hr["permissions"] == []
+    assert "view_leave" in hr["permissions"]
+    assert "approve_leave" in hr["permissions"]
 
 
 # --- helpers (mirror test_company_permission_guard) ---------------------------
