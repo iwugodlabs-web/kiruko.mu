@@ -118,3 +118,17 @@ class TestMigrationBackfillAgreesWithClassifier:
             self._assert_matches(db, ctx)
         finally:
             _cleanup(db, ctx)
+
+    def test_approved_session_not_backfilled(self, db: Session):
+        """Already-decided rows stay NULL — the backfill is pending-only."""
+        ctx = _setup(db, auto_closed=True, admin_approved=True)
+        try:
+            self._run_backfill(db, ctx)
+            row = db.execute(
+                sql_text("SELECT needs_review, exception_reasons FROM time_logs WHERE timelog_id=:i"),
+                {"i": ctx["tl_id"]},
+            ).fetchone()
+            assert row[0] is None, "approved session must NOT be backfilled"
+            assert row[1] is None
+        finally:
+            _cleanup(db, ctx)

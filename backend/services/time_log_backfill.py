@@ -5,6 +5,11 @@ migration ``timelog_needs_review_20260917`` to classify pre-existing rows in the
 same atomic migration (no separate script step). The Python classifier remains
 the source of truth for ongoing writes; this is a frozen, one-time pass.
 
+Scoped to PENDING rows only (``NOT admin_approved AND NOT admin_rejected``):
+already-decided sessions don't need re-classification, and this keeps the
+production UPDATE down to the (small) set of rows that actually feed the
+review queue.
+
 Importable so the migration and the agreement test share the exact SQL.
 """
 
@@ -30,9 +35,13 @@ SET exception_reasons = array_remove(ARRAY[
     CASE WHEN COALESCE((geofence_check_json->>'time_skew')::boolean, false)
          THEN 'time_skew' END
 ], NULL)
-WHERE needs_review IS NULL;
+WHERE needs_review IS NULL
+  AND NOT admin_approved
+  AND NOT admin_rejected;
 
 UPDATE time_logs
 SET needs_review = (cardinality(exception_reasons) > 0)
-WHERE needs_review IS NULL;
+WHERE needs_review IS NULL
+  AND NOT admin_approved
+  AND NOT admin_rejected;
 """
