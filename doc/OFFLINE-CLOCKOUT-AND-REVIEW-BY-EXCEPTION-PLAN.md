@@ -179,9 +179,11 @@ results, (f) the offline-queue reconciliation. Any new write path that touches a
 added to this list.
 
 **Backfill (required, part of P1):** existing rows will have `needs_review = NULL` after the migration, so
-the default "Needs review" view would be empty/ambiguous on day one. Ship a data migration that runs the
-classifier over all historical `TimeLog` rows once. Run the backfill *after* the classifier is validated,
-not in the same step as the schema change.
+the default "Needs review" view would be empty/ambiguous on day one. The classification of historical rows
+is folded into the schema migration itself (a self-contained SQL mirror of the classifier in
+`services/time_log_backfill.py`) so `alembic upgrade head` does it atomically — no separate script step in
+production. The SQL pass is frozen and one-time; the Python classifier remains the source of truth for
+ongoing writes.
 
 Add `needs_review` + `exception_reasons` to `TimeLogReviewItem` (`time_log_review.py:72`) and a
 `needs_review: Optional[bool]` query param to `list_time_logs`.

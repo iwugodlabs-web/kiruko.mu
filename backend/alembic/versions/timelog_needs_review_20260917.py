@@ -4,13 +4,17 @@ Revision ID: timelog_needs_review_20260917
 Revises: vault_shared_visibility_20260907
 Create Date: 2026-09-17
 
-Nullable by design: existing rows are NULL ("not yet classified") until the
-backfill script (scripts/backfill_needs_review.py) runs the classifier over
-them. New writes recompute the columns via services.time_log_classifier.
+The columns are added nullable, then historical rows are classified IN THIS SAME
+migration (atomic, one transaction) from the existing signal columns. This is a
+one-time SQL mirror of services.time_log_classifier.classify_exceptions; the
+Python classifier remains the source of truth for all ongoing writes. New rows
+are recomputed on every write (create/update/auto-close/dispute).
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY
+
+from services.time_log_backfill import BACKFILL_REASONS_SQL
 
 
 revision = "timelog_needs_review_20260917"
@@ -28,6 +32,9 @@ def upgrade() -> None:
         "time_logs",
         sa.Column("exception_reasons", ARRAY(sa.String()), nullable=True),
     )
+    # One-time classification of historical rows — folded here so production
+    # gets a fully-populated "Needs review" view with no separate script step.
+    op.execute(BACKFILL_REASONS_SQL)
 
 
 def downgrade() -> None:
