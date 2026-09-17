@@ -89,6 +89,19 @@ class TimeLogService:
             # M27 — distinguish a cron-closed runaway from a real clock-out
             # so admins (and the dispute flow) can tell them apart.
             active_log.auto_closed = True
+            # Review-by-exception analytics — auto-close flag feeds the per-job /
+            # per-company flag-rate signal (a whole shift always auto-closing is a
+            # schedule/config bug, not N individual review items).
+            from core.analytics import capture_time_log_flag
+            capture_time_log_flag(
+                "time_log.auto_closed",
+                active_log,
+                reason="auto_close",
+                distinct_id=getattr(active_log, "private_user_id", None),
+            )
+        # Review-by-exception — auto-close is a review signal; recompute.
+        from services.time_log_classifier import recompute as _recompute_classification
+        _recompute_classification(active_log)
         logger.info(f"Auto-closed redundant or runaway session {active_log.timelog_id} at {close_at.isoformat()}")
 
     @staticmethod

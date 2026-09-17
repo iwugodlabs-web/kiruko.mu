@@ -1314,6 +1314,11 @@ interface ITranslationSchema {
 		sessionLimitBody: string;
 		alreadyClockedInTitle: string;
 		alreadyClockedInBody: string;
+		syncPendingBanner: string;
+		syncPendingBanner_plural: string;
+		syncFailedTitle: string;
+		syncFailedClockOutBody: string;
+		syncFailedClockInBody: string;
 		jobRequiredTitle: string;
 		jobRequiredBody: string;
 		locationRequiredTitle: string;

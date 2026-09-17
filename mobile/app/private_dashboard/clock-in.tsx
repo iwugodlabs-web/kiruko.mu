@@ -1,4 +1,6 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
+import { punchQueueStore, newIdempotencyKey } from './services/punchQueue';
+import { punchSyncWorker } from './services/syncWorker';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -399,6 +401,9 @@ export default function ClockInPage() {
   const [userDetails, setUserDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Offline queue — count of clock actions waiting to reach the server. Fed by
+  // the sync worker's drain events; drives the "waiting to sync" banner.
+  const [queuedPunchCount, setQueuedPunchCount] = useState(0);
 
   // Notifications and Overtime State
   const [activeOvertimeNotification, setActiveOvertimeNotification] = useState<Notification | null>(null);
@@ -991,6 +996,21 @@ export default function ClockInPage() {
     }
   }, [user, jobId, userDetails, activeTimeLogId]);
 
+  // Offline queue banner — seed the count on mount (covers a queue left over
+  // from a prior session) then track drain events. A dead-letter reverts local
+  // clock state (handled globally in _layout); refresh the timesheet so this
+  // screen reflects the reverted state too.
+  useEffect(() => {
+    punchQueueStore.count().then(setQueuedPunchCount).catch(() => undefined);
+    const unsub = punchSyncWorker.onChange(({ pending, deadLetters }) => {
+      setQueuedPunchCount(pending);
+      if (deadLetters && deadLetters.length > 0) {
+        loadTimeLogsFromDatabase().catch(() => undefined);
+      }
+    });
+    return unsub;
+  }, [loadTimeLogsFromDatabase]);
+
   const checkNotifications = useCallback(async () => {
     try {
       console.log('Checking for notifications...');
@@ -1368,13 +1388,31 @@ export default function ClockInPage() {
           location: locationData,
           geo_check,
         };
-        const response = await postClockIn(timeLogData);
+        let clockedInOffline = false;
+        const clockInKey = newIdempotencyKey();
+        const response = await postClockIn(timeLogData, clockInKey);
         if (response && !('error' in response)) {
           console.log('Clock-in successful, backend response:', response);
           setActiveTimeLogId(response.timelog_id);
           await AsyncStorage.setItem('activeTimeLogId', String(response.timelog_id));
         } else {
-          throw new Error((response as any)?.error || 'Failed to clock in on server.');
+          const status = (response as any)?.status;
+          const networkClass = status === undefined || status === 0 || (status >= 500 && status < 600);
+          if (networkClass) {
+            // Offline clock-in — queue it and mark clocked-in locally. The sync
+            // worker writes the real timelog_id back to AsyncStorage once the
+            // punch lands, so a later clock-out resolves it.
+            await punchQueueStore.enqueue({
+              action: 'clock_in',
+              payload: timeLogData,
+              idempotencyKey: clockInKey,
+            });
+            await AsyncStorage.setItem('pendingClockInKey', clockInKey);
+            clockedInOffline = true;
+            console.log('Clock-in queued for offline sync (network down).');
+          } else {
+            throw new Error((response as any)?.error || 'Failed to clock in on server.');
+          }
         }
 
         setIsClockedIn(true);
@@ -1404,19 +1442,54 @@ export default function ClockInPage() {
         }
       } else {
         // Clock Out
-        if (!activeTimeLogId) throw new Error("No active clock-in session found to clock out.");
+        const pendingClockInKey = await AsyncStorage.getItem('pendingClockInKey');
+        if (!activeTimeLogId && !pendingClockInKey) {
+          throw new Error("No active clock-in session found to clock out.");
+        }
 
         const timeLogData: Partial<TimeLog> = {
           end_time: nowISO,
           location: locationData,
           geo_check,
         };
-        const response = await updateTimeLog(activeTimeLogId, timeLogData);
 
-        if (response && !('error' in response)) {
-          console.log('Clock-out successful, backend response:', response);
+        if (activeTimeLogId) {
+          const response = await updateTimeLog(activeTimeLogId, timeLogData);
+          if (response && !('error' in response)) {
+            console.log('Clock-out successful, backend response:', response);
+          } else {
+            const status = (response as any)?.status;
+            const networkClass = status === undefined || status === 0 || (status >= 500 && status < 600);
+            if (networkClass) {
+              // Network failure at end-of-shift — queue the clock-out so it syncs
+              // later instead of leaving the session open for the cron to
+              // auto-close with a synthetic end time. Pin the exact body + a
+              // fresh idempotency key, then run the optimistic local clock-out.
+              await punchQueueStore.enqueue({
+                action: 'clock_out',
+                timelogId: activeTimeLogId,
+                payload: { end_time: nowISO, location: locationData, geo_check },
+                idempotencyKey: newIdempotencyKey(),
+              });
+              console.log('Clock-out queued for offline sync (network down).');
+            } else {
+              // 4xx — real rejection (deleted session, etc.). Do NOT optimistically
+              // clear state; surface the error so the employee can retry.
+              throw new Error((response as any)?.error || 'Failed to clock out on server.');
+            }
+          }
         } else {
-          throw new Error((response as any)?.error || 'Failed to clock out on server.');
+          // Clock-in is still pending offline — queue the clock-out against the
+          // pending clock-in. The sync worker relays the server's real
+          // timelog_id onto this row once the clock-in lands.
+          await punchQueueStore.enqueue({
+            action: 'clock_out',
+            timelogId: null,
+            dependsOnKey: pendingClockInKey ?? undefined,
+            payload: { end_time: nowISO, location: locationData, geo_check },
+            idempotencyKey: newIdempotencyKey(),
+          });
+          console.log('Clock-out queued against pending clock-in (offline).');
         }
 
         setIsClockedIn(false);
@@ -1426,6 +1499,7 @@ export default function ClockInPage() {
         await AsyncStorage.removeItem('currentClockInTime');
         await AsyncStorage.removeItem('isClockedIn');
         await AsyncStorage.removeItem('activeTimeLogId');
+        await AsyncStorage.removeItem('pendingClockInKey');
         await AsyncStorage.removeItem('breakStart');
         await AsyncStorage.removeItem('breakDurations');
         await AsyncStorage.removeItem('isBreaking');
@@ -1800,6 +1874,28 @@ export default function ClockInPage() {
           }
         >
           <View>
+            {/* Offline queue banner — clock actions saved locally, waiting to
+                reach the server. Clears as the sync worker drains them. */}
+            {queuedPunchCount > 0 && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginHorizontal: 8,
+                  marginBottom: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  backgroundColor: Palette.gray100,
+                }}
+              >
+                <MaterialIcons name="cloud-upload" size={16} color={Palette.gray500} />
+                <Text style={{ flex: 1, fontSize: 13, color: Palette.gray700 }}>
+                  {t('clockIn.syncPendingBanner', { count: queuedPunchCount })}
+                </Text>
+              </View>
+            )}
             {/* Page Header Banner */}
             <LinearGradient
               colors={[Palette.gray100, Palette.gray50, 'white']}

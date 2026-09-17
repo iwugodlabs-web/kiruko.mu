@@ -383,9 +383,25 @@ async def create_time_log(clockin: CreateTimeLog, db: Session, client_ip: Option
             created_at=datetime.now(timezone.utc),
         )
 
+        # Review-by-exception — classify before commit so the row is never
+        # persisted without a needs_review/exception_reasons value.
+        from services.time_log_classifier import recompute as _recompute_classification
+        _recompute_classification(time_log_orm)
+
         db.add(time_log_orm)
         db.commit()
         db.refresh(time_log_orm)
+
+        # Review-by-exception analytics — emit flag events so the per-job /
+        # per-company flag rate can reveal a mis-tuned schedule or geofence
+        # (a whole shift flagged is a config bug, not N review items).
+        from core.analytics import capture_time_log_flag
+        if is_late:
+            capture_time_log_flag("time_log.flagged", time_log_orm, reason="late", distinct_id=clockin.private_user_id)
+        if out_of_schedule:
+            capture_time_log_flag("time_log.flagged", time_log_orm, reason="out_of_schedule", distinct_id=clockin.private_user_id)
+        if out_of_geofence:
+            capture_time_log_flag("time_log.flagged", time_log_orm, reason="out_of_geofence", distinct_id=clockin.private_user_id)
 
         logging.info(f"Validated payload: {clockin}")
         return time_log_orm
@@ -393,14 +409,14 @@ async def create_time_log(clockin: CreateTimeLog, db: Session, client_ip: Option
     except SQLAlchemyError as e:
         db.rollback()
         logging.error(e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create time log. Please try again.")
     except HTTPException:
         db.rollback()
         raise
     except Exception as ex:
         db.rollback()
         logging.error("Unexpected Error:", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(ex))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create time log. Please try again.")
 
 async def get_all_time_logs(db: Session):
     """Get all time logs with break logs"""
@@ -670,20 +686,40 @@ async def update_time_log(time_log_id: int, time_log_data: dict, db: Session, cl
             time_log.hours_worked = round(worked_seconds / 3600, 2)
 
         time_log.updated_at = datetime.now(timezone.utc)
+        # Review-by-exception — recompute after end_time/location/geofence
+        # signals changed (clock-out is the main path).
+        from services.time_log_classifier import recompute as _recompute_classification
+        _recompute_classification(time_log)
+
+        # Flag-rate analytics — clock-out geofence flag (also a schedule/config
+        # signal when it fires for a whole shift).
+        if time_log.out_of_geofence:
+            from core.analytics import capture_time_log_flag
+            capture_time_log_flag(
+                "time_log.flagged",
+                time_log,
+                reason="out_of_geofence",
+                distinct_id=time_log.private_user_id,
+            )
+
+        # P2 — auto-approve a clean clock-out when the company opted in.
+        from services.time_log_auto_approve import maybe_auto_approve
+        maybe_auto_approve(db, time_log)
+
         db.commit()
         db.refresh(time_log)
         return time_log
     except SQLAlchemyError as e:
         db.rollback()
         logging.error(f"SQLAlchemyError while updating time log: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to update time log. Please try again.")
     except HTTPException:
         db.rollback()
         raise
     except Exception as ex:
         db.rollback()
         logging.error(f"Unexpected Error while updating time log: {ex}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(ex))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to update time log. Please try again.")
 
 async def create_break_log(timelog_id: int, db: Session) -> Optional[BreakLogORM]:
     """Start a new break for a given time log."""

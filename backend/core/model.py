@@ -2,7 +2,7 @@ from sqlalchemy import Column, Date, Integer, SmallInteger, String, DateTime, Ti
 from sqlalchemy.orm import relationship, backref, object_session
 from sqlalchemy import UniqueConstraint
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.dialects.postgresql import JSONB, JSON, UUID
+from sqlalchemy.dialects.postgresql import JSONB, JSON, UUID, ARRAY
 # Assuming you have a base class for declarative models
 from core.base_class import Base
 import enum
@@ -280,6 +280,15 @@ class Company(Base):
     require_approved_clockins_for_payroll = Column(
         Boolean, nullable=False, server_default='false',
     )
+    # Review-by-exception (RBE) — % of *clean* sessions to surface into the
+    # admin review queue as a random-sample audit (deterministic per timelog_id),
+    # so "clean" is never a guaranteed skip. 0 = off. Stored as integer 0-100.
+    review_sample_pct = Column(Integer, nullable=False, server_default='0')
+    # Review-by-exception P2 — auto-approve sessions that classify as clean on
+    # clock-out finalize (no exception_reasons, not sampled for audit). Opt-in;
+    # default false. A company that mandates manual approval
+    # (require_approved_clockins_for_payroll) simply leaves this false.
+    auto_approve_clean_clockins = Column(Boolean, nullable=False, server_default='false')
     # M8 closeout — per-company retention override for Concerns v2 (default
     # 7 years). Customers with stricter regimes can extend; customers with
     # lighter contracts can request 3. The retention-purge cron reads this
@@ -755,6 +764,15 @@ class TimeLog(Base):
     # device/OS/app/IP — so admins and auditors can verify every decision.
     out_of_geofence = Column(Boolean, nullable=False, server_default='false')
     geofence_check_json = Column(JSONB, nullable=True)
+
+    # Review-by-exception (RBE) — persisted classification so the review UI
+    # and the auto-approve path share ONE source of truth (never classify at
+    # read-time and re-classify at approve-time). needs_review + exception_reasons
+    # are recomputed by services.time_log_classifier on every write that changes
+    # a signal (clock-in/out, auto-close, dispute, admin edit). NULL = not yet
+    # classified (backfill treats it conservatively as needs-review).
+    needs_review = Column(Boolean, nullable=True)
+    exception_reasons = Column(ARRAY(String), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

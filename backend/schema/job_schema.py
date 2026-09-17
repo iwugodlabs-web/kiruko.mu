@@ -170,6 +170,30 @@ class ShowTimeLog(TimeLog):
     class Config:
         from_attributes = True
 
+
+class ClockOutPayload(BaseModel):
+    """Body for POST /time-log/{id}/clock-out (offline clock-out queue replay).
+
+    end_time is the device wall clock at clock-out; the server clamps and
+    skew-checks it (guard #2). location/geo_check mirror the PUT clock-out."""
+    end_time: datetime
+    location: Optional[Dict[str, Any]] = None
+    geo_check: Optional[Dict[str, Any]] = None
+
+
+class ClockOutResult(BaseModel):
+    """Result of a (possibly queued) clock-out via POST /time-log/{id}/clock-out.
+
+    ``deferred`` is true when the correction was NOT applied in place (session
+    already approved/rejected, inside a finalized period, or admin-edited) and
+    was instead routed to admin review as a pending dispute. The queue treats a
+    2xx with deferred=true as "synced" — it must NOT retry."""
+    timelog_id: int
+    deferred: bool = False
+    deferred_reason: Optional[str] = None
+    time_skew: bool = False
+    end_time: Optional[datetime] = None
+
 class BreakLog(BaseModel):
     timelog_id: int
     start_time: datetime
