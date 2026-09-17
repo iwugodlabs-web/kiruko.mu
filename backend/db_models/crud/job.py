@@ -409,14 +409,14 @@ async def create_time_log(clockin: CreateTimeLog, db: Session, client_ip: Option
     except SQLAlchemyError as e:
         db.rollback()
         logging.error(e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create time log. Please try again.")
     except HTTPException:
         db.rollback()
         raise
     except Exception as ex:
         db.rollback()
         logging.error("Unexpected Error:", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(ex))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create time log. Please try again.")
 
 async def get_all_time_logs(db: Session):
     """Get all time logs with break logs"""
@@ -712,14 +712,14 @@ async def update_time_log(time_log_id: int, time_log_data: dict, db: Session, cl
     except SQLAlchemyError as e:
         db.rollback()
         logging.error(f"SQLAlchemyError while updating time log: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to update time log. Please try again.")
     except HTTPException:
         db.rollback()
         raise
     except Exception as ex:
         db.rollback()
         logging.error(f"Unexpected Error while updating time log: {ex}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(ex))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to update time log. Please try again.")
 
 async def create_break_log(timelog_id: int, db: Session) -> Optional[BreakLogORM]:
     """Start a new break for a given time log."""

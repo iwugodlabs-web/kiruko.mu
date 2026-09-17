@@ -1045,10 +1045,10 @@ async def create_daily_time_log(job: CreateTimeLog, request: Request, db: Sessio
     except HTTPException:
         raise
     except SQLAlchemyError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create time log. Please try again.")
     except Exception as ex:
         logging.error("Unexpected Error:", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(ex))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create time log. Please try again.")
     return work_hours
 
 @router.put('/{job_id}', status_code=200, response_model=ShowJob)
@@ -1502,7 +1502,7 @@ async def update_time_log_endpoint(
         raise e
     except Exception as e:
         logger.error(f"Error updating time log {time_log_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to update time log. Please try again.")
 
 @router.post('/time-log/{time_log_id}/clock-out', status_code=200, response_model=ClockOutResult)
 async def clock_out_endpoint(
@@ -1537,7 +1537,7 @@ async def clock_out_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error in clock-out reconciliation for time log {time_log_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to clock out. Please try again.")
 
 @router.post('/time-log/{timelog_id}/start-break', status_code=201, response_model=ShowBreakLog)
 async def start_break_endpoint(timelog_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):

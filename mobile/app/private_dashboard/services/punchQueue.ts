@@ -75,23 +75,30 @@ export const punchQueueStore = {
     idempotencyKey: string;
     timelogId?: number | null;
     dependsOnKey?: string | null;
-  }): Promise<string> => {
+  }): Promise<string | null> => {
     const rowId = args.idempotencyKey;
-    await db()
-      .insert(punchQueue)
-      .values({
-        id: rowId,
-        action: args.action,
-        timelogId: args.timelogId ?? null,
-        dependsOnKey: args.dependsOnKey ?? null,
-        payloadJson: JSON.stringify(args.payload),
-        idempotencyKey: args.idempotencyKey,
-        attempts: 0,
-        lastError: null,
-        createdAt: Date.now(),
-        deadLettered: 0,
-      });
-    return rowId;
+    try {
+      await db()
+        .insert(punchQueue)
+        .values({
+          id: rowId,
+          action: args.action,
+          timelogId: args.timelogId ?? null,
+          dependsOnKey: args.dependsOnKey ?? null,
+          payloadJson: JSON.stringify(args.payload),
+          idempotencyKey: args.idempotencyKey,
+          attempts: 0,
+          lastError: null,
+          createdAt: Date.now(),
+          deadLettered: 0,
+        });
+      return rowId;
+    } catch (e) {
+      // Never surface a SQLite error to the user — log it and let the caller
+      // fall through to its optimistic path (the punch was still accepted).
+      console.error("[punchQueue] enqueue failed", e);
+      return null;
+    }
   },
 
   /**
@@ -100,26 +107,36 @@ export const punchQueueStore = {
    * they target the real session. Returns the number of rows resolved.
    */
   resolveClockOuts: async (clockInKey: string, timelogId: number): Promise<number> => {
-    const rows = await db()
-      .select()
-      .from(punchQueue)
-      .where(eq(punchQueue.dependsOnKey, clockInKey));
-    if (rows.length === 0) return 0;
-    await db()
-      .update(punchQueue)
-      .set({ timelogId, dependsOnKey: null })
-      .where(eq(punchQueue.dependsOnKey, clockInKey));
-    return rows.length;
+    try {
+      const rows = await db()
+        .select()
+        .from(punchQueue)
+        .where(eq(punchQueue.dependsOnKey, clockInKey));
+      if (rows.length === 0) return 0;
+      await db()
+        .update(punchQueue)
+        .set({ timelogId, dependsOnKey: null })
+        .where(eq(punchQueue.dependsOnKey, clockInKey));
+      return rows.length;
+    } catch (e) {
+      console.error("[punchQueue] resolveClockOuts failed", e);
+      return 0;
+    }
   },
 
   /** Pending rows, oldest first, excluding dead-lettered. */
   listPending: async (): Promise<QueuedPunch[]> => {
-    const rows = await db()
-      .select()
-      .from(punchQueue)
-      .where(eq(punchQueue.deadLettered, 0))
-      .orderBy(asc(punchQueue.createdAt));
-    return rows.map(rowToEntry);
+    try {
+      const rows = await db()
+        .select()
+        .from(punchQueue)
+        .where(eq(punchQueue.deadLettered, 0))
+        .orderBy(asc(punchQueue.createdAt));
+      return rows.map(rowToEntry);
+    } catch (e) {
+      console.error("[punchQueue] listPending failed", e);
+      return [];
+    }
   },
 
   /** UI banner count — excludes dead-lettered. */
@@ -133,26 +150,38 @@ export const punchQueueStore = {
 
   /** Mark synced = delete the row. */
   markSynced: async (id: string): Promise<void> => {
-    await db().delete(punchQueue).where(eq(punchQueue.id, id));
+    try {
+      await db().delete(punchQueue).where(eq(punchQueue.id, id));
+    } catch (e) {
+      console.error("[punchQueue] markSynced failed", e);
+    }
   },
 
   /** Record a failed attempt; dead-letter once MAX_SYNC_ATTEMPTS is reached. */
   recordFailure: async (id: string, error: string): Promise<void> => {
-    const row = await db().select().from(punchQueue).where(eq(punchQueue.id, id)).limit(1);
-    const existing = row[0];
-    if (!existing) return;
-    const nextAttempts = existing.attempts + 1;
-    await db()
-      .update(punchQueue)
-      .set({
-        attempts: nextAttempts,
-        lastError: error,
-        deadLettered: nextAttempts >= MAX_SYNC_ATTEMPTS ? 1 : 0,
-      })
-      .where(eq(punchQueue.id, id));
+    try {
+      const row = await db().select().from(punchQueue).where(eq(punchQueue.id, id)).limit(1);
+      const existing = row[0];
+      if (!existing) return;
+      const nextAttempts = existing.attempts + 1;
+      await db()
+        .update(punchQueue)
+        .set({
+          attempts: nextAttempts,
+          lastError: error,
+          deadLettered: nextAttempts >= MAX_SYNC_ATTEMPTS ? 1 : 0,
+        })
+        .where(eq(punchQueue.id, id));
+    } catch (e) {
+      console.error("[punchQueue] recordFailure failed", e);
+    }
   },
 
   clearAll: async (): Promise<void> => {
-    await db().delete(punchQueue);
+    try {
+      await db().delete(punchQueue);
+    } catch (e) {
+      console.error("[punchQueue] clearAll failed", e);
+    }
   },
 };
