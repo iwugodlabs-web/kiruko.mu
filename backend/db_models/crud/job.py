@@ -536,8 +536,15 @@ async def get_time_logs_by_user(private_user_id: int, db: Session, date_from: Op
         logging.error(f"Unexpected Error while fetching user time logs: {ex}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(ex))
 
-async def update_time_log(time_log_id: int, time_log_data: dict, db: Session, client_ip: Optional[str] = None) -> Optional[TimeLogORM]:
-    """Update a time log record."""
+async def update_time_log(time_log_id: int, time_log_data: dict, db: Session, client_ip: Optional[str] = None, commit: bool = True) -> Optional[TimeLogORM]:
+    """Update a time log record.
+
+    ``commit=False`` flushes instead of committing (and threads through to the
+    geofence audit insert) so a transactional caller — the offline clock-out
+    supersede path in ``services.time_log_clock_out`` — can apply this plus its
+    own follow-up mutations (clear auto_closed, supersede audit) in a SINGLE
+    atomic transaction rather than two separate commits.
+    """
     try:
         time_log = db.query(TimeLogORM).filter(TimeLogORM.timelog_id == time_log_id).first()
         if not time_log:
@@ -624,6 +631,7 @@ async def update_time_log(time_log_id: int, time_log_data: dict, db: Session, cl
                             resource_type="TimeLog",
                             resource_id=time_log.timelog_id,
                             details={"punch": outcome.audit, "reason": outcome.reason},
+                            commit=commit,
                         )
             except HTTPException:
                 raise
@@ -706,8 +714,13 @@ async def update_time_log(time_log_id: int, time_log_data: dict, db: Session, cl
         from services.time_log_auto_approve import maybe_auto_approve
         maybe_auto_approve(db, time_log)
 
-        db.commit()
-        db.refresh(time_log)
+        if commit:
+            db.commit()
+            db.refresh(time_log)
+        else:
+            # Transactional caller owns the commit — flush so the row is
+            # persisted for follow-up mutations, but keep the transaction open.
+            db.flush()
         return time_log
     except SQLAlchemyError as e:
         db.rollback()

@@ -9,6 +9,7 @@ from typing import Optional, List
 
 from core import config
 from core.dependencies import get_current_user, require_company_read_access, require_company_scope, assert_company_access
+from core.idempotency import require_idempotency_key
 from core.model import Salary as SalaryORM, User
 from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult
 from sqlalchemy.orm import Session
@@ -1510,14 +1511,18 @@ async def clock_out_endpoint(
     payload: ClockOutPayload,
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(config.get_db)
+    db: Session = Depends(config.get_db),
+    _idempotency_key: str = Depends(require_idempotency_key),
 ):
     """Offline clock-out queue replay (Feature 1).
 
     POST (not PUT) so the Idempotency-Key middleware dedups retries — the queue
-    replays the same key until it sees a 2xx. Applies the employee's real
-    end_time when safe, or defers to a pending dispute when the session is
-    already approved/rejected/finalized/admin-edited (guard #1). See
+    replays the same key until it sees a 2xx. The Idempotency-Key header is
+    REQUIRED here (defense-in-depth): a replay without dedup could double-apply a
+    supersede or double-open a dispute, so a caller that omits it gets a 400
+    rather than risking a duplicate. Applies the employee's real end_time when
+    safe, or defers to a pending dispute when the session is already
+    approved/rejected/finalized/admin-edited (guard #1). See
     services/time_log_clock_out.py."""
     tl = _assert_timelog_access(time_log_id, current_user, db)
     client_ip = request.client.host if request.client else None
