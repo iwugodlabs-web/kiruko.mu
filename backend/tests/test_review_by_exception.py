@@ -50,7 +50,6 @@ class TestClassifier:
         tl = _tl(auto_closed=True, end_time=datetime(2026, 4, 1, 17, 0, tzinfo=timezone.utc))
         reasons = classify_exceptions(tl)
         assert "auto_closed" in reasons
-        assert "missing_clock_out_location" in reasons  # no clock_out fix
 
     def test_geofence_and_schedule_signals(self):
         from services.time_log_classifier import classify_exceptions
@@ -84,18 +83,6 @@ class TestClassifier:
 
         imprecise = _tl(geofence_check_json={"accuracy_m": 300.0, "reason": "inside"})
         assert "low_accuracy" in classify_exceptions(imprecise)
-
-    def test_missing_clock_out_location_only_when_ended(self):
-        from services.time_log_classifier import classify_exceptions
-
-        open_tl = _tl(end_time=None)  # still clocked in — no clock_out expected
-        assert "missing_clock_out_location" not in classify_exceptions(open_tl)
-
-        ended = _tl(
-            end_time=datetime(2026, 4, 1, 17, 0, tzinfo=timezone.utc),
-            location={"lat": 0, "lng": 0},
-        )
-        assert "missing_clock_out_location" in classify_exceptions(ended)
 
     def test_recompute_persists_columns(self):
         from services.time_log_classifier import recompute

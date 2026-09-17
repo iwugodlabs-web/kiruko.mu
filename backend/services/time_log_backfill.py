@@ -27,8 +27,6 @@ SET exception_reasons = array_remove(ARRAY[
                       WHERE d.time_log_id = time_logs.timelog_id
                         AND d.resolution = 'pending')
          THEN 'disputed' END,
-    CASE WHEN end_time IS NOT NULL AND location->>'clock_out' IS NULL
-         THEN 'missing_clock_out_location' END,
     CASE WHEN COALESCE((geofence_check_json->>'time_skew')::boolean, false)
          THEN 'time_skew' END
 ], NULL)

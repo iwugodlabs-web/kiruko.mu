@@ -56,7 +56,6 @@ const REASON_LABELS: Record<string, string> = {
   mock_location: "Mock GPS",
   low_accuracy: "Low accuracy",
   disputed: "Disputed",
-  missing_clock_out_location: "No clock-out fix",
   time_skew: "Time skew",
 };
 

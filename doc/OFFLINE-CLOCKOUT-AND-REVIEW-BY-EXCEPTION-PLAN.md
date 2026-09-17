@@ -164,8 +164,11 @@ validated in production first.
 - mock-location present in `geofence_check_json`
 - low-accuracy fix (accuracy over threshold)
 - pending `TimeLogDispute`
-- missing `clock_out` location
 - **`time_skew`** (from §3.5)
+
+> Removed after a production backfill: "missing `clock_out` location" fired on 84% of real
+> historical rows (their clock-outs predate the geofence `clock_out` capture), flooding the queue.
+> `auto_closed` already covers the "closed without a device clock-out" case.
 
 Everything else is **clean**.
 

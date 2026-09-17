@@ -25,7 +25,6 @@ REASON_KEYS = {
     "mock_location",
     "low_accuracy",
     "disputed",
-    "missing_clock_out_location",
     "time_skew",
 }
 
@@ -76,13 +75,10 @@ def classify_exceptions(tl) -> List[str]:
     if dispute is not None and getattr(dispute, "resolution", None) == "pending":
         reasons.append("disputed")
 
-    # A session with an end_time but no clock-out fix was closed by a non-
-    # location path (cron auto-close or admin force) — worth a glance.
-    if getattr(tl, "end_time", None) is not None:
-        loc = getattr(tl, "location", None)
-        clock_out = loc.get("clock_out") if isinstance(loc, dict) else None
-        if not clock_out:
-            reasons.append("missing_clock_out_location")
+    # NOTE: no "missing_clock_out_location" reason. Historical clock-outs predate
+    # the geofence `clock_out` location capture, so flagging on its absence floods
+    # the review queue (84% of a real production backfill). auto_closed already
+    # covers the "closed without a device clock-out" case.
 
     return reasons
 
