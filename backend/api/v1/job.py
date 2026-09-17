@@ -10,7 +10,7 @@ from typing import Optional, List
 from core import config
 from core.dependencies import get_current_user, require_company_read_access, require_company_scope, assert_company_access
 from core.model import Salary as SalaryORM, User
-from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee
+from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult
 from sqlalchemy.orm import Session
 from core.exceptions import EnrollmentException as onbording_exceptions
 from pydantic import BaseModel as PydanticBaseModel
@@ -50,6 +50,34 @@ def _assert_timelog_access(timelog_id: int, current_user, db):
     job = db.query(JobORM).filter(JobORM.job_id == tl.job_id).first()
     assert_company_access(current_user, getattr(job, 'company_id', None), db)
     return tl
+
+
+def _authorize_create_time_log(job: CreateTimeLog, current_user, db):
+    """Auth + tenant scope for the clock-in POST. This endpoint was previously
+    unauthenticated (no ``get_current_user``). Rules:
+      * superuser — any employee;
+      * private user — ONLY their own ``private_user_id`` (blocks a member from
+        punching for a co-worker via a forged id);
+      * company user — must have access to the job's company."""
+    from core.model import UserType, Job as JobORM
+
+    if getattr(current_user, "is_superuser", False):
+        return
+
+    if current_user.user_type == UserType.private:
+        pu = getattr(current_user, "private_user", None)
+        own_id = getattr(pu, "private_user_id", None)
+        if own_id is None or job.private_user_id != own_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only create time logs for your own account.",
+            )
+        return
+
+    job_row = db.query(JobORM).filter(JobORM.job_id == job.job_id).first()
+    if not job_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    assert_company_access(current_user, getattr(job_row, "company_id", None), db)
 
 
 def _assert_schedule_access(schedule_id: int, current_user, db):
@@ -1001,10 +1029,14 @@ async def get_user_job_by_id(private_user_id: int, db: Session = Depends(config.
 
 
 @router.post('/create-time-log', status_code=201, response_model=ShowTimeLog)
-async def create_daily_time_log(job: CreateTimeLog, request: Request, db: Session = Depends(config.get_db)):
+async def create_daily_time_log(job: CreateTimeLog, request: Request, db: Session = Depends(config.get_db), current_user: User = Depends(get_current_user)):
     # Log the incoming payload for debugging
     print(f"Incoming payload for create-time-log: {job}")
     sys.stdout.flush()
+
+    # M6 hardening — the clock-in POST used to be unauthenticated. Require auth
+    # and tenant-scope before any write (see _authorize_create_time_log).
+    _authorize_create_time_log(job, current_user, db)
 
     client_ip = request.client.host if request.client else None
 
@@ -1470,6 +1502,41 @@ async def update_time_log_endpoint(
         raise e
     except Exception as e:
         logger.error(f"Error updating time log {time_log_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.post('/time-log/{time_log_id}/clock-out', status_code=200, response_model=ClockOutResult)
+async def clock_out_endpoint(
+    time_log_id: int,
+    payload: ClockOutPayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(config.get_db)
+):
+    """Offline clock-out queue replay (Feature 1).
+
+    POST (not PUT) so the Idempotency-Key middleware dedups retries — the queue
+    replays the same key until it sees a 2xx. Applies the employee's real
+    end_time when safe, or defers to a pending dispute when the session is
+    already approved/rejected/finalized/admin-edited (guard #1). See
+    services/time_log_clock_out.py."""
+    tl = _assert_timelog_access(time_log_id, current_user, db)
+    client_ip = request.client.host if request.client else None
+    from services.time_log_clock_out import clock_out
+    try:
+        result = await clock_out(
+            db,
+            tl,
+            payload.end_time,
+            payload.location,
+            payload.geo_check,
+            current_user=current_user,
+            client_ip=client_ip,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in clock-out reconciliation for time log {time_log_id}: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @router.post('/time-log/{timelog_id}/start-break', status_code=201, response_model=ShowBreakLog)

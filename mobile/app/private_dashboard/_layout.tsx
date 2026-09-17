@@ -16,6 +16,7 @@ import { Platform, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useAuth from '../hooks/useAuth';
 import { useRequireAuth } from '@/components/AuthGuard';
+import { punchSyncWorker } from './services/syncWorker';
 
 export default function DashboardLayout() {
   const primary = useToken('colors', 'primary500');
@@ -39,6 +40,12 @@ export default function DashboardLayout() {
       router.replace('/private_dashboard/profile');
     }
   }, [user, router]);
+
+  // Offline clock-out queue — register the drain worker once the authed
+  // private subtree is live so queued clock-outs sync on network/appstate.
+  React.useEffect(() => {
+    if (ready) punchSyncWorker.register();
+  }, [ready]);
 
   // Hold rendering until auth is resolved AND the user is allowed here, so no
   // protected content flashes before a pending redirect settles.

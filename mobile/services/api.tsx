@@ -1426,11 +1426,15 @@ export const getJobHistory = async (jobId: number): Promise<any[] | { error: str
 
 // ==================== TIME LOG SERVICES ====================
 
-export const postClockIn = async (data: any): Promise<TimeLog | { error: string; status: number }> => {
+export const postClockIn = async (data: any, idempotencyKey?: string): Promise<TimeLog | { error: string; status?: number }> => {
     try {
         console.log('Creating time log (clock in/out):', data);
 
-        const response = await api.post('/job/create-time-log', data);
+        const response = await api.post(
+            '/job/create-time-log',
+            data,
+            idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
+        );
         console.log('Time log created successfully');
         return response.data;
     } catch (error) {
@@ -1692,6 +1696,24 @@ export const updateTimeLog = async (
         return response.data;
     } catch (error) {
         return { error: handleApiError(error, 'updating time log'), status: (error as any).response?.status || 500 };
+    }
+};
+
+// Offline clock-out queue replay — POSTs (not PUT) so the backend's
+// Idempotency-Key middleware dedups retries. The queue worker pins the exact
+// body + key and replays them verbatim.
+export const postClockOut = async (
+    timeLogId: number,
+    timeLogData: { end_time: string; location?: any; geo_check?: any },
+    idempotencyKey: string,
+): Promise<any | { error: string; status?: number }> => {
+    try {
+        const response = await api.post(`/job/time-log/${timeLogId}/clock-out`, timeLogData, {
+            headers: { "Idempotency-Key": idempotencyKey },
+        });
+        return response.data;
+    } catch (error: any) {
+        return { error: handleApiError(error, 'clocking out'), status: error.response?.status };
     }
 };
 

@@ -1,4 +1,5 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
+import { punchQueueStore, newIdempotencyKey } from './services/punchQueue';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -1368,13 +1369,31 @@ export default function ClockInPage() {
           location: locationData,
           geo_check,
         };
-        const response = await postClockIn(timeLogData);
+        let clockedInOffline = false;
+        const clockInKey = newIdempotencyKey();
+        const response = await postClockIn(timeLogData, clockInKey);
         if (response && !('error' in response)) {
           console.log('Clock-in successful, backend response:', response);
           setActiveTimeLogId(response.timelog_id);
           await AsyncStorage.setItem('activeTimeLogId', String(response.timelog_id));
         } else {
-          throw new Error((response as any)?.error || 'Failed to clock in on server.');
+          const status = (response as any)?.status;
+          const networkClass = status === undefined || status === 0 || (status >= 500 && status < 600);
+          if (networkClass) {
+            // Offline clock-in — queue it and mark clocked-in locally. The sync
+            // worker writes the real timelog_id back to AsyncStorage once the
+            // punch lands, so a later clock-out resolves it.
+            await punchQueueStore.enqueue({
+              action: 'clock_in',
+              payload: timeLogData,
+              idempotencyKey: clockInKey,
+            });
+            await AsyncStorage.setItem('pendingClockInKey', clockInKey);
+            clockedInOffline = true;
+            console.log('Clock-in queued for offline sync (network down).');
+          } else {
+            throw new Error((response as any)?.error || 'Failed to clock in on server.');
+          }
         }
 
         setIsClockedIn(true);
@@ -1404,19 +1423,54 @@ export default function ClockInPage() {
         }
       } else {
         // Clock Out
-        if (!activeTimeLogId) throw new Error("No active clock-in session found to clock out.");
+        const pendingClockInKey = await AsyncStorage.getItem('pendingClockInKey');
+        if (!activeTimeLogId && !pendingClockInKey) {
+          throw new Error("No active clock-in session found to clock out.");
+        }
 
         const timeLogData: Partial<TimeLog> = {
           end_time: nowISO,
           location: locationData,
           geo_check,
         };
-        const response = await updateTimeLog(activeTimeLogId, timeLogData);
 
-        if (response && !('error' in response)) {
-          console.log('Clock-out successful, backend response:', response);
+        if (activeTimeLogId) {
+          const response = await updateTimeLog(activeTimeLogId, timeLogData);
+          if (response && !('error' in response)) {
+            console.log('Clock-out successful, backend response:', response);
+          } else {
+            const status = (response as any)?.status;
+            const networkClass = status === undefined || status === 0 || (status >= 500 && status < 600);
+            if (networkClass) {
+              // Network failure at end-of-shift — queue the clock-out so it syncs
+              // later instead of leaving the session open for the cron to
+              // auto-close with a synthetic end time. Pin the exact body + a
+              // fresh idempotency key, then run the optimistic local clock-out.
+              await punchQueueStore.enqueue({
+                action: 'clock_out',
+                timelogId: activeTimeLogId,
+                payload: { end_time: nowISO, location: locationData, geo_check },
+                idempotencyKey: newIdempotencyKey(),
+              });
+              console.log('Clock-out queued for offline sync (network down).');
+            } else {
+              // 4xx — real rejection (deleted session, etc.). Do NOT optimistically
+              // clear state; surface the error so the employee can retry.
+              throw new Error((response as any)?.error || 'Failed to clock out on server.');
+            }
+          }
         } else {
-          throw new Error((response as any)?.error || 'Failed to clock out on server.');
+          // Clock-in is still pending offline — queue the clock-out against the
+          // pending clock-in. The sync worker relays the server's real
+          // timelog_id onto this row once the clock-in lands.
+          await punchQueueStore.enqueue({
+            action: 'clock_out',
+            timelogId: null,
+            dependsOnKey: pendingClockInKey ?? undefined,
+            payload: { end_time: nowISO, location: locationData, geo_check },
+            idempotencyKey: newIdempotencyKey(),
+          });
+          console.log('Clock-out queued against pending clock-in (offline).');
         }
 
         setIsClockedIn(false);
@@ -1426,6 +1480,7 @@ export default function ClockInPage() {
         await AsyncStorage.removeItem('currentClockInTime');
         await AsyncStorage.removeItem('isClockedIn');
         await AsyncStorage.removeItem('activeTimeLogId');
+        await AsyncStorage.removeItem('pendingClockInKey');
         await AsyncStorage.removeItem('breakStart');
         await AsyncStorage.removeItem('breakDurations');
         await AsyncStorage.removeItem('isBreaking');

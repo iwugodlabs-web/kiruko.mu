@@ -945,6 +945,13 @@ export interface TimeLogReviewItem {
   // is the clock-in fix; `clock_out` sub-key is the clock-out fix (present only
   // when the employee clocked out from a location-capable device).
   location?: Record<string, unknown> | null;
+  // Review-by-exception — persisted classification. needs_review=true means the
+  // session carries at least one exception reason; null = not yet classified.
+  needs_review?: boolean | null;
+  exception_reasons?: string[] | null;
+  // Random-sample audit — true when a clean session was deterministically pulled
+  // into the review queue (Company.review_sample_pct).
+  sampled_for_review?: boolean;
 }
 
 export type TimeLogStatus = 'all' | 'pending' | 'approved' | 'rejected' | 'disputed';
@@ -956,7 +963,12 @@ export const timeLogReview = {
   list: async (
     companyId: number,
     month: string,  // 'YYYY-MM'
-    opts?: { privateUserId?: number; status?: TimeLogStatus; source?: TimeLogSource },
+    opts?: {
+      privateUserId?: number;
+      status?: TimeLogStatus;
+      source?: TimeLogSource;
+      needsReview?: boolean;
+    },
   ): Promise<ApiResult<TimeLogReviewItem[]>> => {
     try {
       const r = await api.get(`/companies/${companyId}/time-logs`, {
@@ -966,6 +978,8 @@ export const timeLogReview = {
           status: opts?.status ?? 'all',
           // M30 — forward only when set so the backend default ("all sources") holds.
           source: opts?.source,
+          // Review-by-exception — only forward when explicitly set.
+          needs_review: opts?.needsReview,
         },
       });
       return r.data;
@@ -995,6 +1009,20 @@ export const timeLogReview = {
       const r = await api.post(
         `/companies/${companyId}/time-logs/approve`,
         { time_log_ids: timeLogIds },
+      );
+      return r.data;
+    } catch (e) { return normalizeError(e); }
+  },
+
+  // Review-by-exception P2 — one-click "approve all clean this month".
+  approveClean: async (
+    companyId: number, month: string,
+  ): Promise<ApiResult<{ approved_count: number; skipped_count: number; audit_log_id: number | null }>> => {
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/time-logs/approve-clean`,
+        undefined,
+        { params: { month } },
       );
       return r.data;
     } catch (e) { return normalizeError(e); }

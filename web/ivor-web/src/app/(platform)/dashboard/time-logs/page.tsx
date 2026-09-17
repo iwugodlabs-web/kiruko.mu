@@ -45,6 +45,45 @@ function currentMonth(): string {
 }
 
 
+// Review-by-exception — human labels for the server's reason keys. Rendered as
+// chips so the "why does this need review?" answer is one glance.
+const REASON_LABELS: Record<string, string> = {
+  auto_closed: "Auto-closed",
+  out_of_geofence: "Out of geofence",
+  out_of_schedule: "Off-schedule",
+  late: "Late",
+  overtime_unconfirmed: "OT unconfirmed",
+  mock_location: "Mock GPS",
+  low_accuracy: "Low accuracy",
+  disputed: "Disputed",
+  missing_clock_out_location: "No clock-out fix",
+  time_skew: "Time skew",
+};
+
+
+function ExceptionChips({ log }: { log: TimeLogReviewItem }) {
+  const reasons = (log.exception_reasons ?? []).filter((r) => r in REASON_LABELS);
+  if (reasons.length === 0 && !log.sampled_for_review) return null;
+  return (
+    <div className="inline-flex items-center gap-1 flex-wrap">
+      {log.sampled_for_review && (
+        <span className="inline-flex items-center gap-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 text-xs">
+          <ShieldQuestion className="h-3 w-3" /> Audit sample
+        </span>
+      )}
+      {reasons.map((r) => (
+        <span
+          key={r}
+          className="inline-flex items-center gap-1 rounded bg-zinc-100 dark:bg-gray-800 text-zinc-700 dark:text-gray-200 px-2 py-0.5 text-xs"
+        >
+          {REASON_LABELS[r]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+
 // ---------------------------------------------------------------------------
 // Reject reason modal — required min_length=20.
 // ---------------------------------------------------------------------------
@@ -240,6 +279,9 @@ export default function TimeLogsPage() {
   const [status, setStatus] = useState<TimeLogStatus>("pending");
   // M30 — source filter: "all" maps to "no filter" when calling the API.
   const [source, setSource] = useState<TimeLogSource | "all">("all");
+  // Review-by-exception — default to the exception-only view so admins triage
+  // the few sessions that need judgment instead of re-examining every clean one.
+  const [needsReviewOnly, setNeedsReviewOnly] = useState(true);
   // Auto-clockout — client-side toggle to isolate sessions the system closed
   // (max-shift or scheduled-end) rather than the employee. The backend has no
   // dedicated filter param, so we narrow the already-fetched month locally.
@@ -250,6 +292,7 @@ export default function TimeLogsPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [disputeLog, setDisputeLog] = useState<TimeLogReviewItem | null>(null);
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [approvingClean, setApprovingClean] = useState(false);
   // #20 — grouped-by-employee/day view (default) vs the legacy flat table.
   const [view, setView] = useState<"grouped" | "flat">("grouped");
   // "Why this screen" explainer — dismissible, remembered so it doesn't nag.
@@ -270,12 +313,13 @@ export default function TimeLogsPage() {
     const r = await timeLogReview.list(companyId, month, {
       status,
       source: source === "all" ? undefined : source,
+      needsReview: needsReviewOnly ? true : undefined,
     });
     setLoading(false);
     if (isError(r)) { toast.error(r.error); setLogs([]); return; }
     setLogs(r);
     setSelected(new Set());
-  }, [companyId, month, status, source]);
+  }, [companyId, month, status, source, needsReviewOnly]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -350,6 +394,18 @@ export default function TimeLogsPage() {
     const r = await timeLogReview.approve(companyId, Array.from(selected));
     if (isError(r)) { toast.error(r.error); return; }
     toast.success(`Approved ${r.approved_count}`);
+    refresh();
+  }
+
+  // Review-by-exception P2 — approve every clean (non-flagged, non-sampled)
+  // session this month in one click. Deterministic complement of "Needs review".
+  async function approveAllClean() {
+    if (!companyId) return;
+    setApprovingClean(true);
+    const r = await timeLogReview.approveClean(companyId, month);
+    setApprovingClean(false);
+    if (isError(r)) { toast.error(r.error); return; }
+    toast.success(`Approved ${r.approved_count} clean clock-in${r.approved_count === 1 ? "" : "s"}`);
     refresh();
   }
 
@@ -483,6 +539,46 @@ export default function TimeLogsPage() {
               {s.charAt(0).toUpperCase() + s.slice(1)}
             </button>
           ))}
+        </div>
+        {/* Review-by-exception — exception-only toggle (default ON). When on,
+            the list is narrowed to sessions that need judgment (plus the
+            deterministic random-audit sample of clean ones). */}
+        <div className="flex items-center gap-1 text-sm border-l border-zinc-200 dark:border-gray-800 pl-3 ml-1">
+          <button
+            type="button"
+            onClick={() => setNeedsReviewOnly((v) => !v)}
+            title="Show only sessions flagged for review (auto-closed, late, off-schedule, out-of-geofence, unconfirmed overtime, etc.) plus a random audit sample of clean sessions."
+            className={`px-2.5 py-1 rounded-md inline-flex items-center gap-1 ${
+              needsReviewOnly
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 dark:text-gray-400 hover:bg-zinc-100 dark:hover:bg-gray-800"
+            }`}
+          >
+            <ShieldAlert className="h-3 w-3" /> Needs review
+          </button>
+          <button
+            type="button"
+            onClick={() => setNeedsReviewOnly(false)}
+            className={`px-2.5 py-1 rounded-md ${
+              !needsReviewOnly
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 dark:text-gray-400 hover:bg-zinc-100 dark:hover:bg-gray-800"
+            }`}
+          >
+            All
+          </button>
+          {/* Review-by-exception P2 — one-click approve every clean session
+              this month (non-flagged, non-sampled). */}
+          <button
+            type="button"
+            onClick={approveAllClean}
+            disabled={approvingClean}
+            title="Approve every clean (non-flagged) clock-in this month in one click. Flagged and audit-sampled sessions are left for manual review."
+            className="px-2.5 py-1 rounded-md inline-flex items-center gap-1 text-sm text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {approvingClean ? "Approving…" : "Approve all clean"}
+          </button>
         </div>
         {/* M30 — source filter. Distinct visual treatment (border + neutral
             color when active) so it doesn't compete with the primary status
@@ -785,6 +881,9 @@ export default function TimeLogsPage() {
                         </span>
                       )}
                     </div>
+                    {/* Review-by-exception — server-computed reason chips + audit
+                        sample marker. */}
+                    <ExceptionChips log={l} />
                     {/* Employee's own explanation, shown directly — not a
                         hover tooltip — so HR doesn't miss it during review. */}
                     {l.is_late && (

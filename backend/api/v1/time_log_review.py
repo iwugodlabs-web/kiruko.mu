@@ -40,6 +40,7 @@ from core.auth_guards import require_company_admin
 from core.dependencies import get_current_user
 from core.model import (
     AuditLog,
+    Company,
     Job,
     PrivateUser,
     TimeLog,
@@ -118,6 +119,15 @@ class TimeLogReviewItem(BaseModel):
     # `clock_out` key. `Any` (not `dict`) so a legacy string location can't fail
     # response validation and 500 the whole list.
     location: Optional[Any] = None
+    # Review-by-exception — persisted classification. needs_review=True means the
+    # session carries at least one exception reason (see exception_reasons) and
+    # should be triaged; None = not yet classified (backfill pending).
+    needs_review: Optional[bool] = None
+    exception_reasons: Optional[List[str]] = None
+    # Random-sample audit — true when a *clean* session was deterministically
+    # pulled into the review queue (Company.review_sample_pct). Lets the UI mark
+    # "audit sample" distinctly from a signal-driven exception.
+    sampled_for_review: bool = False
 
 
 class TimeLogPatch(BaseModel):
@@ -181,7 +191,7 @@ class DisputeRead(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _to_review_item(tl: TimeLog, employee_name: str, employee_code: Optional[str] = None) -> TimeLogReviewItem:
+def _to_review_item(tl: TimeLog, employee_name: str, employee_code: Optional[str] = None, sampled_for_review: bool = False) -> TimeLogReviewItem:
     dispute_status = tl.dispute.resolution if tl.dispute is not None else None
     job = getattr(tl, "job", None)
     sched_start = job.work_start_time.strftime("%H:%M") if job and job.work_start_time else None
@@ -213,6 +223,9 @@ def _to_review_item(tl: TimeLog, employee_name: str, employee_code: Optional[str
         scheduled_start=sched_start,
         scheduled_end=sched_end,
         location=tl.location,
+        needs_review=getattr(tl, "needs_review", None),
+        exception_reasons=getattr(tl, "exception_reasons", None) or [],
+        sampled_for_review=sampled_for_review,
     )
 
 
@@ -271,6 +284,10 @@ def list_time_logs(
         None,
         description="M30 — optional source filter: mobile | web | kiosk | admin",
     ),
+    needs_review: Optional[bool] = Query(
+        None,
+        description="Review-by-exception filter: true=exceptions only, false=clean only, unset=all",
+    ),
     db: Session = Depends(config.get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -306,11 +323,36 @@ def list_time_logs(
     elif status != "all":
         raise HTTPException(status_code=400, detail=f"Unknown status filter: {status}")
 
+    # Review-by-exception + random-sample audit. The needs_review bucket =
+    # exceptions (True) + unclassified (NULL, pre-backfill) + a deterministic
+    # sample of clean sessions (Company.review_sample_pct). Doing the partition
+    # in Python keeps the sample overlay live (depends on company config) while
+    # the signal classification stays persisted.
+    company = db.query(Company).filter(Company.company_id == company_id).first()
+    sample_pct = int(getattr(company, "review_sample_pct", 0) or 0)
+    from services.time_log_classifier import is_sampled_for_review
+
     rows = q.order_by(TimeLog.start_time).all()
-    return [
-        _to_review_item(tl, f"{pu.first_name} {pu.last_name}".strip(), pu.employee_code)
-        for tl, pu in rows
-    ]
+
+    items: list[TimeLogReviewItem] = []
+    for tl, pu in rows:
+        name = f"{pu.first_name} {pu.last_name}".strip()
+        tl_needs = getattr(tl, "needs_review", None)
+        if needs_review is True:
+            if tl_needs is True or tl_needs is None:
+                items.append(_to_review_item(tl, name, pu.employee_code))
+            elif tl_needs is False and sample_pct and is_sampled_for_review(
+                company_id, tl.timelog_id, sample_pct
+            ):
+                items.append(
+                    _to_review_item(tl, name, pu.employee_code, sampled_for_review=True)
+                )
+        elif needs_review is False:
+            if tl_needs is False:
+                items.append(_to_review_item(tl, name, pu.employee_code))
+        else:
+            items.append(_to_review_item(tl, name, pu.employee_code))
+    return items
 
 
 @router.patch("/time-logs/{time_log_id}", response_model=TimeLogReviewItem)
@@ -365,18 +407,9 @@ def patch_time_log(
     # a log inside one isn't allowed — the fix there is a retroactive
     # adjustment in the next open run, not editing history.
     if tl.start_time:
-        from core.model import PayrollRun
-        log_date = tl.start_time.date()
-        finalized = (
-            db.query(PayrollRun)
-            .filter(
-                PayrollRun.company_id == tl.job.company_id,
-                PayrollRun.status == "finalized",
-                PayrollRun.period_start <= log_date,
-                PayrollRun.period_end >= log_date,
-            )
-            .first()
-        )
+        from services.payroll_period import session_in_finalized_period
+
+        finalized = session_in_finalized_period(db, tl.job.company_id, tl.start_time)
         if finalized is not None:
             raise HTTPException(
                 status_code=409,
@@ -403,6 +436,11 @@ def patch_time_log(
         tl.admin_approved_at = None
         tl.admin_approved_by_user_id = None
 
+    # Review-by-exception — admin edits change signal fields (times, overtime,
+    # location); recompute the persisted classification.
+    from services.time_log_classifier import recompute as _recompute_classification
+    _recompute_classification(tl)
+
     db.add(
         AuditLog(
             actor_user_id=current_user.user_id,
@@ -425,25 +463,23 @@ def patch_time_log(
     return _to_review_item(tl, f"{pu.first_name} {pu.last_name}".strip(), pu.employee_code)
 
 
-@router.post(
-    "/companies/{company_id}/time-logs/approve",
-    response_model=BulkApproveResult,
-)
-def approve_time_logs(
+def _approve_logs_core(
+    db: Session,
     company_id: int,
-    payload: BulkIdsPayload,
-    db: Session = Depends(config.get_db),
-    current_user: User = Depends(get_current_user),
-):
-    _require_company_admin_gated(current_user, company_id, db, "edit_hours")
-    rows = _ensure_logs_belong_to_company(db, company_id, payload.time_log_ids)
+    time_log_ids: List[int],
+    current_user: User,
+    *,
+    action: str = "time_log.bulk_approve",
+) -> BulkApproveResult:
+    """Shared approval mutation for the explicit-id and approve-clean paths."""
+    rows = _ensure_logs_belong_to_company(db, company_id, time_log_ids)
     rows_by_id = {r.timelog_id: r for r in rows}
 
     approved = 0
     skipped = 0
     notif_targets: list[tuple[int, int]] = []  # (employee user_id, time_log_id)
     now = datetime.now(timezone.utc)
-    for tl_id in payload.time_log_ids:
+    for tl_id in time_log_ids:
         tl = rows_by_id.get(tl_id)
         if tl is None:
             skipped += 1
@@ -477,12 +513,12 @@ def approve_time_logs(
 
     audit = AuditLog(
         actor_user_id=current_user.user_id,
-        action="time_log.bulk_approve",
+        action=action,
         target_type="time_logs",
         target_id=str(company_id),
         meta={
             "company_id": company_id,
-            "time_log_ids": payload.time_log_ids,
+            "time_log_ids": time_log_ids,
             "approved_count": approved,
             "skipped_count": skipped,
         },
@@ -504,6 +540,46 @@ def approve_time_logs(
 
     return BulkApproveResult(
         approved_count=approved, skipped_count=skipped, audit_log_id=audit.id,
+    )
+
+
+@router.post(
+    "/companies/{company_id}/time-logs/approve",
+    response_model=BulkApproveResult,
+)
+def approve_time_logs(
+    company_id: int,
+    payload: BulkIdsPayload,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_company_admin_gated(current_user, company_id, db, "edit_hours")
+    return _approve_logs_core(db, company_id, payload.time_log_ids, current_user)
+
+
+@router.post(
+    "/companies/{company_id}/time-logs/approve-clean",
+    response_model=BulkApproveResult,
+)
+def approve_clean_time_logs(
+    company_id: int,
+    month: str = Query(..., description="YYYY-MM"),
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """One-click "approve all clean this month" (review-by-exception P2).
+
+    Approves every clean, pending session in the month that is NOT sampled for
+    audit — the deterministic complement of the "Needs review" bucket."""
+    _require_company_admin_gated(current_user, company_id, db, "edit_hours")
+    start, end = _month_range(month)
+    from services.time_log_auto_approve import clean_pending_ids
+
+    ids = clean_pending_ids(db, company_id, start, end)
+    if not ids:
+        return BulkApproveResult(approved_count=0, skipped_count=0, audit_log_id=None)
+    return _approve_logs_core(
+        db, company_id, ids, current_user, action="time_log.bulk_approve_clean",
     )
 
 
@@ -663,6 +739,12 @@ def create_dispute(
         )
         db.add(d)
 
+    # Link the dispute onto the TimeLog so the review-by-exception classifier
+    # sees the pending dispute and re-flags the session for review.
+    tl.dispute = d
+    from services.time_log_classifier import recompute as _recompute_classification
+    _recompute_classification(tl)
+
     db.add(
         AuditLog(
             actor_user_id=current_user.user_id,
@@ -735,6 +817,10 @@ def resolve_dispute(
         tl.admin_rejected_at = None
         tl.admin_rejected_by_user_id = None
         tl.admin_rejected_reason = None
+
+    # Review-by-exception — a resolved dispute is no longer "disputed"; recompute.
+    from services.time_log_classifier import recompute as _recompute_classification
+    _recompute_classification(tl)
 
     db.add(
         AuditLog(

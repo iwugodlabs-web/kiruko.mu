@@ -35,3 +35,30 @@ export const kioskQueue = sqliteTable("kiosk_queue", {
   // listPending() filters these out so the worker stops retrying.
   deadLettered: integer("dead_lettered").notNull().default(0),
 });
+
+/**
+ * Employee offline punch queue (Feature 1). When the authed employee's clock-in
+ * or clock-out request fails on a network-class error, the full request body is
+ * pinned here and replayed by services/syncWorker.ts once the network returns.
+ *
+ * Clock-in replays POST /job/create-time-log; clock-out replays
+ * POST /job/time-log/{id}/clock-out. `payloadJson` holds the EXACT request body
+ * so a retry replays the same bytes (the idempotency middleware 409s on a
+ * reused key with a different body). `timelogId` is the clock-out target id
+ * (NULL for clock-in).
+ */
+export const punchQueue = sqliteTable("punch_queue", {
+  id: text("id").primaryKey(), // idempotency key (UUID) — also the row id
+  action: text("action").notNull(), // 'clock_in' | 'clock_out'
+  timelogId: integer("timelog_id"), // clock_out target; NULL for clock_in
+  // For a clock_out queued while its clock_in is still pending offline: the
+  // pending clock_in's idempotency key. The sync worker relays the server's
+  // real timelog_id onto this row once that clock_in lands.
+  dependsOnKey: text("depends_on_key"),
+  payloadJson: text("payload_json").notNull(), // exact request body (JSON)
+  idempotencyKey: text("idempotency_key").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull(), // Date.now() — oldest-first drain
+  deadLettered: integer("dead_lettered").notNull().default(0),
+});
