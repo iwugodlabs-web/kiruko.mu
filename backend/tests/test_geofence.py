@@ -190,6 +190,28 @@ class TestResolvePunch:
         assert out.inside is False
         assert out.reason == "mock_detected"
 
+    def test_string_fix_timestamp_does_not_crash(self, db, geofenced_company):
+        # The mobile clock-out path builds PunchContext from a raw JSON dict,
+        # so fix_timestamp arrives as an ISO-8601 string, not a datetime.
+        # Regression: this crashed both the audit pack (.isoformat) and the
+        # staleness gate (_to_utc). A fresh string fix must resolve normally.
+        company, set_company_mode, _ = geofenced_company
+        set_company_mode("block")
+        fresh = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        ctx = PunchContext(latitude=HQ_LAT, longitude=HQ_LNG, accuracy_m=5, fix_timestamp=fresh)
+        assert isinstance(ctx.fix_timestamp, datetime)
+        out = resolve_punch(company, _fences(db, company.company_id), ctx)
+        assert out.inside is True
+        assert out.audit["fix_timestamp"] is not None
+
+    def test_stale_string_fix_timestamp_flagged_unverifiable(self, db, geofenced_company):
+        company, set_company_mode, _ = geofenced_company
+        set_company_mode("block")
+        stale = datetime(2020, 1, 1, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+        ctx = PunchContext(latitude=HQ_LAT, longitude=HQ_LNG, accuracy_m=5, fix_timestamp=stale)
+        out = resolve_punch(company, _fences(db, company.company_id), ctx)
+        assert out.reason == "stale_fix"
+
     def test_no_location_blocks_in_block_mode(self, db, geofenced_company):
         company, set_company_mode, _ = geofenced_company
         set_company_mode("block")
