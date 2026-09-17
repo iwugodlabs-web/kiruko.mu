@@ -1,5 +1,6 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
 import { punchQueueStore, newIdempotencyKey } from './services/punchQueue';
+import { punchSyncWorker } from './services/syncWorker';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -400,6 +401,9 @@ export default function ClockInPage() {
   const [userDetails, setUserDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Offline queue — count of clock actions waiting to reach the server. Fed by
+  // the sync worker's drain events; drives the "waiting to sync" banner.
+  const [queuedPunchCount, setQueuedPunchCount] = useState(0);
 
   // Notifications and Overtime State
   const [activeOvertimeNotification, setActiveOvertimeNotification] = useState<Notification | null>(null);
@@ -991,6 +995,21 @@ export default function ClockInPage() {
       }
     }
   }, [user, jobId, userDetails, activeTimeLogId]);
+
+  // Offline queue banner — seed the count on mount (covers a queue left over
+  // from a prior session) then track drain events. A dead-letter reverts local
+  // clock state (handled globally in _layout); refresh the timesheet so this
+  // screen reflects the reverted state too.
+  useEffect(() => {
+    punchQueueStore.count().then(setQueuedPunchCount).catch(() => undefined);
+    const unsub = punchSyncWorker.onChange(({ pending, deadLetters }) => {
+      setQueuedPunchCount(pending);
+      if (deadLetters && deadLetters.length > 0) {
+        loadTimeLogsFromDatabase().catch(() => undefined);
+      }
+    });
+    return unsub;
+  }, [loadTimeLogsFromDatabase]);
 
   const checkNotifications = useCallback(async () => {
     try {
@@ -1855,6 +1874,28 @@ export default function ClockInPage() {
           }
         >
           <View>
+            {/* Offline queue banner — clock actions saved locally, waiting to
+                reach the server. Clears as the sync worker drains them. */}
+            {queuedPunchCount > 0 && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginHorizontal: 8,
+                  marginBottom: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  backgroundColor: Palette.gray100,
+                }}
+              >
+                <MaterialIcons name="cloud-upload" size={16} color={Palette.gray500} />
+                <Text style={{ flex: 1, fontSize: 13, color: Palette.gray700 }}>
+                  {t('clockIn.syncPendingBanner', { count: queuedPunchCount })}
+                </Text>
+              </View>
+            )}
             {/* Page Header Banner */}
             <LinearGradient
               colors={[Palette.gray100, Palette.gray50, 'white']}

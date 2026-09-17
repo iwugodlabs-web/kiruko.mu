@@ -21,16 +21,30 @@ import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, type AppStateStatus } from "react-native";
 import { postClockIn, postClockOut } from "../../../services/api";
-import { punchQueueStore, type QueuedPunch } from "./punchQueue";
+import { punchQueueStore, type QueuedAction, type QueuedPunch } from "./punchQueue";
 
 export interface SyncResult {
   attempted: number;
   succeeded: number;
   failed: number;
+  deadLettered: number;
   remaining: number;
 }
 
-type SyncListener = (status: { pending: number; lastResult: "ok" | "partial" | "error" | null }) => void;
+/** A punch that exhausted its retry budget and was dropped. The UI reverts the
+ * optimistic clock state and alerts the employee to redo it (guard #3). */
+export interface DeadLetter {
+  action: QueuedAction;
+  timelogId: number | null;
+}
+
+type SyncListener = (status: {
+  pending: number;
+  lastResult: "ok" | "partial" | "error" | null;
+  deadLetters: DeadLetter[];
+}) => void;
+
+type RowOutcome = "ok" | "retry" | "dead";
 
 let _inFlight: Promise<SyncResult> | null = null;
 let _registered = false;
@@ -40,33 +54,50 @@ function isApiError(r: unknown): r is { error: string; status?: number } {
   return typeof r === "object" && r !== null && "error" in (r as Record<string, unknown>);
 }
 
-async function _drainOnce(): Promise<SyncResult> {
+async function _drainOnce(): Promise<{ result: SyncResult; deadLetters: DeadLetter[] }> {
+  // Snapshot the queue ONCE (oldest-first) and attempt each row at most once per
+  // drain. Re-reading the head every iteration (the old approach) meant a row
+  // that failed a transient 4xx — e.g. a token that expired mid-drain — was
+  // retried immediately, burning all MAX_SYNC_ATTEMPTS in one tight loop and
+  // dead-lettering a legitimate punch. Spacing retries across triggers (network
+  // flip, app foreground) is exactly what the attempt budget is for.
+  const snapshot = await punchQueueStore.listPending();
   let attempted = 0;
   let succeeded = 0;
   let failed = 0;
-  // Re-fetch the oldest pending row each iteration: syncing a clock_in resolves
-  // downstream clock_outs (dependsOnKey → real timelog_id), so they must be
-  // re-read before draining.
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const pending = await punchQueueStore.listPending();
-    if (pending.length === 0) break;
-    const row = pending[0];
+  const deadLetters: DeadLetter[] = [];
+
+  for (const snap of snapshot) {
+    let row = snap;
     if (row.action === "clock_out" && row.timelogId == null) {
-      // Still waiting on a pending (or dead-lettered) clock-in — leave it and
-      // stop so we don't spin.
-      break;
+      // A clock_in synced earlier in THIS drain may have resolved this
+      // clock_out's timelog_id — re-read before deciding.
+      const fresh = await punchQueueStore.getById(row.id);
+      if (!fresh || fresh.deadLettered) continue; // synced/removed/dead meanwhile
+      row = fresh;
+      if (row.timelogId == null) continue; // clock_in still pending — next drain
     }
     attempted += 1;
-    const ok = await _syncRow(row);
-    if (ok) succeeded += 1;
-    else failed += 1;
+    const outcome = await _syncRow(row);
+    if (outcome === "ok") {
+      succeeded += 1;
+    } else {
+      failed += 1;
+      if (outcome === "dead") {
+        deadLetters.push({ action: row.action, timelogId: row.timelogId });
+        await _reconcileDeadLetter(row);
+      }
+    }
   }
+
   const remaining = (await punchQueueStore.listPending()).length;
-  return { attempted, succeeded, failed, remaining };
+  return {
+    result: { attempted, succeeded, failed, deadLettered: deadLetters.length, remaining },
+    deadLetters,
+  };
 }
 
-async function _syncRow(row: QueuedPunch): Promise<boolean> {
+async function _syncRow(row: QueuedPunch): Promise<RowOutcome> {
   let payload: Record<string, unknown> = {};
   try {
     payload = JSON.parse(row.payloadJson);
@@ -87,11 +118,14 @@ async function _syncRow(row: QueuedPunch): Promise<boolean> {
     const networkClass =
       r.status === undefined || r.status === 0 || (r.status >= 500 && r.status < 600);
     if (networkClass) {
-      // Backend is the problem — bail out without burning attempts.
+      // Backend is the problem — bail out of the whole drain without burning
+      // this row's attempts. Resumes on the next trigger.
       throw new Error("network_still_down");
     }
-    await punchQueueStore.recordFailure(row.id, `${r.status ?? 0}: ${r.error}`);
-    return false;
+    // 4xx — a real rejection. Record ONE failure; if that tips the row over the
+    // attempt budget it's now dead-lettered and the caller reconciles state.
+    const nowDead = await punchQueueStore.recordFailure(row.id, `${r.status ?? 0}: ${r.error}`);
+    return nowDead ? "dead" : "retry";
   }
   // Success — including the idempotency replay path and "deferred" results
   // (the server accepted the correction and routed it to review).
@@ -111,7 +145,36 @@ async function _syncRow(row: QueuedPunch): Promise<boolean> {
     }
   }
   await punchQueueStore.markSynced(row.id);
-  return true;
+  return "ok";
+}
+
+/**
+ * Guard #3 — a queued punch was dropped after exhausting retries. The optimistic
+ * UI told the employee it succeeded; it didn't, and the server never recorded
+ * it. Revert local state so it matches the server, so the employee isn't left
+ * believing they clocked out (with the session still open for the cron to
+ * auto-close). The onChange dead-letter event drives the visible alert.
+ */
+async function _reconcileDeadLetter(row: QueuedPunch): Promise<void> {
+  try {
+    if (row.action === "clock_out") {
+      // The server session is still OPEN — the employee is actually still
+      // clocked in. Restore that so they can retry the clock-out.
+      if (row.timelogId != null) {
+        await AsyncStorage.setItem("activeTimeLogId", String(row.timelogId));
+        await AsyncStorage.setItem("isClockedIn", "true");
+      }
+    } else {
+      // A clock_in that never landed — the employee is NOT clocked in. Clear the
+      // optimistic clocked-in state so the UI stops showing an active session.
+      await AsyncStorage.removeItem("activeTimeLogId");
+      await AsyncStorage.removeItem("pendingClockInKey");
+      await AsyncStorage.removeItem("isClockedIn");
+      await AsyncStorage.removeItem("currentClockInTime");
+    }
+  } catch {
+    /* best-effort — the dead-letter alert still fires regardless */
+  }
 }
 
 export const punchSyncWorker = {
@@ -119,13 +182,19 @@ export const punchSyncWorker = {
     if (_inFlight) return _inFlight;
     _inFlight = (async () => {
       try {
-        const result = await _drainOnce();
-        await _notify(result);
+        const { result, deadLetters } = await _drainOnce();
+        await _notify(result, deadLetters);
         return result;
       } catch {
         const remaining = (await punchQueueStore.listPending().catch(() => [])).length;
-        const result: SyncResult = { attempted: 0, succeeded: 0, failed: 0, remaining };
-        await _notify(result, "error");
+        const result: SyncResult = {
+          attempted: 0,
+          succeeded: 0,
+          failed: 0,
+          deadLettered: 0,
+          remaining,
+        };
+        await _notify(result, [], "error");
         return result;
       } finally {
         _inFlight = null;
@@ -162,7 +231,11 @@ export const punchSyncWorker = {
   },
 };
 
-async function _notify(result: SyncResult, forceStatus?: "ok" | "partial" | "error"): Promise<void> {
+async function _notify(
+  result: SyncResult,
+  deadLetters: DeadLetter[],
+  forceStatus?: "ok" | "partial" | "error",
+): Promise<void> {
   const pending = result.remaining;
   let lastResult: "ok" | "partial" | "error" | null;
   if (forceStatus) {
@@ -178,7 +251,7 @@ async function _notify(result: SyncResult, forceStatus?: "ok" | "partial" | "err
   }
   for (const l of _listeners) {
     try {
-      l({ pending, lastResult });
+      l({ pending, lastResult, deadLetters });
     } catch {
       /* don't crash siblings */
     }

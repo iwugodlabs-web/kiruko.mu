@@ -12,8 +12,9 @@ import {
   Settings,
 } from 'lucide-react-native';
 import React from 'react';
-import { Platform, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { Alert, Platform, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import useAuth from '../hooks/useAuth';
 import { useRequireAuth } from '@/components/AuthGuard';
 import { punchSyncWorker } from './services/syncWorker';
@@ -24,6 +25,7 @@ export default function DashboardLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { t } = useTranslation();
 
   // Auth boundary — this runs before any child screen renders, so it gates
   // EVERY page in the private dashboard (including entries via notification
@@ -46,6 +48,25 @@ export default function DashboardLayout() {
   React.useEffect(() => {
     if (ready) punchSyncWorker.register();
   }, [ready]);
+
+  // Guard #3 — a queued punch that exhausted its retries is dropped. The worker
+  // has already reverted the optimistic local state; alert the employee so they
+  // redo it rather than silently believing the punch went through (which would
+  // let the cron auto-close the still-open session with a synthetic end time).
+  React.useEffect(() => {
+    if (!ready) return;
+    const unsub = punchSyncWorker.onChange(({ deadLetters }) => {
+      if (!deadLetters || deadLetters.length === 0) return;
+      const hasClockOut = deadLetters.some((d) => d.action === 'clock_out');
+      Alert.alert(
+        t('clockIn.syncFailedTitle'),
+        hasClockOut
+          ? t('clockIn.syncFailedClockOutBody')
+          : t('clockIn.syncFailedClockInBody'),
+      );
+    });
+    return unsub;
+  }, [ready, t]);
 
   // Hold rendering until auth is resolved AND the user is allowed here, so no
   // protected content flashes before a pending redirect settles.

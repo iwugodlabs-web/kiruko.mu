@@ -124,6 +124,19 @@ export const punchQueueStore = {
     }
   },
 
+  /** Fetch a single row by id regardless of dead-letter state, or null. Used by
+   * the sync worker to re-read a row mid-drain (a clock-in may have resolved a
+   * dependent clock-out's timelog_id) and to confirm a dead-letter transition. */
+  getById: async (id: string): Promise<QueuedPunch | null> => {
+    try {
+      const rows = await db().select().from(punchQueue).where(eq(punchQueue.id, id)).limit(1);
+      return rows[0] ? rowToEntry(rows[0]) : null;
+    } catch (e) {
+      console.error("[punchQueue] getById failed", e);
+      return null;
+    }
+  },
+
   /** Pending rows, oldest first, excluding dead-lettered. */
   listPending: async (): Promise<QueuedPunch[]> => {
     try {
@@ -157,23 +170,28 @@ export const punchQueueStore = {
     }
   },
 
-  /** Record a failed attempt; dead-letter once MAX_SYNC_ATTEMPTS is reached. */
-  recordFailure: async (id: string, error: string): Promise<void> => {
+  /** Record a failed attempt; dead-letter once MAX_SYNC_ATTEMPTS is reached.
+   * Returns true iff this failure tipped the row into the dead-lettered state,
+   * so the caller can reconcile the optimistic local clock state (guard #3). */
+  recordFailure: async (id: string, error: string): Promise<boolean> => {
     try {
       const row = await db().select().from(punchQueue).where(eq(punchQueue.id, id)).limit(1);
       const existing = row[0];
-      if (!existing) return;
+      if (!existing) return false;
       const nextAttempts = existing.attempts + 1;
+      const deadLettered = nextAttempts >= MAX_SYNC_ATTEMPTS;
       await db()
         .update(punchQueue)
         .set({
           attempts: nextAttempts,
           lastError: error,
-          deadLettered: nextAttempts >= MAX_SYNC_ATTEMPTS ? 1 : 0,
+          deadLettered: deadLettered ? 1 : 0,
         })
         .where(eq(punchQueue.id, id));
+      return deadLettered;
     } catch (e) {
       console.error("[punchQueue] recordFailure failed", e);
+      return false;
     }
   },
 
