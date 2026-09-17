@@ -47,6 +47,24 @@ MAX_FIX_AGE_SECONDS = 120.0
 BLOCK_CODES = {"outside_geofence", "unverifiable_location", "mock_detected"}
 
 
+def _coerce_fix_timestamp(value) -> Optional[datetime]:
+    """Normalise a punch's GPS fix time to a ``datetime`` (or ``None``).
+
+    Accepts an existing ``datetime`` (mobile clock-in, pre-parsed by Pydantic)
+    or an ISO-8601 string (mobile clock-out, straight from the JSON dict). A
+    trailing ``Z`` is honoured; anything unparseable degrades to ``None`` so a
+    bad client value can never crash the punch.
+    """
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
 @dataclass
 class PunchContext:
     """Everything the enforcement decision needs about one punch.
@@ -72,6 +90,14 @@ class PunchContext:
     # set + active, the punch is judged against THIS fence only — clocking in
     # at a different branch is "outside". None → any active fence governs.
     home_geofence_id: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        # The clock-out path builds the context from a raw JSON dict, so
+        # ``fix_timestamp`` arrives as an ISO-8601 string rather than a
+        # ``datetime`` (the clock-in path gets it pre-parsed by Pydantic).
+        # Coerce it here — the single source of truth — so every caller is
+        # safe. A malformed value must never crash a punch: fall back to None.
+        self.fix_timestamp = _coerce_fix_timestamp(self.fix_timestamp)
 
 
 @dataclass
