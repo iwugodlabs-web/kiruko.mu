@@ -223,11 +223,16 @@ async def clock_out(
     if geo_check is not None:
         update_payload["geo_check"] = geo_check
 
+    # commit=False — this apply plus the supersede mutations below (clear
+    # auto_closed, supersede audit, skew stamp, reclassify, auto-approve) commit
+    # together as ONE transaction. A crash between them can no longer leave the
+    # real end_time persisted while auto_closed is still True with no audit.
     updated = await update_time_log(
         tl.timelog_id,
         update_payload,
         db,
         client_ip=client_ip,
+        commit=False,
     )
 
     if was_auto_closed:

@@ -269,12 +269,24 @@ class TestClockOutEndpoint:
             app.dependency_overrides[get_current_user] = _override_user
             client = TestClient(app, raise_server_exceptions=False)
             try:
+                # Missing Idempotency-Key → 400 (defense-in-depth: a replay
+                # without dedup could double-apply the clock-out).
+                missing_key = client.post(
+                    f"/api/v1/job/time-log/{ctx['tl_id']}/clock-out",
+                    json={
+                        "end_time": "2026-04-01T17:00:00Z",
+                        "location": {"lat": -20.16, "longitude": 57.50},
+                    },
+                )
+                assert missing_key.status_code == 400, missing_key.text
+
                 resp = client.post(
                     f"/api/v1/job/time-log/{ctx['tl_id']}/clock-out",
                     json={
                         "end_time": "2026-04-01T17:00:00Z",
                         "location": {"lat": -20.16, "longitude": 57.50},
                     },
+                    headers={"Idempotency-Key": "test-clock-out-key-1"},
                 )
                 assert resp.status_code == 200, resp.text
                 body = resp.json()
