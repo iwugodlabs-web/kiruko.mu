@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status, HTTPException
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from core import config
 from db_models.crud import company as company_crud
 from core.dependencies import get_current_user, assert_company_access
@@ -520,6 +520,12 @@ class HolidayRateUpdate(BaseModel):
     multiplier: float | None = None
     note: str | None = None
 
+class HolidayRateImport(BaseModel):
+    """Replace-on-import payload: the full set of holidays for one year, which
+    replaces the company's existing rows for its country + that year."""
+    year: int
+    holidays: List[HolidayRateCreate]
+
 
 def _require_company_member(company_id: int, current_user, db):
     """Raise 403 if current_user is not an admin/owner/superuser of this company."""
@@ -573,6 +579,7 @@ def _serialize_rate(r) -> dict:
     return {
         'id': r.id,
         'company_id': r.company_id,
+        'country_code': getattr(r, 'country_code', None),
         'name': r.name,
         'date': r.date,
         'recurrent': r.recurrent,
@@ -583,17 +590,30 @@ def _serialize_rate(r) -> dict:
     }
 
 
+def _company_country(company_id: int, db) -> Optional[str]:
+    """The company's configured country_code (always set; defaults 'MU')."""
+    row = db.query(Company.country_code).filter(Company.company_id == company_id).first()
+    return (row[0] if row else None)
+
+
 @router.get('/{company_id}/holiday-rates', status_code=200)
 async def list_company_holiday_rates(
     company_id: int,
     db: Session = Depends(config.get_db),
     current_user=Depends(get_current_user),
 ):
-    """List all holiday pay rates for a company."""
+    """List holiday pay rates for a company, scoped to its configured country so
+    a stale/other-country calendar never shows. Legacy rows with a NULL
+    country_code (pre-migration) are included so nothing silently disappears."""
     from core.model import CompanyHolidayRate
     _require_company_member(company_id, current_user, db)
+    country = _company_country(company_id, db)
     rates = db.query(CompanyHolidayRate).filter(
-        CompanyHolidayRate.company_id == company_id
+        CompanyHolidayRate.company_id == company_id,
+        or_(
+            CompanyHolidayRate.country_code == country,
+            CompanyHolidayRate.country_code.is_(None),
+        ),
     ).order_by(CompanyHolidayRate.date).all()
     return [_serialize_rate(r) for r in rates]
 
@@ -611,6 +631,7 @@ async def create_company_holiday_rate(
     _assert_holiday_multiplier_above_floor(company_id, payload.multiplier, db)
     rate = CompanyHolidayRate(
         company_id=company_id,
+        country_code=_company_country(company_id, db),
         name=payload.name.strip(),
         date=payload.date,
         recurrent=payload.recurrent,
@@ -630,6 +651,63 @@ async def create_company_holiday_rate(
         metadata={'date': str(rate.date), 'multiplier': str(rate.multiplier), 'name': rate.name},
     )
     return _serialize_rate(rate)
+
+
+@router.post('/{company_id}/holiday-rates/import', status_code=200)
+async def import_company_holiday_rates(
+    company_id: int,
+    payload: HolidayRateImport,
+    db: Session = Depends(config.get_db),
+    current_user=Depends(get_current_user),
+):
+    """Replace-on-import for a country calendar. Deletes the company's existing
+    holidays for its country + the given year, then inserts the supplied set —
+    atomically. This both prevents cross-country mixing and cleans up any
+    pre-existing mixed rows for that year (they're removed before re-insert)."""
+    from core.model import CompanyHolidayRate
+    _require_company_member(company_id, current_user, db)
+    country = _company_country(company_id, db)
+    year_prefix = f"{payload.year}-"
+
+    for h in payload.holidays:
+        _assert_holiday_multiplier_above_floor(company_id, h.multiplier, db)
+
+    # Delete this company's rows for that year — both the current-country rows and
+    # any legacy/other-country rows dated in that year, so re-import fully cleans
+    # a previously-mixed calendar for the year.
+    deleted = db.query(CompanyHolidayRate).filter(
+        CompanyHolidayRate.company_id == company_id,
+        CompanyHolidayRate.date.like(f"{year_prefix}%"),
+    ).delete(synchronize_session=False)
+
+    created = []
+    for h in payload.holidays:
+        rate = CompanyHolidayRate(
+            company_id=company_id,
+            country_code=country,
+            name=h.name.strip(),
+            date=h.date,
+            recurrent=h.recurrent,
+            multiplier=h.multiplier,
+            note=h.note,
+        )
+        db.add(rate)
+        created.append(rate)
+    try:
+        db.commit()
+        for r in created:
+            db.refresh(r)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f'Failed to import holiday rates: {e}')
+
+    company_crud.log_audit(
+        company_id, 'holiday_rates_imported', current_user.user_id,
+        f'company:{company_id}', db,
+        metadata={'country_code': country, 'year': payload.year,
+                  'deleted': deleted, 'inserted': len(created)},
+    )
+    return [_serialize_rate(r) for r in created]
 
 
 @router.put('/{company_id}/holiday-rates/{rate_id}', status_code=200)
