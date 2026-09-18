@@ -12,6 +12,7 @@
       "developmentClient": false,
       "distribution": "internal",
       "channel": "preview",
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1",
         "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
@@ -26,6 +27,7 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1",
         "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
