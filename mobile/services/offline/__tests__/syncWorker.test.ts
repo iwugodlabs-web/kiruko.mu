@@ -26,7 +26,7 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
     getItem: jest.fn(() => Promise.resolve(null)),
   },
 }));
-jest.mock("../../../../services/api", () => ({
+jest.mock("../../api", () => ({
   __esModule: true,
   postClockIn: jest.fn(),
   postClockOut: jest.fn(),
@@ -44,7 +44,7 @@ jest.mock("../punchQueue", () => ({
 }));
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as api from "../../../../services/api";
+import * as api from "../../api";
 import { punchQueueStore } from "../punchQueue";
 import { punchSyncWorker, type DeadLetter } from "../syncWorker";
 
