@@ -1,6 +1,7 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
 import { punchQueueStore, newIdempotencyKey } from '@/services/offline/punchQueue';
 import { punchSyncWorker } from '@/services/offline/syncWorker';
+import { canPunch } from '@/services/offline/canPunch';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -377,6 +378,17 @@ const safeParseDate = (dateStr: string | null | undefined): Date | null => {
   }
 };
 
+// Offline resilience — the clock-in/out buttons are gated on `jobId`, which is
+// only ever fetched from the server. Cache it per user so the buttons still
+// enable (and the offline punch queue can run) when the device is offline at
+// launch. Keyed by private_user_id so a shared device never reuses another
+// user's job.
+// v2 NOTE: a user will be able to hold MULTIPLE jobs. When that lands, this
+// single-value cache becomes a per-user list (e.g. `cachedJobs:<uid>` → array)
+// and the screen gains a job selector; the key scheme here is already
+// per-user, so the migration is additive.
+const jobIdCacheKey = (privateUserId: string | number) => `cachedJobId:${privateUserId}`;
+
 export default function ClockInPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -655,6 +667,25 @@ export default function ClockInPage() {
     requestAndGetLocation(true).catch((e) => console.warn('Initial location fetch failed:', e));
   }, [requestAndGetLocation]);
 
+  // Offline resilience — hydrate jobId from cache on mount so the clock
+  // buttons enable even when the device launched offline (the server
+  // getJobById would otherwise leave jobId null and disable both buttons,
+  // blocking the offline punch queue). A later online fetch overwrites this.
+  useEffect(() => {
+    const privateUserId = user?.private_user_id || user?.private_user?.private_user_id;
+    if (!privateUserId) return;
+    AsyncStorage.getItem(jobIdCacheKey(privateUserId))
+      .then((cached) => {
+        const parsed = cached ? Number(cached) : NaN;
+        if (!Number.isNaN(parsed)) {
+          // Functional update: don't clobber a fresh server value that may
+          // have already arrived.
+          setJobId((prev) => prev ?? parsed);
+        }
+      })
+      .catch(() => {});
+  }, [user]);
+
   const getTimeSheet = useCallback(async () => {
     try {
       const storedClockInTime = await AsyncStorage.getItem('currentClockInTime');
@@ -757,6 +788,8 @@ export default function ClockInPage() {
         const jobRes = await getJobById(Number(privateUserId));
         if (jobRes && !('error' in jobRes) && jobRes.job_id) {
           setJobId(jobRes.job_id);
+          // Cache for offline launches so the clock buttons enable without network.
+          AsyncStorage.setItem(jobIdCacheKey(privateUserId), String(jobRes.job_id)).catch(() => {});
           setJobCompanyId((jobRes as any).company_id ?? null);
           const threshold = (jobRes as any).minimum_break_minutes;
           if (threshold && threshold > 0) setMinBreakThresholdMinutes(threshold);
@@ -1202,6 +1235,8 @@ export default function ClockInPage() {
             if (isMounted) {
               if (jobResponse && !('error' in jobResponse) && jobResponse.job_id) {
                 setJobId(jobResponse.job_id);
+                // Cache for offline launches so the clock buttons enable without network.
+                AsyncStorage.setItem(jobIdCacheKey(numericPrivateUserId), String(jobResponse.job_id)).catch(() => {});
                 const threshold = (jobResponse as any).minimum_break_minutes;
                 if (threshold && threshold > 0) setMinBreakThresholdMinutes(threshold);
               } else if (jobResponse && 'error' in jobResponse && jobResponse.status !== 404) {
@@ -1966,7 +2001,7 @@ export default function ClockInPage() {
                   {/* Primary Clock Button */}
                   <Pressable
                     onPress={handleClockToggle}
-                    disabled={!locationAuthorized || !currentCoordinates || !jobId || isLoading}
+                    disabled={!canPunch({ locationAuthorized, currentCoordinates, jobId, isLoading })}
                   >
                     <Box
                       w={140}
@@ -2075,7 +2110,7 @@ export default function ClockInPage() {
                   {isClockedIn && (
                     <Pressable
                       onPress={handleBreakToggle}
-                      disabled={!locationAuthorized || !currentCoordinates || !jobId || isLoading}
+                      disabled={!canPunch({ locationAuthorized, currentCoordinates, jobId, isLoading })}
                     >
                       <Box
                         w={140}
