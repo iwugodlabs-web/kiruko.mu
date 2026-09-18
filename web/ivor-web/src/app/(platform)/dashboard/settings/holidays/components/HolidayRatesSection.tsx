@@ -59,11 +59,12 @@ export default function HolidayRatesSection() {
   const { user } = useAuth();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const companyId = (user as any)?.company?.company_id as number | undefined;
-  // Import must respect the COMPANY's configured country, not a hardcoded one.
-  // Mirrors GeofencingSettings' `company?.country_code`. Defaults to MU (the
-  // launch market) only when the company has no country set.
+  // Import must respect the COMPANY's configured country, and NEVER guess one —
+  // defaulting to a country would import the wrong calendar (e.g. MU holidays
+  // into a TZ company). If the company has no country set, the import is blocked
+  // until they set it. Mirrors GeofencingSettings' `company?.country_code`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const countryCode = (((user as any)?.company?.country_code as string) || "MU").toUpperCase();
+  const countryCode = ((user as any)?.company?.country_code as string | undefined)?.toUpperCase();
 
   const [holidays, setHolidays] = useState<HolidayRate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +148,10 @@ export default function HolidayRatesSection() {
 
   async function importCountryHolidays() {
     if (!companyId) return;
+    if (!countryCode) {
+      toast.error("Set your company's country in Settings before importing public holidays.");
+      return;
+    }
     setImporting(true);
 
     let toImport: Omit<HolidayRate, "id">[] = [];
@@ -273,11 +278,11 @@ export default function HolidayRatesSection() {
           </button>
           <button
             onClick={importCountryHolidays}
-            disabled={importing}
+            disabled={importing || !countryCode}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 rounded-xl transition-colors disabled:opacity-50"
           >
             <RefreshCw size={13} className={importing ? "animate-spin" : ""} />
-            Import {countryCode} {selectedYear}
+            {countryCode ? `Import ${countryCode} ${selectedYear}` : "Set country to import"}
           </button>
           <button
             onClick={openCreate}
@@ -349,11 +354,11 @@ export default function HolidayRatesSection() {
           <div className="flex gap-2 mt-4">
             <button
               onClick={importCountryHolidays}
-              disabled={importing}
+              disabled={importing || !countryCode}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={11} className={importing ? "animate-spin" : ""} />
-              Import {countryCode} {selectedYear}
+              {countryCode ? `Import ${countryCode} ${selectedYear}` : "Set country to import"}
             </button>
             <button
               onClick={openCreate}
