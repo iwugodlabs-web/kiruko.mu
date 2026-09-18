@@ -21,7 +21,16 @@ must never have its dev seed corrupted by a stray test commit.
 # settings load time.
 import os
 
-os.environ["POSTGRES_DB"] = os.environ.get("KONTOKAZ_TEST_DB", "kontokaz_test")
+# Safety guard: the test DB name must always look like a test DB. This stops a
+# stray `KONTOKAZ_TEST_DB=ivor_activity` (or similar) from pointing pytest at a
+# real dev DB and having `_ensure_test_db_exists()` DROP it.
+_TEST_DB_OVERRIDE = os.environ.get("KONTOKAZ_TEST_DB", "").strip()
+if _TEST_DB_OVERRIDE and "test" not in _TEST_DB_OVERRIDE.lower():
+    raise RuntimeError(
+        f"KONTOKAZ_TEST_DB='{_TEST_DB_OVERRIDE}' does not look like a test database — "
+        "refusing to run pytest against a non-test DB."
+    )
+os.environ["POSTGRES_DB"] = _TEST_DB_OVERRIDE or "kontokaz_test"
 # Tests assume a local Postgres unless explicitly overridden.
 os.environ.setdefault("POSTGRES_SERVER", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "5432")
@@ -100,6 +109,12 @@ def _ensure_test_db_exists() -> None:
     to fall back to create-if-missing.
     """
     target = os.environ["POSTGRES_DB"]
+    # Second line of defence: never DROP a database whose name doesn't look
+    # like a test DB, regardless of how POSTGRES_DB got set.
+    if "test" not in target.lower():
+        raise RuntimeError(
+            f"Refusing to drop/recreate non-test database '{target}' during pytest bootstrap."
+        )
     keep = os.environ.get("KONTOKAZ_TEST_KEEP_DB", "").strip().lower() in ("1", "true", "yes")
     admin_engine = create_engine(_admin_db_url(), isolation_level="AUTOCOMMIT")
     with admin_engine.connect() as conn:

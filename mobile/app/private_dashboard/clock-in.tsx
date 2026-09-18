@@ -633,19 +633,31 @@ export default function ClockInPage() {
     if (status === 'granted') {
       setLocationAuthorized(true);
       try {
-        let location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        setCurrentCoordinates({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-        console.log('Location obtained:', location.coords);
+        // Offline-resilient: a cached last-known fix needs no network/GPS warm-up
+        // and works after an offline cold start. Only fall back to a fresh fix
+        // when there's no cached one. High accuracy here (pure GPS) frequently
+        // fails offline/cold — Balanced degrades gracefully.
+        let location = await Location.getLastKnownPositionAsync();
+        if (!location) {
+          location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        }
+        if (location?.coords) {
+          setCurrentCoordinates({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          });
+          console.log('Location obtained:', location.coords);
+        }
+        // If we got nothing this time, KEEP any existing fix — don't null a good
+        // one just because a refresh failed.
       } catch (error: any) {
-        console.error('Error getting location:', error);
-        Alert.alert(t('clockIn.locationErrorTitle'), t('clockIn.locationErrorBody'));
-        setCurrentCoordinates(null);
-        setLocationAuthorized(false);
+        // A position-fetch failure is NOT a permission revocation. Permission is
+        // still granted (checked above), so do NOT flip locationAuthorized off —
+        // doing so wrongly disabled the clock buttons offline. Keep any existing
+        // coordinates so the buttons stay usable; only warn.
+        console.warn('Could not refresh device position (keeping last fix):', error?.message);
       }
     } else {
       setLocationAuthorized(false);
