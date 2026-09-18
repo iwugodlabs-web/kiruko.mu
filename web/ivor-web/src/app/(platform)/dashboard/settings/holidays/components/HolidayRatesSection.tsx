@@ -189,42 +189,24 @@ export default function HolidayRatesSection() {
       }
     }
 
-    // 3. Skip holidays already in the list (by name)
-    const existingNames = new Set(holidays.map((h) => h.name.toLowerCase()));
-    const newEntries = toImport.filter((h) => !existingNames.has(h.name.toLowerCase()));
-
-    if (newEntries.length === 0) {
-      toast.info(`All ${selectedYear} holidays are already configured.`);
-      setImporting(false);
-      return;
-    }
-
-    // 4. Save each to backend; only keep rows the backend actually persisted.
-    // A POST failure must NOT fabricate a local row — that hides the error and
-    // leaves an un-persisted holiday that silently disappears on refresh.
-    const saved: HolidayRate[] = [];
-    let failed = 0;
-    for (const entry of newEntries) {
-      try {
-        const res = await api.post(`/company/${companyId}/holiday-rates`, entry);
-        saved.push(res.data);
-      } catch {
-        failed++;
-      }
-    }
-
-    if (saved.length > 0) {
-      setHolidays((prev) => [...prev, ...saved]);
-    }
-
-    if (failed > 0) {
-      toast.error(
-        saved.length > 0
-          ? `${saved.length} imported, but ${failed} failed to save. Please try again.`
-          : `Failed to import holidays for ${selectedYear}. Please try again.`
-      );
-    } else {
-      toast.success(`${saved.length} holiday${saved.length !== 1 ? "s" : ""} imported for ${selectedYear}.`);
+    // 3. Replace-on-import: one atomic call replaces this company's holidays for
+    // its country + the selected year. The backend deletes the year's existing
+    // rows (including any legacy/other-country ones) before inserting, so the
+    // calendar can never end up mixed across countries.
+    try {
+      const res = await api.post(`/company/${companyId}/holiday-rates/import`, {
+        year: selectedYear,
+        holidays: toImport,
+      });
+      const imported: HolidayRate[] = Array.isArray(res.data) ? res.data : [];
+      // Rebuild local state: drop this year's rows, add the freshly imported set.
+      setHolidays((prev) => [
+        ...prev.filter((h) => !h.date.startsWith(`${selectedYear}-`)),
+        ...imported,
+      ]);
+      toast.success(`${imported.length} ${countryCode} holiday${imported.length !== 1 ? "s" : ""} imported for ${selectedYear}.`);
+    } catch {
+      toast.error(`Failed to import holidays for ${selectedYear}. Please try again.`);
     }
     setImporting(false);
   }

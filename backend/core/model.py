@@ -1695,6 +1695,11 @@ class CompanyHolidayRate(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    # Which country's calendar this holiday belongs to. Prevents cross-country
+    # mixing (e.g. MU holidays showing for a TZ company): the list is filtered to
+    # the company's country, and imports are scoped/replaced per country. Backfilled
+    # to the owning company's country_code; nullable only for the migration window.
+    country_code = Column(String(2), ForeignKey("countries.code"), nullable=True, index=True)
     name = Column(String, nullable=False)
     date = Column(String(10), nullable=False)   # YYYY-MM-DD stored as string for flexibility
     recurrent = Column(Boolean, default=False, server_default='False')
