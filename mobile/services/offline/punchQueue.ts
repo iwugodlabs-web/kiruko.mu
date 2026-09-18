@@ -12,7 +12,7 @@
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/expo-sqlite";
 import { openDatabaseSync } from "expo-sqlite";
-import { punchQueue } from "../../../db/schema";
+import { punchQueue } from "../../db/schema";
 
 export const MAX_SYNC_ATTEMPTS = 3;
 

@@ -1,6 +1,6 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
-import { punchQueueStore, newIdempotencyKey } from './services/punchQueue';
-import { punchSyncWorker } from './services/syncWorker';
+import { punchQueueStore, newIdempotencyKey } from '@/services/offline/punchQueue';
+import { punchSyncWorker } from '@/services/offline/syncWorker';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';

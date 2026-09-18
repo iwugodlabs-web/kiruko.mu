@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import useAuth from '../hooks/useAuth';
 import { useRequireAuth } from '@/components/AuthGuard';
-import { punchSyncWorker } from './services/syncWorker';
+import { punchSyncWorker } from '@/services/offline/syncWorker';
 
 export default function DashboardLayout() {
   const primary = useToken('colors', 'primary500');
