@@ -59,6 +59,11 @@ export default function HolidayRatesSection() {
   const { user } = useAuth();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const companyId = (user as any)?.company?.company_id as number | undefined;
+  // Import must respect the COMPANY's configured country, not a hardcoded one.
+  // Mirrors GeofencingSettings' `company?.country_code`. Defaults to MU (the
+  // launch market) only when the company has no country set.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const countryCode = (((user as any)?.company?.country_code as string) || "MU").toUpperCase();
 
   const [holidays, setHolidays] = useState<HolidayRate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,15 +145,16 @@ export default function HolidayRatesSection() {
 
   const [importing, setImporting] = useState(false);
 
-  async function importMauritius() {
+  async function importCountryHolidays() {
     if (!companyId) return;
     setImporting(true);
 
     let toImport: Omit<HolidayRate, "id">[] = [];
 
-    // 1. Try Nager.Date public API — accurate dates for lunar/religious holidays
+    // 1. Try Nager.Date public API for the COMPANY's country — accurate dates
+    //    for lunar/religious holidays that move year to year.
     try {
-      const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${selectedYear}/MU`);
+      const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${selectedYear}/${countryCode}`);
       if (res.ok) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data: any[] = await res.json();
@@ -164,10 +170,18 @@ export default function HolidayRatesSection() {
       // Network error — will fall back below
     }
 
-    // 2. Fall back to local list if API returned nothing
+    // 2. Fall back to the local list ONLY for MU (the only country with a bundled
+    //    fallback). For any other country, never inject MU holidays — that would
+    //    silently import the wrong country's calendar. Surface an error instead.
     if (toImport.length === 0) {
-      toImport = getMuFallbackHolidays(selectedYear);
-      toast.info("Using offline holiday list — verify lunar holiday dates manually.");
+      if (countryCode === "MU") {
+        toImport = getMuFallbackHolidays(selectedYear);
+        toast.info("Using offline holiday list — verify lunar holiday dates manually.");
+      } else {
+        toast.error(`Couldn't fetch ${countryCode} public holidays for ${selectedYear}. Check your connection and try again, or add them manually.`);
+        setImporting(false);
+        return;
+      }
     }
 
     // 3. Skip holidays already in the list (by name)
@@ -258,12 +272,12 @@ export default function HolidayRatesSection() {
             <RefreshCw size={14} className={spinning ? "animate-spin" : ""} />
           </button>
           <button
-            onClick={importMauritius}
+            onClick={importCountryHolidays}
             disabled={importing}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 rounded-xl transition-colors disabled:opacity-50"
           >
             <RefreshCw size={13} className={importing ? "animate-spin" : ""} />
-            Import MU {selectedYear}
+            Import {countryCode} {selectedYear}
           </button>
           <button
             onClick={openCreate}
@@ -334,12 +348,12 @@ export default function HolidayRatesSection() {
           <p className="text-xs mt-1">Add public holidays to apply special pay rates automatically.</p>
           <div className="flex gap-2 mt-4">
             <button
-              onClick={importMauritius}
+              onClick={importCountryHolidays}
               disabled={importing}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={11} className={importing ? "animate-spin" : ""} />
-              Import MU {selectedYear}
+              Import {countryCode} {selectedYear}
             </button>
             <button
               onClick={openCreate}
@@ -429,7 +443,7 @@ export default function HolidayRatesSection() {
       )}
 
       <p className="text-xs text-gray-400 dark:text-gray-500">
-        Mauritius Employment Rights Act requires a minimum of 2× pay for public holiday work.
+        {countryCode === "MU" && "Mauritius Employment Rights Act requires a minimum of 2× pay for public holiday work. "}
         Toggle years above to view or plan holidays for previous and future years.
       </p>
 
