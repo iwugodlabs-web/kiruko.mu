@@ -2083,21 +2083,58 @@ async def delete_schedule_endpoint(schedule_id: int, current_user: User = Depend
 # --- Employee Verification Endpoints ---
 
 @router.get('/company-brn/{company_brn}', status_code=200, response_model=List[PendingEmployee])
-def get_jobs_by_company_brn(company_brn: str, db: Session = Depends(config.get_db)):
-    """Get all job profiles for employees who claim to work for a company (by BRN)"""
+def get_jobs_by_company_brn(
+    company_brn: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(config.get_db),
+):
+    """Get all job profiles for employees who claim to work for a company (by BRN).
+
+    Surfaces self-signup claimants (draft placeholder jobs linked only by
+    employer_brn) so the employer can verify them — they are excluded from the
+    company roster (`/users/company/{id}`) by design.
+
+    Auth: the caller must be able to read the company that owns this BRN
+    (company member/admin, or a platform read-operator). Previously this was
+    UNAUTHENTICATED and leaked pending employees' PII (passport number, DOB,
+    phone, salary) to anyone who knew or guessed a BRN.
+
+    The company/BRN match is case-insensitive and whitespace-trimmed, anchored
+    to the company's canonical BRN, so a claimant who typed the BRN in a
+    different case still surfaces (mirrors get_users_by_company).
+    """
+    from sqlalchemy import func
+    from core.model import Company
+    from core.dependencies import assert_company_access
+
+    # Resolve + authorize BEFORE the try below — that block's bare `except
+    # Exception` would otherwise convert a 403/404 into a 500.
+    normalized = (company_brn or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No company found for this BRN")
+    company = (
+        db.query(Company)
+        .filter(func.lower(func.trim(Company.brn)) == normalized.lower())
+        .first()
+    )
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No company found for this BRN")
+    assert_company_access(current_user, company.company_id, db)
+    canonical_brn = (company.brn or normalized).strip()
+
     try:
         from core.model import Job, PrivateUser, User
         from schema.job_schema import PendingEmployee
 
         # Join Job with PrivateUser and User to get complete employee information
         logger.info(f"Searching for jobs with employer_brn: '{company_brn}'")
-        
+
         jobs = db.query(Job).join(
             PrivateUser, Job.private_user_id == PrivateUser.private_user_id
         ).join(
             User, PrivateUser.user_id == User.user_id
         ).filter(
-            Job.employer_brn == company_brn
+            func.lower(func.trim(Job.employer_brn)) == canonical_brn.lower()
         ).all()
         
         logger.info(f"Found {len(jobs)} jobs with complete user data for company BRN: {company_brn}")
