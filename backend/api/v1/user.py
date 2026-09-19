@@ -18,6 +18,7 @@ from schema.user_schema import (
 )
 from schema.job_schema import CreateSalary, OnboardJob, ShowJob, CreateJob, ShowSchedule, ApproveLeaveRequest
 from services.storage_service import get_storage_service
+from services import attachment_proxy
 from services.user_service import UserService
 from datetime import date
 from fastapi import UploadFile, File, Form
@@ -2399,6 +2400,7 @@ def _parse_dispute_range(since: Optional[str], until: Optional[str]):
 @router.get('/disputes/company/{company_id}', status_code=200)
 async def get_company_disputes(
     company_id: int,
+    request: Request,
     channel: Optional[str] = Query("internal", description="internal | external | all"),
     dispute_status: Optional[str] = Query(None, alias="status"),
     since: Optional[str] = Query(None, description="ISO date/datetime, inclusive lower bound on created_at"),
@@ -2521,7 +2523,7 @@ async def get_company_disputes(
                     "expected_outcome": d.expected_outcome,
                     "occurrence_description": d.occurrence_description,
                     "date_of_occurrence": d.date_of_occurrence.isoformat() if d.date_of_occurrence else None,
-                    "attachment_url": d.attachment_url,
+                    "attachment_url": attachment_proxy.proxy_url(request, d.right_id, d.attachment_url),
                     "attachment_scan_result": getattr(d, "attachment_scan_result", None),
                     "assigned_to": d.assigned_to,
                     "internal_notes": d.internal_notes,
@@ -2559,6 +2561,7 @@ async def get_company_disputes(
 
 @router.get('/disputes/compliance', status_code=200)
 async def get_compliance_disputes(
+    request: Request,
     channel: Optional[str] = Query("all", description="internal | external | all"),
     dispute_status: Optional[str] = Query(None, alias="status"),
     only_aging: bool = Query(False, description="If true, restrict to reports past 5 working days"),
@@ -2681,7 +2684,7 @@ async def get_compliance_disputes(
                 "expected_outcome": d.expected_outcome,
                 "occurrence_description": d.occurrence_description,
                 "date_of_occurrence": d.date_of_occurrence.isoformat() if d.date_of_occurrence else None,
-                "attachment_url": d.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, d.right_id, d.attachment_url),
                 "assigned_to": d.assigned_to,
                 "internal_notes": d.internal_notes,
                 "resolution": d.resolution,
@@ -3191,7 +3194,7 @@ async def list_owner_messages(
                 # Owner thread mirrors the public portal — handler user_ids
                 # are not exposed (could de-anonymise the investigator).
                 "body": m.body,
-                "attachment_url": m.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, right_id, m.attachment_url, m.message_id),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in messages
@@ -3395,7 +3398,7 @@ async def list_dispute_messages(
                 "author_kind": m.author_kind,
                 "author_user_id": m.author_user_id,  # handler view: shows the colleague's user_id
                 "body": m.body,
-                "attachment_url": m.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, right_id, m.attachment_url, m.message_id),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in messages
@@ -4274,4 +4277,79 @@ async def serve_vault_file(
         io.BytesIO(data),
         media_type=media_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get('/concern-attachment/{right_id}/file/{filename}', status_code=200)
+async def serve_concern_attachment(
+    right_id: int,
+    filename: str,
+    request: Request,
+    token: str = Query(..., description="View token from the concern list / thread / portal response"),
+    db: Session = Depends(config.get_db),
+):
+    """Stream a concern evidence / thread-message attachment same-origin.
+
+    Concern attachments live on a private object store whose raw URLs 403 in
+    the browser (broken inline preview + dead "Open file"). The company list,
+    compliance list, handler/owner threads and the reporter portal all hand
+    out capability-scoped proxy URLs pointing here (see
+    services/attachment_proxy.py). This endpoint validates the signed token
+    and streams the bytes. `filename` is cosmetic (preserves the extension for
+    inline preview + download) — the object is resolved from the DB row, never
+    from client input.
+    """
+    from services.attachment_proxy import PURPOSE
+    from core.model import UserRight, ConcernMessage
+
+    payload = decode_token(token) if token else None
+    claims = (payload or {}).get("user") or {}
+    if (
+        not payload
+        or payload.get("refresh", False)
+        or claims.get("purpose") != PURPOSE
+        or claims.get("right_id") != right_id
+    ):
+        raise HTTPException(status_code=401, detail="Invalid or expired view token")
+
+    concern = db.query(UserRight).filter(UserRight.right_id == right_id).one_or_none()
+    if concern is None:
+        raise HTTPException(status_code=404, detail="Concern not found")
+
+    # Resolve the object strictly from the DB row the token points at — the
+    # attachment must genuinely belong to this concern (defence against a
+    # token being reused to fetch an unrelated object).
+    message_id = claims.get("message_id")
+    if message_id:
+        msg = (
+            db.query(ConcernMessage)
+            .filter(
+                ConcernMessage.message_id == message_id,
+                ConcernMessage.right_id == right_id,
+            )
+            .one_or_none()
+        )
+        source_url = msg.attachment_url if msg else None
+    else:
+        source_url = concern.attachment_url
+    if not source_url:
+        raise HTTPException(status_code=404, detail="No file attached to this concern")
+
+    data = get_storage_service().download_bytes(source_url)
+    if data is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve the stored file")
+
+    import mimetypes
+    media_type = (
+        mimetypes.guess_type(filename)[0]
+        or mimetypes.guess_type(source_url.split("?", 1)[0])[0]
+        or "application/octet-stream"
+    )
+    from fastapi.responses import StreamingResponse
+    import io
+    safe_name = (filename or f"attachment-{right_id}").replace('"', "")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
     )
