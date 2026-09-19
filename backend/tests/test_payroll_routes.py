@@ -311,6 +311,37 @@ def test_timesheet_clamp_reconciles_and_reports_pay_basis(db, _engine, seed_mu_r
     assert abs(float(body["totals"]["counted_paid_hours"]) - canonical) < 0.01
 
 
+def test_timesheet_overtime_hours_read_from_payslip_components(db, _engine, seed_mu_rules):
+    """The footer's OT hours come from the payslip's OWN overtime components (the
+    bucketing engine's split), not the coarse per-row is_overtime flag — so it
+    ties to the Components drill-down. Only premium buckets (category
+    'earning.overtime') count; the regular 'REG' bucket ('earning.basic') and
+    non-overtime earnings are excluded."""
+    owner, co, wu, pu, job = _seed(db)
+    run = payroll_engine.create_draft_run(db, PayrollRunCreate(
+        company_id=co.company_id, period_start=PS, period_end=PE), actor_user_id=None)
+    db.commit()
+    ps = _payslip_for(db, run, pu)
+    # Inject a known bucket split: 8h regular (REG) + 2h premium OT + a flat
+    # allowance. Only the 2h premium bucket should be reported as overtime.
+    ps.components = [
+        {"code": "BASIC", "label": "Basic", "kind": "earning", "category": "earning.basic",
+         "amount": "30000.00", "is_taxable": True, "is_basic": True, "source": "structure"},
+        {"code": "REG", "label": "Regular hours", "kind": "earning", "category": "earning.basic",
+         "amount": "1600.00", "is_taxable": True, "is_basic": True, "source": "overtime",
+         "meta": {"multiplier": "1.0", "hours": "8.0"}},
+        {"code": "OT15", "label": "Overtime 1.5x", "kind": "earning", "category": "earning.overtime",
+         "amount": "600.00", "is_taxable": True, "is_basic": False, "source": "overtime",
+         "meta": {"multiplier": "1.5", "hours": "2.0"}},
+    ]
+    db.commit()
+    c = _client(_engine, owner.user_id)
+    r = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    assert r.status_code == 200, r.text
+    assert float(r.json()["totals"]["total_overtime_hours"]) == 2.0
+
+
 def test_timesheet_forbidden_for_other_company_admin(db, _engine, seed_mu_rules):
     """A company admin from a different tenant cannot read the payslip's
     timesheet — mirrors GET /payslips/{id}'s access rules."""
