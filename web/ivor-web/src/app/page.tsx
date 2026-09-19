@@ -22,7 +22,25 @@ export default function LoginPage() {
   const [otpVerifying, setOtpVerifying] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const router = useRouter();
-  const { login, loginWithOtpResult, loading } = useAuth();
+  const { login, loginWithOtpResult, loading, user } = useAuth();
+
+  // Already signed in (e.g. typed "/" in a new tab with a live session)? Don't
+  // show the login form — send them to their home. router.replace so Back
+  // doesn't bounce them onto login again. Mirrors routeAfterLogin's ?next=
+  // handling below.
+  useEffect(() => {
+    if (loading || !user) return;
+    try {
+      const next = new URLSearchParams(window.location.search).get("next");
+      if (next && next.startsWith("/") && !next.startsWith("//")) {
+        router.replace(next);
+        return;
+      }
+    } catch {
+      // fall through to default routing
+    }
+    router.replace(user.isPlatformAdmin ? "/admin" : "/dashboard");
+  }, [user, loading, router]);
 
   // Rehydrate the user's prior mode so phone-first users don't see the
   // email tab every visit. localStorage is fine here — the value is
