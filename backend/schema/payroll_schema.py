@@ -158,3 +158,67 @@ class PayrollRunSummary(BaseModel):
     warning_subjects: Dict[str, str] = {}
     finalized_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Per-payslip timesheet — the daily clock-ins that produced this payslip's
+# hours, computed with the same rules payroll counts them (so the totals tie
+# back to the slip). Read-only; served by GET /payslips/{id}/timesheet.
+# ---------------------------------------------------------------------------
+
+
+class TimesheetRow(BaseModel):
+    timelog_id: int
+    date: date
+    day_of_week: Optional[str] = None
+    clock_in: Optional[datetime] = None
+    # Null while the session is still open (no clock-out yet).
+    clock_out: Optional[datetime] = None
+    break_minutes: Decimal = Decimal("0")
+    # Raw worked hours as stored on the time log (breaks already subtracted).
+    hours_worked: Optional[Decimal] = None
+    # What payroll actually pays for this row: raw hours minus the early-minutes
+    # clamp to the scheduled shift start. Zero when the row doesn't count toward
+    # pay (unconfirmed/rejected overtime). Sums to totals.counted_paid_hours.
+    paid_hours: Decimal = Decimal("0")
+    is_overtime: bool = False
+    overtime_confirmed_by_employer: bool = False
+    overtime_rejected: bool = False
+    # One derived label: open | auto_closed | disputed | rejected | pending |
+    # approved. Drives the row's status pill.
+    status: str
+    # Already-computed review signals worth catching before an irreversible
+    # finalize: e.g. out_of_geofence, is_late, out_of_schedule, auto_closed.
+    exception_flags: List[str] = []
+
+
+class LeaveRow(BaseModel):
+    """Approved leave intersecting the period — day-based, absent from TimeLog,
+    so it's overlaid separately (the client interleaves it by date)."""
+    start_date: date
+    end_date: date
+    code: str
+    label: str
+    paid: bool
+    days: int
+
+
+class TimesheetTotals(BaseModel):
+    total_paid_hours: Decimal = Decimal("0")
+    total_overtime_hours: Decimal = Decimal("0")
+    # The canonical hours that flowed into pay (proration.sum_hours_worked_in_period).
+    # Displayed alongside the row sum so a mismatch is visible.
+    counted_paid_hours: Decimal = Decimal("0")
+    total_leave_days: int = 0
+    # Rows in open/pending/disputed — clock-ins not yet cleared for payroll.
+    unapproved_count: int = 0
+
+
+class PayslipTimesheetRead(BaseModel):
+    payslip_id: int
+    private_user_id: int
+    period_start: date
+    period_end: date
+    rows: List[TimesheetRow] = []
+    leave_rows: List[LeaveRow] = []
+    totals: TimesheetTotals

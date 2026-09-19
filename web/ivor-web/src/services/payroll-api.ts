@@ -33,7 +33,7 @@ import type {
   EmployeeSalaryAssignment, EmployeeSalaryAssignmentCreate,
   ResolvedSalary,
   // payroll
-  PayrollRun, PayrollRunCreate, PayrollRunSummary, Payslip,
+  PayrollRun, PayrollRunCreate, PayrollRunSummary, Payslip, PayslipTimesheet,
   // leave types
   LeaveType, LeaveTypeCreate, LeaveTypeUpdate, SeedFromCountryReport,
   // one-offs
@@ -421,6 +421,15 @@ export const payroll = {
   getPayslip: async (payslipId: number): Promise<ApiResult<Payslip>> => {
     try {
       const r = await api.get(`/payslips/${payslipId}`);
+      return r.data;
+    } catch (e) { return normalizeError(e); }
+  },
+
+  /** The daily clock-ins behind a payslip's hours, over the run's exact period,
+   *  reconciled to the slip. Loaded on demand — not folded into getPayslip. */
+  getPayslipTimesheet: async (payslipId: number): Promise<ApiResult<PayslipTimesheet>> => {
+    try {
+      const r = await api.get(`/payslips/${payslipId}/timesheet`);
       return r.data;
     } catch (e) { return normalizeError(e); }
   },

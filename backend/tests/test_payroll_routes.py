@@ -207,3 +207,82 @@ def test_get_run_embeds_employee_name_and_code(db, _engine, seed_mu_rules):
     assert len(payslips) == 1
     assert payslips[0]["employee_name"] == f"{pu.first_name} {pu.last_name}".strip()
     assert payslips[0]["employee_code"] == pu.employee_code
+
+
+def _payslip_for(db, run, pu):
+    return db.query(Payslip).filter(
+        Payslip.payroll_run_id == run.id,
+        Payslip.private_user_id == pu.private_user_id,
+        Payslip.is_adjustment.is_(False),
+    ).one()
+
+
+def test_timesheet_reconciles_and_reports_rows(db, _engine, seed_mu_rules):
+    """GET /payslips/{id}/timesheet returns the period's clock-ins, and the
+    per-row paid_hours sum ties to totals.counted_paid_hours (the canonical
+    hours proration feeds into pay)."""
+    owner, co, wu, pu, job = _seed(db)
+    wd = sorted(proration.working_dates_in_period(db, "MU", PS, PE, job.work_days))
+    _clock(db, pu, job, wd[:3])  # three 8h approved days
+    run = payroll_engine.create_draft_run(db, PayrollRunCreate(
+        company_id=co.company_id, period_start=PS, period_end=PE), actor_user_id=None)
+    db.commit()
+    ps = _payslip_for(db, run, pu)
+    c = _client(_engine, owner.user_id)
+    r = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["rows"]) == 3
+    assert all(row["status"] == "approved" for row in body["rows"])
+    row_sum = sum(float(row["paid_hours"]) for row in body["rows"])
+    assert abs(row_sum - float(body["totals"]["total_paid_hours"])) < 0.01
+    assert abs(row_sum - float(body["totals"]["counted_paid_hours"])) < 0.01
+    assert body["totals"]["unapproved_count"] == 0
+
+
+def test_timesheet_excludes_unconfirmed_overtime_from_paid(db, _engine, seed_mu_rules):
+    """An overtime row not yet confirmed by the employer is surfaced as
+    'pending', excluded from paid hours, and counted as unapproved."""
+    owner, co, wu, pu, job = _seed(db)
+    d = sorted(proration.working_dates_in_period(db, "MU", PS, PE, job.work_days))[0]
+    st = datetime.combine(d, time(8, 0), tzinfo=timezone.utc)
+    db.add(TimeLog(private_user_id=pu.private_user_id, job_id=job.job_id, day_of_week=d.strftime("%A"),
+                   start_time=st, end_time=st + timedelta(hours=10), hours_worked=Decimal("10.00"),
+                   location={}, admin_approved=True, is_overtime=True,
+                   overtime_confirmed_by_employer=False))
+    db.commit()
+    run = payroll_engine.create_draft_run(db, PayrollRunCreate(
+        company_id=co.company_id, period_start=PS, period_end=PE), actor_user_id=None)
+    db.commit()
+    ps = _payslip_for(db, run, pu)
+    c = _client(_engine, owner.user_id)
+    r = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["rows"]) == 1
+    assert body["rows"][0]["status"] == "pending"
+    assert float(body["rows"][0]["paid_hours"]) == 0.0
+    assert float(body["totals"]["total_paid_hours"]) == 0.0
+    assert body["totals"]["unapproved_count"] == 1
+
+
+def test_timesheet_forbidden_for_other_company_admin(db, _engine, seed_mu_rules):
+    """A company admin from a different tenant cannot read the payslip's
+    timesheet — mirrors GET /payslips/{id}'s access rules."""
+    owner_a, co_a, wu_a, pu_a, job_a = _seed(db)
+    owner_b, co_b, wu_b, pu_b, job_b = _seed(db)
+    run = payroll_engine.create_draft_run(db, PayrollRunCreate(
+        company_id=co_a.company_id, period_start=PS, period_end=PE), actor_user_id=None)
+    db.commit()
+    ps = _payslip_for(db, run, pu_a)
+    # Admin of company B → 403; the employee themselves → 200.
+    c = _client(_engine, owner_b.user_id)
+    r_other = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    c = _client(_engine, wu_a.user_id)
+    r_self = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    assert r_other.status_code == 403, r_other.text
+    assert r_self.status_code == 200, r_self.text
