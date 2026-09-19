@@ -36,12 +36,16 @@ export async function middleware(request: NextRequest) {
         pathname.startsWith('/_next') ||
         pathname.startsWith('/api') ||
         pathname.startsWith('/static') ||
-        pathname === '/' ||
         pathname === '/manifest.json' ||
         pathname.startsWith('/accept-invite')
     ) {
         return NextResponse.next();
     }
+    // NOTE: '/' (the login page) is intentionally NOT short-circuited here — it
+    // falls through to the token logic below so an already-authenticated visitor
+    // who types "/" in a new tab is redirected to their dashboard instead of
+    // being shown the login form. An unauthenticated visitor still lands on it
+    // via the `if (!token) return next()` path.
 
     // 2. Get Cookie
     const tokenCookie = request.cookies.get('access_token');
@@ -86,6 +90,23 @@ export async function middleware(request: NextRequest) {
         const isSuperUser = user?.is_superuser === true;
         const roles = user?.roles || [];
         const userType = user?.user_type;
+
+        // Already authenticated and landing on the login page ("/")? Send them
+        // to their home instead of showing the login form. Guarded so a private
+        // user with no web access is left on "/" — redirecting them to
+        // /dashboard would just bounce back here and loop.
+        if (pathname === '/') {
+            const isPlatformAdmin = isSuperUser || roles.includes('platform_admin');
+            if (isPlatformAdmin) {
+                return NextResponse.redirect(new URL('/admin', request.url));
+            }
+            const hasWebAccess = userType !== 'private' || user?.company_web_access === true;
+            if (hasWebAccess) {
+                return NextResponse.redirect(new URL('/dashboard', request.url));
+            }
+            // Private user without web access — leave them on the login page.
+            return NextResponse.next();
+        }
 
         // Block employees (private users) from the entire web dashboard.
         // Web is for company/employer accounts only — EXCEPT platform admins,
@@ -132,7 +153,12 @@ export async function middleware(request: NextRequest) {
             "Middleware JWT verification failed (check JWT_SECRET and JWT_ALGORITHM match the backend):",
             (e as Error)?.message ?? e,
         );
-        // Invalid token (bad signature, wrong audience, expired, etc.) -> login
+        // Invalid token (bad signature, wrong audience, expired, etc.) -> login.
+        // If we're already on "/" (the login page), fall through rather than
+        // redirect to "/" — a stale/invalid cookie must not cause a redirect loop.
+        if (pathname === '/') {
+            return NextResponse.next();
+        }
         return NextResponse.redirect(new URL('/', request.url));
     }
 
