@@ -538,6 +538,7 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
   }
   if (data === null) return null;
 
+  const salaried = data.pay_basis === "monthly";
   const hasRows = data.rows.length > 0 || data.leave_rows.length > 0;
   if (!hasRows) {
     return (
@@ -545,6 +546,7 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
         <TimesheetHeading />
         <p className="text-xs text-zinc-400 dark:text-zinc-500 py-2">
           No clock-ins recorded for this period.
+          {salaried && " This employee is salaried — pay is the monthly salary prorated by working days, not clock-ins."}
         </p>
       </div>
     );
@@ -653,7 +655,9 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
         </table>
       </div>
 
-      {mismatch && (
+      {/* Only meaningful when hours drive pay (hourly/daily). For salaried staff
+          the counted figure isn't what pays, so a "mismatch" would mislead. */}
+      {!salaried && mismatch && (
         <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">
           Row total ({fmtHours(rowSum)}) differs from the hours that paid ({fmtHours(counted)}) — recompute the run.
         </p>
@@ -668,7 +672,9 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
         </div>
       )}
       <p className="mt-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
-        Paid hours reflect confirmed overtime and the scheduled-shift-start clamp, matching how payroll counts them.
+        {salaried
+          ? "This employee is salaried — pay is the monthly salary prorated by working days, not these hours. The timesheet is attendance reference; confirmed overtime, if any, still adds to pay."
+          : "Paid hours reflect confirmed overtime and the scheduled-shift-start clamp — this is what payroll paid for."}
       </p>
     </div>
   );
