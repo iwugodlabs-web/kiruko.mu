@@ -268,6 +268,80 @@ def test_timesheet_excludes_unconfirmed_overtime_from_paid(db, _engine, seed_mu_
     assert body["totals"]["unapproved_count"] == 1
 
 
+def test_timesheet_clamp_reconciles_and_reports_pay_basis(db, _engine, seed_mu_rules):
+    """An early clock-in (before the scheduled shift start) is clamped: paid_hours
+    < raw hours_worked, and the row sum still ties to totals.counted_paid_hours
+    AND to proration.sum_hours_worked_in_period — the shared per-row helper keeps
+    the timesheet and the engine's aggregate from drifting. Also reports pay_basis."""
+    from datetime import time as _t
+    owner, co, wu, pu, job = _seed(db)
+    sal = _make_hourly(db, job, "200.00")
+    sal.pay_basis = "hourly"  # engine branches on pay_basis, not just hourly_rate
+    # Scheduled 09:00–17:00 local (MU is UTC+4 → 05:00Z–13:00Z).
+    job.work_start_time = _t(9, 0)
+    job.work_end_time = _t(17, 0)
+    db.commit()
+    d = sorted(proration.working_dates_in_period(db, "MU", PS, PE, job.work_days))[0]
+    # Clock in an hour early: 08:00 local = 04:00Z; out 17:00 local = 13:00Z. Raw 9h.
+    st = datetime.combine(d, time(4, 0), tzinfo=timezone.utc)
+    db.add(TimeLog(private_user_id=pu.private_user_id, job_id=job.job_id, day_of_week=d.strftime("%A"),
+                   start_time=st, end_time=st + timedelta(hours=9), hours_worked=Decimal("9.00"),
+                   location={}, admin_approved=True))
+    db.commit()
+    run = payroll_engine.create_draft_run(db, PayrollRunCreate(
+        company_id=co.company_id, period_start=PS, period_end=PE), actor_user_id=None)
+    db.commit()
+    ps = _payslip_for(db, run, pu)
+    c = _client(_engine, owner.user_id)
+    r = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["pay_basis"] == "hourly"
+    assert len(body["rows"]) == 1
+    row = body["rows"][0]
+    assert float(row["hours_worked"]) == 9.0       # raw
+    assert float(row["paid_hours"]) == 8.0          # early hour clamped off
+    # Row sum == the engine's own aggregate, both ways.
+    canonical = float(proration.sum_hours_worked_in_period(
+        db, private_user_id=pu.private_user_id, period_start=PS, period_end=PE,
+        company_timezone=co.timezone))
+    assert canonical == 8.0
+    assert abs(float(body["totals"]["total_paid_hours"]) - canonical) < 0.01
+    assert abs(float(body["totals"]["counted_paid_hours"]) - canonical) < 0.01
+
+
+def test_timesheet_overtime_hours_read_from_payslip_components(db, _engine, seed_mu_rules):
+    """The footer's OT hours come from the payslip's OWN overtime components (the
+    bucketing engine's split), not the coarse per-row is_overtime flag — so it
+    ties to the Components drill-down. Only premium buckets (category
+    'earning.overtime') count; the regular 'REG' bucket ('earning.basic') and
+    non-overtime earnings are excluded."""
+    owner, co, wu, pu, job = _seed(db)
+    run = payroll_engine.create_draft_run(db, PayrollRunCreate(
+        company_id=co.company_id, period_start=PS, period_end=PE), actor_user_id=None)
+    db.commit()
+    ps = _payslip_for(db, run, pu)
+    # Inject a known bucket split: 8h regular (REG) + 2h premium OT + a flat
+    # allowance. Only the 2h premium bucket should be reported as overtime.
+    ps.components = [
+        {"code": "BASIC", "label": "Basic", "kind": "earning", "category": "earning.basic",
+         "amount": "30000.00", "is_taxable": True, "is_basic": True, "source": "structure"},
+        {"code": "REG", "label": "Regular hours", "kind": "earning", "category": "earning.basic",
+         "amount": "1600.00", "is_taxable": True, "is_basic": True, "source": "overtime",
+         "meta": {"multiplier": "1.0", "hours": "8.0"}},
+        {"code": "OT15", "label": "Overtime 1.5x", "kind": "earning", "category": "earning.overtime",
+         "amount": "600.00", "is_taxable": True, "is_basic": False, "source": "overtime",
+         "meta": {"multiplier": "1.5", "hours": "2.0"}},
+    ]
+    db.commit()
+    c = _client(_engine, owner.user_id)
+    r = c.get(f"/api/v1/payslips/{ps.id}/timesheet")
+    _clear()
+    assert r.status_code == 200, r.text
+    assert float(r.json()["totals"]["total_overtime_hours"]) == 2.0
+
+
 def test_timesheet_forbidden_for_other_company_admin(db, _engine, seed_mu_rules):
     """A company admin from a different tenant cannot read the payslip's
     timesheet — mirrors GET /payslips/{id}'s access rules."""

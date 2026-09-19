@@ -217,6 +217,9 @@ class TimesheetTotals(BaseModel):
 class PayslipTimesheetRead(BaseModel):
     payslip_id: int
     private_user_id: int
+    # 'monthly' | 'hourly' | 'daily'. Decides whether these hours drive pay
+    # (hourly/daily → reconciles to gross) or are attendance reference (monthly).
+    pay_basis: str = "monthly"
     period_start: date
     period_end: date
     rows: List[TimesheetRow] = []
