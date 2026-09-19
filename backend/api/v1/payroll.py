@@ -1148,7 +1148,6 @@ def get_payslip_timesheet(
 
     rows: list[TimesheetRow] = []
     total_paid = Decimal("0.00")
-    total_ot = Decimal("0.00")
     unapproved = 0
     for tl, work_start_time, work_end_time in logs:
         row_start = tl.start_time
@@ -1195,8 +1194,6 @@ def get_payslip_timesheet(
             else Decimal("0")
         )
         total_paid += paid_raw
-        if is_ot and ot_confirmed:
-            total_ot += paid_raw
         paid = paid_raw.quantize(Decimal("0.01"))  # per-row display value
 
         # Status — one derived label, most-actionable first.
@@ -1278,6 +1275,24 @@ def get_payslip_timesheet(
                 days=days,
             )
         )
+
+    # Overtime hours — read from the payslip's OWN overtime components (the
+    # bucketing engine's split: source='overtime', premium buckets categorised
+    # 'earning.overtime', excluding the regular 'REG' bucket which is
+    # 'earning.basic'). This ties the footer to the Components drill-down and
+    # what actually paid, instead of the coarse per-row is_overtime flag which
+    # can't see a partial-shift OT slice. meta.hours is the bucket's hour count.
+    total_ot = Decimal("0")
+    for comp in (ps.components or []):
+        if comp.get("source") != "overtime" or comp.get("category") != "earning.overtime":
+            continue
+        h = (comp.get("meta") or {}).get("hours")
+        if h is None:
+            continue
+        try:
+            total_ot += Decimal(str(h))
+        except (ArithmeticError, ValueError):
+            continue
 
     # Canonical paid hours that actually flowed into pay — displayed next to the
     # row sum so a divergence is visible rather than silent.
