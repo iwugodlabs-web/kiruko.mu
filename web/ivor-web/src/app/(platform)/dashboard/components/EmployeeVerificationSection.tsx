@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { fetchCompanyUsers, resendClaimLink } from "../../../../services/api";
+import { fetchCompanyUsers, fetchCompanyBrnClaimants, resendClaimLink } from "../../../../services/api";
 import { api } from "../../../../services/apiClient";
 import { useAuth } from "@/contexts/AuthContext";
 import VerifyEmployeeModal from "./VerifyEmployeeModal";
@@ -85,7 +85,7 @@ export default function EmployeeVerificationSection() {
     const [employeeToReject, setEmployeeToReject] = useState<PendingEmployee | null>(null);
     const [rejectReason, setRejectReason] = useState('');
 
-    const { companyId } = useAuth();
+    const { companyId, companyBrn } = useAuth();
 
     // Fetch pending employees from API
     const fetchPendingEmployees = async () => {
@@ -104,6 +104,10 @@ export default function EmployeeVerificationSection() {
                 const users = response as any[];
 
                 if (Array.isArray(users)) {
+                    // user_ids already on the roster — so a self-signup claimant
+                    // who's ALSO somehow linked isn't listed twice.
+                    const rosterUserIds = new Set<number>(users.map((u: any) => u.user_id));
+
                     // Keep users that are not approved (pending/rejected) or explicitly unverified
                     const filtered = users.filter((u: any) => {
                         const onboarding = u.company_onboarding_status;
@@ -132,7 +136,42 @@ export default function EmployeeVerificationSection() {
                         };
                     });
 
-                    setPendingEmployees(companyEmployees);
+                    // Merge self-signup BRN claimants — they carry a draft job
+                    // linked only by employer_brn, so the roster endpoint above
+                    // omits them. Keyed by user_id so the existing approve/reject/
+                    // review flow (all user_id-based) works unchanged. Only add
+                    // pending, not-yet-on-roster claimants.
+                    let claimants: PendingEmployee[] = [];
+                    if (companyBrn) {
+                        const claimResp = await fetchCompanyBrnClaimants(companyBrn);
+                        if (Array.isArray(claimResp)) {
+                            const seen = new Set<number>();
+                            claimants = claimResp
+                                .filter((c: any) =>
+                                    c.user_id &&
+                                    !rosterUserIds.has(c.user_id) &&
+                                    (c.verification_status ?? 'pending') !== 'approved',
+                                )
+                                .filter((c: any) => (seen.has(c.user_id) ? false : (seen.add(c.user_id), true)))
+                                .map((c: any) => ({
+                                    id: c.user_id,
+                                    first_name: c.first_name,
+                                    last_name: c.last_name,
+                                    email: c.email,
+                                    job_title: c.job_title || undefined,
+                                    verification_status: (c.verification_status ?? 'pending') as any,
+                                    first_date_of_employment: c.first_date_of_employment || undefined,
+                                    phone: c.phone,
+                                    passport_number: c.passport_number,
+                                    date_of_birth: c.date_of_birth,
+                                    // Self-signups already own an account — no set-up
+                                    // link needed, so mark verified to hide that button.
+                                    user_verified: true,
+                                }));
+                        }
+                    }
+
+                    setPendingEmployees([...companyEmployees, ...claimants]);
                 } else {
                     setPendingEmployees([]);
                 }
@@ -150,7 +189,7 @@ export default function EmployeeVerificationSection() {
     useEffect(() => {
         fetchPendingEmployees();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [companyId]);
+    }, [companyId, companyBrn]);
 
     const handleVerification = async (employee: PendingEmployee, action: 'approve' | 'reject', reason?: string) => {
         setIsProcessing(true);
