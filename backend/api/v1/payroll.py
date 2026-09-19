@@ -1096,8 +1096,7 @@ def get_payslip_timesheet(
         TimesheetRow,
         TimesheetTotals,
     )
-    from services.kiosk_service import KioskService
-    from services.proration import sum_hours_worked_in_period
+    from services.proration import paid_hours_for_timelog, sum_hours_worked_in_period
 
     ps = db.query(Payslip).filter(Payslip.id == payslip_id).one_or_none()
     if ps is None:
@@ -1109,6 +1108,13 @@ def get_payslip_timesheet(
     company = db.query(Company).filter(Company.company_id == run.company_id).one_or_none()
     company_tz = company.timezone if company is not None else None
     require_approved = bool(company.require_approved_clockins_for_payroll) if company is not None else False
+
+    # Pay basis decides whether these hours actually DRIVE pay: hourly/daily pay
+    # off worked hours (timesheet reconciles to gross), monthly is salary-by-days
+    # (timesheet is attendance reference). Resolved via the same helper the engine
+    # uses so we read the identical active salary.
+    _job, _salary = payroll_engine._active_job_with_salary(db, ps.private_user_id)
+    pay_basis = (_salary.pay_basis if _salary and _salary.pay_basis else "monthly").lower()
 
     period_start, period_end = run.period_start, run.period_end
     # Same UTC-bounded window proration uses — TIMESTAMPTZ columns bound with
@@ -1170,30 +1176,28 @@ def get_payslip_timesheet(
         ot_confirmed = bool(tl.overtime_confirmed_by_employer)
         ot_rejected = bool(tl.overtime_rejected)
 
-        # Paid hours — replicate sum_hours_worked_in_period per row: the row must
-        # have hours, not be unconfirmed/rejected overtime, and (when the company
-        # requires it) be admin-approved. Then clamp early minutes to the
-        # scheduled shift start.
+        # Paid hours — reuse payroll's own per-row function (proration.
+        # paid_hours_for_timelog) so a row never disagrees with what the engine
+        # pays. A row counts only if it has hours, isn't unconfirmed/rejected
+        # overtime, and (when the company requires it) is admin-approved — the
+        # same predicate sum_hours_worked_in_period applies in SQL.
         hrs = tl.hours_worked
         counts = (
             hrs is not None
             and (not is_ot or ot_confirmed)
             and (not require_approved or bool(tl.admin_approved))
         )
-        paid = Decimal("0.00")
-        if counts and hrs is not None:
-            paid = Decimal(hrs)
-            if row_start is not None:
-                eff_start = KioskService.effective_paid_start(
-                    work_start_time, work_end_time, company_tz, row_start
-                )
-                if eff_start > row_start:
-                    early = (eff_start - row_start).total_seconds()
-                    paid = max(Decimal("0.00"), paid - Decimal(early) / Decimal(3600))
-            paid = paid.quantize(Decimal("0.01"))
-        total_paid += paid
+        # UNQUANTIZED per-row value; accumulate then quantize the total once,
+        # matching sum_hours_worked_in_period so the two never drift.
+        paid_raw = (
+            paid_hours_for_timelog(hrs, row_start, work_start_time, work_end_time, company_tz)
+            if counts
+            else Decimal("0")
+        )
+        total_paid += paid_raw
         if is_ot and ot_confirmed:
-            total_ot += paid
+            total_ot += paid_raw
+        paid = paid_raw.quantize(Decimal("0.01"))  # per-row display value
 
         # Status — one derived label, most-actionable first.
         if row_end is None:
@@ -1289,6 +1293,7 @@ def get_payslip_timesheet(
     return PayslipTimesheetRead(
         payslip_id=ps.id,
         private_user_id=ps.private_user_id,
+        pay_basis=pay_basis,
         period_start=period_start,
         period_end=period_end,
         rows=rows,

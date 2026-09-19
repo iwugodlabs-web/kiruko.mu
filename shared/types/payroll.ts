@@ -806,6 +806,9 @@ export interface TimesheetTotals {
 export interface PayslipTimesheet {
   payslip_id: number;
   private_user_id: number;
+  /** 'monthly' | 'hourly' | 'daily'. Hourly/daily reconcile to gross; monthly
+   *  is salary-by-days so the timesheet is attendance reference only. */
+  pay_basis: string;
   period_start: string;
   period_end: string;
   rows: TimesheetRow[];
