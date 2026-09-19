@@ -748,3 +748,67 @@ export interface CountryAssignmentCreate {
   new_company_id?: number | null;
   notes?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Per-payslip timesheet — the daily clock-ins behind a payslip's hours,
+// reconciled to the numbers on the slip. Served by GET /payslips/{id}/timesheet.
+// ---------------------------------------------------------------------------
+
+export type TimesheetRowStatus =
+  | 'open'
+  | 'auto_closed'
+  | 'disputed'
+  | 'rejected'
+  | 'pending'
+  | 'approved';
+
+export interface TimesheetRow {
+  timelog_id: number;
+  date: string;
+  day_of_week?: string | null;
+  clock_in?: string | null;
+  /** null while the session is still open (no clock-out yet). */
+  clock_out?: string | null;
+  break_minutes: string;
+  /** Raw worked hours as stored (breaks already subtracted). */
+  hours_worked?: string | null;
+  /** What payroll actually pays for this row (after the scheduled-start clamp);
+   *  zero when the row doesn't count (unconfirmed/rejected overtime). */
+  paid_hours: string;
+  is_overtime: boolean;
+  overtime_confirmed_by_employer: boolean;
+  overtime_rejected: boolean;
+  status: TimesheetRowStatus;
+  /** Review signals: out_of_geofence | is_late | out_of_schedule | auto_closed. */
+  exception_flags: string[];
+}
+
+export interface TimesheetLeaveRow {
+  start_date: string;
+  end_date: string;
+  code: string;
+  label: string;
+  paid: boolean;
+  days: number;
+}
+
+export interface TimesheetTotals {
+  total_paid_hours: string;
+  total_overtime_hours: string;
+  /** Canonical hours that flowed into pay — displayed next to the row sum so a
+   *  divergence is visible. */
+  counted_paid_hours: string;
+  total_leave_days: number;
+  /** Rows in open/pending/disputed — clock-ins not yet cleared for payroll. */
+  unapproved_count: number;
+}
+
+export interface PayslipTimesheet {
+  payslip_id: number;
+  private_user_id: number;
+  period_start: string;
+  period_end: string;
+  rows: TimesheetRow[];
+  leave_rows: TimesheetLeaveRow[];
+  totals: TimesheetTotals;
+}

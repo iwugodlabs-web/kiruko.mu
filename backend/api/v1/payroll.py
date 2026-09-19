@@ -1076,6 +1076,233 @@ def get_payslip(
     return _enrich_payslip(ps, db)
 
 
+@router.get("/payslips/{payslip_id}/timesheet")
+def get_payslip_timesheet(
+    payslip_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The daily clock-ins that produced this payslip's hours, over the run's
+    exact period, with paid hours computed the same way payroll counts them
+    (`proration.sum_hours_worked_in_period`) so the totals tie back to the slip.
+    Read-only. Same access rules as GET /payslips/{id}: the employee for their
+    own slip, or a company admin with `view_payslip`."""
+    from datetime import datetime as _dt, time as _time, timezone as _tz
+    from decimal import Decimal
+    from core.model import BreakLog, Job, Leave, LeaveType, TimeLog, TimeLogDispute
+    from schema.payroll_schema import (
+        LeaveRow,
+        PayslipTimesheetRead,
+        TimesheetRow,
+        TimesheetTotals,
+    )
+    from services.kiosk_service import KioskService
+    from services.proration import sum_hours_worked_in_period
+
+    ps = db.query(Payslip).filter(Payslip.id == payslip_id).one_or_none()
+    if ps is None:
+        raise HTTPException(status_code=404, detail=f"Payslip {payslip_id} not found")
+    run = db.query(PayrollRun).filter(PayrollRun.id == ps.payroll_run_id).one()
+    if current_user.user_id != ps.private_user.user_id:
+        _require_admin_for_company(current_user, run.company_id, db, permission="view_payslip")
+
+    company = db.query(Company).filter(Company.company_id == run.company_id).one_or_none()
+    company_tz = company.timezone if company is not None else None
+    require_approved = bool(company.require_approved_clockins_for_payroll) if company is not None else False
+
+    period_start, period_end = run.period_start, run.period_end
+    # Same UTC-bounded window proration uses — TIMESTAMPTZ columns bound with
+    # explicit UTC so a non-UTC DB session doesn't shift the window.
+    start_dt = _dt.combine(period_start, _time.min, tzinfo=_tz.utc)
+    end_dt = _dt.combine(period_end, _time.max, tzinfo=_tz.utc)
+    now = _dt.now(_tz.utc)
+
+    logs = (
+        db.query(TimeLog, Job.work_start_time, Job.work_end_time)
+        .join(Job, TimeLog.job_id == Job.job_id)
+        .filter(TimeLog.private_user_id == ps.private_user_id)
+        .filter(TimeLog.start_time >= start_dt)
+        .filter(TimeLog.start_time <= end_dt)
+        .order_by(TimeLog.start_time.asc())
+        .all()
+    )
+
+    # Which of these timelogs carry an unresolved dispute — one bulk query
+    # rather than a lazy `.dispute` load per row.
+    log_ids = [tl.timelog_id for tl, _ws, _we in logs]
+    disputed_ids: set[int] = set()
+    if log_ids:
+        disputed_ids = {
+            row[0]
+            for row in db.query(TimeLogDispute.time_log_id)
+            .filter(TimeLogDispute.time_log_id.in_(log_ids))
+            .filter(TimeLogDispute.resolution == "pending")
+            .all()
+        }
+
+    rows: list[TimesheetRow] = []
+    total_paid = Decimal("0.00")
+    total_ot = Decimal("0.00")
+    unapproved = 0
+    for tl, work_start_time, work_end_time in logs:
+        row_start = tl.start_time
+        row_end = tl.end_time
+
+        # Break minutes — an open break (no end) counts through the clock-out,
+        # or through `now` while the session itself is still open. Mirrors the
+        # clock-out summation in crud/job.py so displayed breaks match stored hours.
+        break_seconds = 0.0
+        for b in db.query(BreakLog.start_time, BreakLog.end_time).filter(
+            BreakLog.timelog_id == tl.timelog_id
+        ):
+            b_start, b_end = b
+            if b_start is None:
+                continue
+            eff_end = b_end if b_end is not None else (row_end or now)
+            if b_start.tzinfo is None:
+                b_start = b_start.replace(tzinfo=_tz.utc)
+            if eff_end.tzinfo is None:
+                eff_end = eff_end.replace(tzinfo=_tz.utc)
+            break_seconds += max((eff_end - b_start).total_seconds(), 0)
+        break_minutes = Decimal(str(round(break_seconds / 60, 1)))
+
+        is_ot = bool(tl.is_overtime)
+        ot_confirmed = bool(tl.overtime_confirmed_by_employer)
+        ot_rejected = bool(tl.overtime_rejected)
+
+        # Paid hours — replicate sum_hours_worked_in_period per row: the row must
+        # have hours, not be unconfirmed/rejected overtime, and (when the company
+        # requires it) be admin-approved. Then clamp early minutes to the
+        # scheduled shift start.
+        hrs = tl.hours_worked
+        counts = (
+            hrs is not None
+            and (not is_ot or ot_confirmed)
+            and (not require_approved or bool(tl.admin_approved))
+        )
+        paid = Decimal("0.00")
+        if counts and hrs is not None:
+            paid = Decimal(hrs)
+            if row_start is not None:
+                eff_start = KioskService.effective_paid_start(
+                    work_start_time, work_end_time, company_tz, row_start
+                )
+                if eff_start > row_start:
+                    early = (eff_start - row_start).total_seconds()
+                    paid = max(Decimal("0.00"), paid - Decimal(early) / Decimal(3600))
+            paid = paid.quantize(Decimal("0.01"))
+        total_paid += paid
+        if is_ot and ot_confirmed:
+            total_ot += paid
+
+        # Status — one derived label, most-actionable first.
+        if row_end is None:
+            status = "open"
+        elif bool(tl.admin_rejected):
+            status = "rejected"
+        elif tl.timelog_id in disputed_ids:
+            status = "disputed"
+        elif is_ot and not ot_confirmed and not ot_rejected:
+            status = "pending"  # overtime awaiting employer sign-off
+        elif bool(tl.needs_review):
+            status = "pending"
+        elif require_approved and not bool(tl.admin_approved):
+            status = "pending"
+        elif bool(tl.auto_closed):
+            status = "auto_closed"
+        else:
+            status = "approved"
+        if status in ("open", "pending", "disputed"):
+            unapproved += 1
+
+        exception_flags: list[str] = []
+        for attr in ("out_of_geofence", "is_late", "out_of_schedule", "auto_closed"):
+            if bool(getattr(tl, attr, False)):
+                exception_flags.append(attr)
+
+        rows.append(
+            TimesheetRow(
+                timelog_id=tl.timelog_id,
+                date=(row_start.date() if row_start is not None else period_start),
+                day_of_week=tl.day_of_week,
+                clock_in=row_start,
+                clock_out=row_end,
+                break_minutes=break_minutes,
+                hours_worked=Decimal(hrs) if hrs is not None else None,
+                paid_hours=paid,
+                is_overtime=is_ot,
+                overtime_confirmed_by_employer=ot_confirmed,
+                overtime_rejected=ot_rejected,
+                status=status,
+                exception_flags=exception_flags,
+            )
+        )
+
+    # Leave overlay — approved leave intersecting the period, day-based (absent
+    # from TimeLog). Same intersection rule as payroll_engine._compute_leave_summary.
+    leave_rows: list[LeaveRow] = []
+    total_leave_days = 0
+    for lv, lt in (
+        db.query(Leave, LeaveType)
+        .outerjoin(LeaveType, LeaveType.id == Leave.leave_type_id)
+        .filter(Leave.private_user_id == ps.private_user_id)
+        .filter(Leave.status == "approved")
+        .filter(Leave.start_date <= period_end)
+        .filter(Leave.end_date >= period_start)
+        .all()
+    ):
+        eff_start = max(lv.start_date, period_start)
+        eff_end = min(lv.end_date, period_end)
+        if eff_end < eff_start:
+            continue
+        days = (eff_end - eff_start).days + 1
+        if lt is not None:
+            code, label, paid_leave = lt.code, (lt.label or lt.code), bool(lt.is_paid)
+        else:
+            from services.payroll_engine import _DEFAULT_PAID_TYPES
+            code = (lv.leave_type or "other").lower()
+            label = (lv.leave_type or "Other").replace("_", " ").title()
+            paid_leave = code in _DEFAULT_PAID_TYPES
+        total_leave_days += days
+        leave_rows.append(
+            LeaveRow(
+                start_date=eff_start,
+                end_date=eff_end,
+                code=code,
+                label=label,
+                paid=paid_leave,
+                days=days,
+            )
+        )
+
+    # Canonical paid hours that actually flowed into pay — displayed next to the
+    # row sum so a divergence is visible rather than silent.
+    counted = sum_hours_worked_in_period(
+        db,
+        private_user_id=ps.private_user_id,
+        period_start=period_start,
+        period_end=period_end,
+        require_approved=require_approved,
+        company_timezone=company_tz,
+    )
+
+    return PayslipTimesheetRead(
+        payslip_id=ps.id,
+        private_user_id=ps.private_user_id,
+        period_start=period_start,
+        period_end=period_end,
+        rows=rows,
+        leave_rows=leave_rows,
+        totals=TimesheetTotals(
+            total_paid_hours=total_paid.quantize(Decimal("0.01")),
+            total_overtime_hours=total_ot.quantize(Decimal("0.01")),
+            counted_paid_hours=counted,
+            total_leave_days=total_leave_days,
+            unapproved_count=unapproved,
+        ),
+    )
+
+
 @router.get("/payslips/employee/{private_user_id}", response_model=List[PayslipRead])
 def list_employee_payslips(
     private_user_id: int,
