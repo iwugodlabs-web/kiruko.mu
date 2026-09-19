@@ -153,6 +153,43 @@ class TestSqlScan:
         # jobs has a company_id filter; private_users transitively isolated.
         assert "jobs" in filtered
 
+    def test_scan_accepts_private_user_id_scope(self):
+        """A read isolated by private_user_id (one employee → one company) is
+        scoped even without a literal company_id — e.g. the salary-preview and
+        auth/context lookups that used to spam the log."""
+        from core.tenant_guard import _scan
+
+        sql = "SELECT * FROM jobs WHERE jobs.private_user_id = 20"
+        _, filtered = _scan(sql)
+        assert filtered == {"jobs"}
+
+    def test_scan_accepts_employer_brn_scope(self):
+        """The company leave list matches jobs by employer_brn (a per-company
+        key), not company_id."""
+        from core.tenant_guard import _scan
+
+        sql = "SELECT jobs.private_user_id FROM jobs WHERE jobs.employer_brn = 'C1234'"
+        _, filtered = _scan(sql)
+        assert filtered == {"jobs"}
+
+    def test_scan_accepts_qualified_pk_id_filter(self):
+        """A table whose PK is `id` (payroll_runs) pins to one row → one tenant
+        when filtered on its qualified id."""
+        from core.tenant_guard import _scan
+
+        sql = "SELECT * FROM payroll_runs WHERE payroll_runs.id = 7"
+        _, filtered = _scan(sql)
+        assert filtered == {"payroll_runs"}
+
+    def test_scan_bare_id_still_flagged(self):
+        """A bare `id` (not table-qualified) must NOT count as a tenant scope,
+        or the guard would pass essentially everything."""
+        from core.tenant_guard import _scan
+
+        sql = "SELECT * FROM payroll_runs WHERE id = 7"
+        _, filtered = _scan(sql)
+        assert filtered == set()
+
 
 # ---------------------------------------------------------------------------
 # End-to-end via the live event listener
