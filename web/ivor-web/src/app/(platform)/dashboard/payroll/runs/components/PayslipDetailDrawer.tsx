@@ -9,7 +9,7 @@ import {
   type TimesheetRow,
   type TimesheetLeaveRow,
 } from "@/services/payroll-api";
-import { AlertTriangle, ChevronDown, ChevronUp, Clock, Download, FileText, Loader2, Lock, MapPin, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Clock, Download, FileText, Loader2, Lock, MapPin, Maximize2, X } from "lucide-react";
 import { isError, formatMoney as fmtMoneyBase } from "@/utils/payrollFormat";
 import { describeFlag } from "@/utils/describeFlag";
 import { countryLabel } from "@/utils/countryDisplay";
@@ -506,10 +506,13 @@ function TimesheetStatusPill({ status }: { status: string }) {
 }
 
 /** The daily clock-ins that produced this payslip's hours, over the run's exact
- *  period — reconciled to the Gross/overtime figures above. Lazy-loaded. */
+ *  period — reconciled to the Gross/overtime figures above. Lazy-loaded. The
+ *  drawer shows a compact summary; the full daily table opens in a wide modal
+ *  so it isn't cramped in the ~512px drawer. */
 function TimesheetSection({ payslip }: { payslip: Payslip }) {
   const [data, setData] = useState<PayslipTimesheet | null>(null);
   const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
   const payslipId = payslip.id;
 
   useEffect(() => {
@@ -552,6 +555,121 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
     );
   }
 
+  const t = data.totals;
+  const dayCount = data.rows.length;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <TimesheetHeading className="mb-0" />
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:underline"
+        >
+          <Maximize2 className="h-3.5 w-3.5" /> Full view
+        </button>
+      </div>
+
+      {/* Compact summary — the full daily table opens in the modal (below), so
+          it isn't squeezed into the narrow drawer. The whole card is clickable. */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full text-left rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors px-3.5 py-3"
+      >
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5">
+          <SummaryStat label="Paid hours" value={fmtHours(t.total_paid_hours)} strong />
+          {Number(t.total_overtime_hours) > 0 && (
+            <SummaryStat label="Overtime" value={fmtHours(t.total_overtime_hours)} />
+          )}
+          {t.total_leave_days > 0 && (
+            <SummaryStat label="Leave" value={`${t.total_leave_days} day${t.total_leave_days === 1 ? "" : "s"}`} />
+          )}
+          <span className="ml-auto inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-300">
+            {dayCount} clock-in{dayCount === 1 ? "" : "s"} <Maximize2 className="h-3 w-3" />
+          </span>
+        </div>
+      </button>
+
+      {t.unapproved_count > 0 && <UnapprovedBanner count={t.unapproved_count} />}
+
+      {open && (
+        <TimesheetModal payslip={payslip} data={data} salaried={salaried} onClose={() => setOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+
+function SummaryStat({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{label}</span>
+      <span className={`tabular-nums ${strong ? "text-base font-semibold text-zinc-900 dark:text-zinc-100" : "text-sm font-medium text-zinc-700 dark:text-zinc-300"}`}>
+        {value}
+      </span>
+    </span>
+  );
+}
+
+
+function UnapprovedBanner({ count }: { count: number }) {
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+      <span>
+        {count} clock-in{count === 1 ? "" : "s"} still need approval before finalizing —
+        open, pending or disputed rows are excluded from paid hours.
+      </span>
+    </div>
+  );
+}
+
+
+/** The full daily timesheet in a wide centered modal — stacks above the payslip
+ *  drawer (z-[60]) so the table has room to breathe. */
+function TimesheetModal({ payslip, data, salaried, onClose }: {
+  payslip: Payslip;
+  data: PayslipTimesheet;
+  salaried: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <button aria-label="Close timesheet" type="button" onClick={onClose} className="absolute inset-0 bg-black/40" />
+      <div className="relative w-full max-w-3xl max-h-[85vh] bg-white dark:bg-zinc-900 rounded-lg shadow-xl flex flex-col">
+        <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-1.5 text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              <Clock className="h-4 w-4 text-zinc-400 dark:text-zinc-500" /> Timesheet
+            </h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
+              {payslip.employee_name ? `${payslip.employee_name} · ` : ""}
+              {fmtPeriod(data.period_start, data.period_end)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <TimesheetTable data={data} salaried={salaried} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/** The daily clock-in table + reconciliation notes. Rendered inside the modal. */
+function TimesheetTable({ data, salaried }: { data: PayslipTimesheet; salaried: boolean }) {
   // Interleave clock-ins and leave days by date so the period reads chronologically.
   type Entry =
     | { kind: "log"; date: string; row: TimesheetRow }
@@ -568,7 +686,6 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
 
   return (
     <div>
-      <TimesheetHeading />
       <div className="rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
         <table className="min-w-full divide-y divide-zinc-100 text-sm">
           <thead className="bg-zinc-50 dark:bg-zinc-900/40">
@@ -584,7 +701,7 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
             {entries.map((e, i) =>
               e.kind === "leave" ? (
                 <tr key={`lv-${e.leave.code}-${i}`} className="bg-zinc-50/40 dark:bg-zinc-800/20">
-                  <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400">{fmtDay(e.leave.start_date)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500 dark:text-zinc-400">{fmtDay(e.leave.start_date)}</td>
                   <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400 italic" colSpan={3}>
                     Leave — {e.leave.label} ({e.leave.days}d, {e.leave.paid ? "paid" : "unpaid"})
                   </td>
@@ -658,20 +775,12 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
       {/* Only meaningful when hours drive pay (hourly/daily). For salaried staff
           the counted figure isn't what pays, so a "mismatch" would mislead. */}
       {!salaried && mismatch && (
-        <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+        <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
           Row total ({fmtHours(rowSum)}) differs from the hours that paid ({fmtHours(counted)}) — recompute the run.
         </p>
       )}
-      {t.unapproved_count > 0 && (
-        <div className="mt-2 inline-flex items-start gap-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            {t.unapproved_count} clock-in{t.unapproved_count === 1 ? "" : "s"} still need approval before finalizing —
-            open, pending or disputed rows are excluded from paid hours.
-          </span>
-        </div>
-      )}
-      <p className="mt-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+      {t.unapproved_count > 0 && <UnapprovedBanner count={t.unapproved_count} />}
+      <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
         {salaried
           ? "This employee is salaried — pay is the monthly salary prorated by working days, not these hours. The timesheet is attendance reference; confirmed overtime, if any, still adds to pay."
           : "Paid hours reflect confirmed overtime and the scheduled-shift-start clamp — this is what payroll paid for."}
@@ -680,13 +789,23 @@ function TimesheetSection({ payslip }: { payslip: Payslip }) {
   );
 }
 
-function TimesheetHeading() {
+
+function TimesheetHeading({ className = "" }: { className?: string }) {
   return (
-    <h3 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide mb-2">
+    <h3 className={`flex items-center gap-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide mb-2 ${className}`}>
       <Clock className="h-4 w-4 text-zinc-400 dark:text-zinc-500" />
       Timesheet
     </h3>
   );
+}
+
+
+function fmtPeriod(startIso: string, endIso: string): string {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return "";
+  const opts: Intl.DateTimeFormatOptions = { day: "2-digit", month: "short" };
+  return `${s.toLocaleDateString(undefined, opts)} – ${e.toLocaleDateString(undefined, opts)} ${e.getFullYear()}`;
 }
 
 
