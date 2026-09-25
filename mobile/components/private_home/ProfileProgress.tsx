@@ -1,12 +1,17 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { Palette } from '@/app/constants/theme';
-import { Box, HStack, Text, VStack, Pressable, Progress, ProgressFilledTrack } from '@gluestack-ui/themed';
+import { Box, HStack, Text, VStack, Pressable } from '@gluestack-ui/themed';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Animated, { FadeIn } from '@/app/utils/animated';
 import { useTranslation } from 'react-i18next';
 
+const DISMISS_KEY = 'kiruko.profileChecklist.dismissed';
+
 interface ProfileProgressProps {
+  /** Server-authoritative onboarding flag. False ⇒ setup isn't finished. */
+  onboardComplete?: boolean;
   profileData: {
     gender?: string;
     date_of_birth?: string;
@@ -19,59 +24,162 @@ interface ProfileProgressProps {
     work_end_time?: string;
     work_days?: Record<string, string>;
   } | null;
+  salaryData?: { salary?: any } | null;
 }
 
-const ProfileProgress: React.FC<ProfileProgressProps> = ({ profileData, jobData }) => {
+/**
+ * Redesign v2 — the home nudge card. Replaces the old "profile percentage"
+ * meter (which implied a mandatory 100% goal) with:
+ *   - a single CTA to the Setup flow if required setup is somehow incomplete, or
+ *   - a dismissible "get the most out of Kiruko" checklist of OPTIONAL items
+ *     that deep-link into the profile sections and are driven by the action
+ *     that benefits from them (payslip estimate, KYC, compliance).
+ */
+const ProfileProgress: React.FC<ProfileProgressProps> = ({
+  onboardComplete,
+  profileData,
+  jobData,
+  salaryData,
+}) => {
   const router = useRouter();
   const { t } = useTranslation();
+  const [dismissed, setDismissed] = useState<boolean | undefined>(undefined);
 
-  const fields = [
-    profileData?.gender,
-    profileData?.date_of_birth,
-    profileData?.pass_port_number,
-    jobData?.job_title,
-    jobData?.employer_name,
-    jobData?.work_start_time,
-    jobData?.work_end_time,
-    jobData?.work_days && Object.keys(jobData.work_days).length > 0 ? 'yes' : undefined,
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(DISMISS_KEY).then((v) => {
+      if (!cancelled) setDismissed(v === 'true');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const filled = fields.filter(Boolean).length;
-  const total = fields.length;
-  const percentage = Math.round((filled / total) * 100);
+  if (dismissed === undefined) return null;
 
-  if (percentage === 100) return null;
+  // Required setup not done — the one thing that must be surfaced.
+  if (onboardComplete === false) {
+    return (
+      <Animated.View entering={FadeIn.duration(500).delay(100)}>
+        <Pressable onPress={() => router.replace('/private_dashboard/setup' as any)}>
+          <Box
+            bg={Palette.blueTint}
+            p="$4"
+            rounded="$2xl"
+            borderWidth={1}
+            borderColor="#C9D3F7"
+            mb="$4"
+          >
+            <HStack alignItems="center" space="md">
+              <Box bg="white" p="$2" rounded="$full">
+                <MaterialIcons name="rocket-launch" size={20} color={Palette.blue} />
+              </Box>
+              <VStack flex={1}>
+                <Text fontSize={14} fontWeight="800" color={Palette.indigo}>
+                  {t('privateHomeCards.finishSetupTitle', { defaultValue: 'Finish setting up to clock in' })}
+                </Text>
+                <Text fontSize={12} color={Palette.blue} fontWeight="600">
+                  {t('privateHomeCards.finishSetupBody', { defaultValue: 'Takes ~20 seconds' })}
+                </Text>
+              </VStack>
+              <MaterialIcons name="chevron-right" size={20} color={Palette.blue} />
+            </HStack>
+          </Box>
+        </Pressable>
+      </Animated.View>
+    );
+  }
+
+  const identityDone = Boolean(profileData?.gender && profileData?.date_of_birth && profileData?.pass_port_number);
+  const hasEmployer = Boolean(jobData?.job_title && jobData?.employer_name);
+  const payDone = Boolean(salaryData?.salary && String(salaryData.salary).trim() !== '');
+
+  const items: { id: string; label: string; icon: string; color: string; route: string }[] = [];
+  if (hasEmployer && !payDone) {
+    items.push({
+      id: 'pay',
+      label: t('privateHomeCards.tipPayslip', { defaultValue: 'Add salary for accurate payslip estimates' }),
+      icon: 'account-balance-wallet',
+      color: Palette.blue,
+      route: '/private_dashboard/profile/pay',
+    });
+  }
+  if (!identityDone) {
+    items.push({
+      id: 'identity',
+      label: t('privateHomeCards.tipIdentity', { defaultValue: 'Add ID details for verification' }),
+      icon: 'badge',
+      color: Palette.violet,
+      route: '/private_dashboard/profile/identity',
+    });
+  }
+  if (hasEmployer) {
+    items.push({
+      id: 'compliance',
+      label: t('privateHomeCards.tipCompliance', { defaultValue: 'Complete compliance details for reports' }),
+      icon: 'gavel',
+      color: Palette.green,
+      route: '/private_dashboard/profile/compliance',
+    });
+  }
+
+  if (dismissed || items.length === 0) return null;
+
+  const dismiss = async () => {
+    setDismissed(true);
+    try {
+      await AsyncStorage.setItem(DISMISS_KEY, 'true');
+    } catch {
+      // Best-effort.
+    }
+  };
 
   return (
     <Animated.View entering={FadeIn.duration(500).delay(100)}>
-      <Pressable onPress={() => router.push('/private_dashboard/profile' as any)}>
-        <Box
-          bg="white"
-          p="$4"
-          rounded="$2xl"
-          borderWidth={1}
-          borderColor="$borderLight100"
-          shadowColor="$shadowColor"
-          shadowOffset={{ width: 0, height: 2 }}
-          shadowOpacity={0.06}
-          shadowRadius={8}
-          elevation={3}
-        >
-          <HStack alignItems="center" space="sm" mb="$3">
-            <Box bg="rgba(236, 72, 153, 0.1)" p="$2" rounded="$full">
-              <MaterialIcons name="person" size={20} color={Palette.violet} />
-            </Box>
-            <VStack flex={1}>
-              <Text fontSize={14} fontWeight="800" color="$textDark900">{t('privateHomeCards.completeProfile')}</Text>
-              <Text fontSize={11} color="$textLight500" fontWeight="600">{t('privateHomeCards.profilePercent', { percentage, remaining: total - filled })}</Text>
-            </VStack>
-            <MaterialIcons name="chevron-right" size={20} color={Palette.gray400} />
-          </HStack>
-          <Progress value={percentage} size="sm" bg="$backgroundLight100" rounded="$full">
-            <ProgressFilledTrack bg={percentage > 60 ? Palette.green : percentage > 30 ? Palette.warning : Palette.errorAlt} rounded="$full" />
-          </Progress>
-        </Box>
-      </Pressable>
+      <Box
+        bg="white"
+        p="$4"
+        rounded="$2xl"
+        borderWidth={1}
+        borderColor="$borderLight100"
+        shadowColor="$shadowColor"
+        shadowOffset={{ width: 0, height: 2 }}
+        shadowOpacity={0.06}
+        shadowRadius={8}
+        elevation={3}
+        mb="$4"
+      >
+        <HStack alignItems="center" space="sm" mb="$3">
+          <Box bg={Palette.goldTint} p="$2" rounded="$full">
+            <MaterialIcons name="auto-awesome" size={18} color={Palette.gold} />
+          </Box>
+          <VStack flex={1}>
+            <Text fontSize={14} fontWeight="800" color={Palette.ink}>
+              {t('privateHomeCards.getMostTitle', { defaultValue: 'Get the most out of Kiruko' })}
+            </Text>
+            <Text fontSize={11} color={Palette.gray500} fontWeight="600">
+              {t('privateHomeCards.getMostBody', { defaultValue: 'Optional — do it whenever you like' })}
+            </Text>
+          </VStack>
+          <Pressable onPress={dismiss} hitSlop={10}>
+            <MaterialIcons name="close" size={18} color={Palette.gray400} />
+          </Pressable>
+        </HStack>
+
+        <VStack space="xs">
+          {items.map((item) => (
+            <Pressable key={item.id} onPress={() => router.push(item.route as any)}>
+              <HStack alignItems="center" space="sm" py="$2">
+                <MaterialIcons name={item.icon as any} size={18} color={item.color} />
+                <Text flex={1} fontSize={13} color={Palette.gray700} fontWeight="600">
+                  {item.label}
+                </Text>
+                <MaterialIcons name="chevron-right" size={18} color={Palette.gray400} />
+              </HStack>
+            </Pressable>
+          ))}
+        </VStack>
+      </Box>
     </Animated.View>
   );
 };

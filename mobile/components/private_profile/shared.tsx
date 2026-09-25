@@ -1,0 +1,287 @@
+import { createOnboardJob, createSalary, getJobById, getUserDetail, updateJob, updateUserProfile } from '@/services/api';
+import { profileLock } from '@/services/payroll-api';
+import { Palette, Type } from '@/app/constants/theme';
+import { PremiumHeader } from '@/components/PremiumHeader';
+import { StandardButton } from '@/app/design-system';
+import { Box, HStack, Pressable, Text } from '@gluestack-ui/themed';
+import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import useAuth from '@/app/hooks/useAuth';
+
+// ---------------------------------------------------------------------------
+// Progressive-onboarding profile shared helpers.
+//
+// Every section screen (workschedule / pay / identity / compliance) loads the
+// same underlying profile+job+salary rows and persists its own slice. We
+// persist through POST /user/onboard (which upserts and recomputes the
+// server-authoritative onboard_complete flag) rather than PATCH, so partial
+// writes can't strand the gate.
+// ---------------------------------------------------------------------------
+
+export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+export const DEDUCTION_REASONS = ['Food', 'Lodging', 'Transport', 'Uniform'] as const;
+export const AUTO_LOCK_REASON = 'Auto-locked on admin company-edit';
+
+export const toBoolStr = (val: any): 'true' | 'false' | '' =>
+  val === true ? 'true' : val === false ? 'false' : '';
+
+export const str = (val: any): string => (val !== null && val !== undefined ? String(val) : '');
+
+// Time/date helpers ---------------------------------------------------------
+
+export const formatDate = (date: Date | string | undefined): string => {
+  if (!date) return '';
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().split('T')[0];
+};
+
+export const formatTime = (date: Date | string | undefined): string => {
+  if (!date) return '';
+  if (typeof date === 'string' && /^\d{2}:\d{2}/.test(date)) return date.slice(0, 5);
+  const d = new Date(date as any);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
+export const parseTimeDate = (value: string): Date => {
+  const [h, m] = (value || '').split(':').map(Number);
+  const d = new Date();
+  d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
+  return d;
+};
+
+export const parseDate = (value: string): Date => {
+  const d = value ? new Date(value) : new Date();
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+};
+
+// ---------------------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------------------
+
+export interface ProfileBootstrap {
+  user: any;
+  privateUserId?: number;
+  job: any | null;
+  salary: any | null;
+  lockState: any | null;
+  isIndependentUser: boolean;
+  identityLocked: boolean;
+  companyLocked: boolean;
+  loading: boolean;
+  reload: () => Promise<void>;
+  refreshAuth: () => Promise<void>;
+}
+
+export function useProfileBootstrap(): ProfileBootstrap {
+  const { user, login } = useAuth();
+  const [job, setJob] = useState<any | null>(null);
+  const [salary, setSalary] = useState<any | null>(null);
+  const [lockState, setLockState] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const privateUserId =
+    user?.private_user?.private_user_id ??
+    (user as any)?.private_user_id ??
+    (user?.user_id !== undefined ? Number(user.user_id) : undefined);
+
+  const reload = useCallback(async () => {
+    if (!privateUserId) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const jobData: any = await getJobById(privateUserId);
+      if (jobData && !('error' in jobData)) {
+        setJob(jobData);
+        setSalary(jobData?.salaries?.[0] ?? null);
+      }
+    } catch (e) {
+      console.warn('profile section: failed to load job', e);
+    }
+    try {
+      const r: any = await profileLock.get(privateUserId);
+      if (!('error' in r)) setLockState(r);
+    } catch (e) {
+      console.warn('profile section: failed to load lock', e);
+    }
+    setLoading(false);
+  }, [privateUserId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const refreshAuth = useCallback(async () => {
+    try {
+      if (login && user?.user_id !== undefined) {
+        const latest = await getUserDetail(user.user_id as any);
+        if (latest && !('error' in latest)) {
+          await login(latest as any, (user as any).token);
+        }
+      }
+    } catch {
+      // Non-fatal — the server-side write already persisted.
+    }
+  }, [login, user]);
+
+  const identityVerified = !!lockState?.identity_verified;
+  const companyLocked = !!lockState?.is_locked;
+  const manualLock = companyLocked && lockState?.lock_reason !== AUTO_LOCK_REASON;
+  const identityLocked = identityVerified || manualLock;
+
+  return {
+    user,
+    privateUserId,
+    job,
+    salary,
+    lockState,
+    isIndependentUser: !user?.private_user?.company_id,
+    identityLocked,
+    companyLocked,
+    loading,
+    reload,
+    refreshAuth,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+export const toBool = (val: string | undefined): boolean => val === 'true';
+
+/** Extract the always-required Job columns from the loaded job so a slice
+ *  update (e.g. compliance-only) still satisfies the Job schema. */
+export function jobBase(job: any, privateUserId: number) {
+  return {
+    private_user_id: privateUserId,
+    job_title: job?.job_title ?? '',
+    employer_name: job?.employer_name ?? null,
+    employer_brn: job?.employer_brn ?? null,
+  };
+}
+
+export async function submitOnboard(payload: Record<string, any>): Promise<void> {
+  const res: any = await createOnboardJob(payload);
+  if (res?.error) throw new Error(res.error);
+  if (res?.status && res.status !== 'success') {
+    throw new Error(res?.message || 'Failed to save');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UI atoms
+// ---------------------------------------------------------------------------
+
+export const SectionShell: React.FC<{
+  title: string;
+  subtitle?: string;
+  onSave: () => void;
+  saving: boolean;
+  saveDisabled?: boolean;
+  children: React.ReactNode;
+}> = ({ title, subtitle, onSave, saving, saveDisabled, children }) => {
+  const router = useRouter();
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: Palette.white }}>
+      <PremiumHeader title={title} subtitle={subtitle} onBack={() => router.back()} />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 140 }}
+      >
+        {children}
+      </ScrollView>
+      <Box
+        px="$4"
+        pt="$3"
+        bg={Palette.white}
+        borderTopWidth={1}
+        borderTopColor={Palette.gray100}
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
+        <StandardButton.Primary onPress={onSave} isLoading={saving} isDisabled={saving || saveDisabled}>
+          {t('profile.save', { defaultValue: 'Save' })}
+        </StandardButton.Primary>
+      </Box>
+    </SafeAreaView>
+  );
+};
+
+export const Card: React.FC<{ color?: string; children: React.ReactNode }> = ({ color = Palette.gold, children }) => (
+  <Box bg={Palette.white} rounded="$2xl" p="$5" mb="$4" borderWidth={1} borderColor={Palette.gray200}>
+    {children}
+  </Box>
+);
+
+export const FieldLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <Text fontSize={Type.small} fontWeight="700" color={Palette.gray600} mb="$1">
+    {children}
+  </Text>
+);
+
+export const YesNo: React.FC<{ value: string; onChange: (v: 'true' | 'false') => void; disabled?: boolean; color?: string }> = ({
+  value,
+  onChange,
+  disabled,
+  color = Palette.gold,
+}) => {
+  const { t } = useTranslation();
+  const Pill = ({ label, v }: { label: string; v: 'true' | 'false' }) => {
+    const active = value === v;
+    return (
+      <Pressable
+        onPress={() => !disabled && onChange(v)}
+        disabled={disabled}
+        flex={1}
+        opacity={disabled ? 0.5 : 1}
+        style={[
+          styles.pill,
+          active && { borderColor: color, backgroundColor: color + '10' },
+        ]}
+      >
+        <Text fontWeight="700" fontSize={Type.body} color={active ? color : Palette.gray500} textAlign="center">
+          {label}
+        </Text>
+      </Pressable>
+    );
+  };
+  return (
+    <HStack space="sm">
+      <Pill label={t('common.yes', { defaultValue: 'Yes' })} v="true" />
+      <Pill label={t('common.no', { defaultValue: 'No' })} v="false" />
+    </HStack>
+  );
+};
+
+export const SavingOverlay = () => (
+  <Box flex={1} alignItems="center" justifyContent="center" style={{ minHeight: 200 }}>
+    <ActivityIndicator size="large" color={Palette.gold} />
+  </Box>
+);
+
+export const saveSuccess = () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+export const saveFailed = () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+const styles = StyleSheet.create({
+  pill: {
+    borderWidth: 1.5,
+    borderColor: Palette.gray200,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: Palette.gray50,
+  },
+});
+
+// Re-export a couple of raw API calls so section screens don't each import
+// from the big services barrel (keeps this feature cohesive).
+export { createSalary, updateJob, updateUserProfile };

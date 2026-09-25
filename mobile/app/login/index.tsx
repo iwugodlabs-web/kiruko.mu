@@ -140,7 +140,7 @@ export default function LoginPage() {
                 } else if (user.user_type === "company") {
                     router.replace("/company_dashboard/home");
                 } else if (user.user_type === "private") {
-                    router.replace(user.onboard_complete ? "/private_dashboard/home" : "/private_dashboard/profile");
+                    router.replace(user.onboard_complete ? "/private_dashboard/home" : "/private_dashboard/setup" as any);
                 }
             } else if ('status' in response && response.status === 403 && (response as any).error === 'EMAIL_NOT_VERIFIED') {
                 Alert.alert(

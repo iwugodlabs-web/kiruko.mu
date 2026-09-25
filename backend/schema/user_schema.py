@@ -289,6 +289,11 @@ class UpdateUser(BaseModel):
     date_of_birth: Optional[date] = None
     pass_port_number: Optional[str] = None
     onboard_complete: Optional[bool] = None
+    # Escape hatch for users without a current employer (see
+    # core.onboarding._evaluate_private). Lives on PrivateUser; the CRUD
+    # update_user auto-applies via hasattr. PATCH /user recomputes the
+    # onboarding flag after persisting it.
+    onboarding_acknowledged_no_employer: Optional[bool] = None
     company_onboarding_status: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None

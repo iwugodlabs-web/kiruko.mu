@@ -1241,6 +1241,18 @@ async def update_user_profile(
         if user_row:
             setattr(user_row, 'verification_note', verification_note)
 
+    # 3d. Recompute the server-authoritative onboarding flag after any profile
+    # mutation. Progressive onboarding writes sections individually via PATCH
+    # (identity, ack-no-employer, repaired phone), so the flag must be
+    # re-evaluated here too — not only in POST /user/onboard — or a user who
+    # satisfies the rule via PATCH stays stuck behind the onboarding gate.
+    try:
+        from core.onboarding import refresh_user_onboard_state
+        db.flush()
+        refresh_user_onboard_state(target, db)
+    except Exception as ob_err:
+        logger.warning(f"refresh_user_onboard_state after PATCH failed (non-fatal): {ob_err}")
+
     db.commit()
     
     # 4. Fetch updated User object to return (matching showUser schema)
@@ -1716,36 +1728,44 @@ async def onboard_job(job_info: OnboardJob, db: Session = Depends(config.get_db)
             if hasattr(private_user, key):
                 setattr(private_user, key, value)
 
-        # Upsert Job
+        # Upsert Job — skipped on the progressive-onboarding "no employer" path
+        # (no job_data). The ack flag travels in user_data above; the refresh
+        # below is what actually satisfies the onboarding gate in that case.
         existing_job = db.query(Job).filter(Job.private_user_id == private_user_id).first()
-        job_data_dict = job_info.job_data.model_dump(exclude_unset=True)
-
-        # Resolve employer_brn → company_id so the job is linkable via ID queries
-        if job_data_dict.get('employer_brn') and not job_data_dict.get('company_id'):
-            brn_lookup = job_data_dict['employer_brn'].strip().lower()
-            matched_company = db.query(Company).filter(
-                func.lower(Company.brn) == brn_lookup
-            ).first()
-            if matched_company:
-                job_data_dict['company_id'] = matched_company.company_id
-                # Also link the PrivateUser to the company if not already set
-                if not private_user.company_id:
-                    private_user.company_id = matched_company.company_id
-                    from services.employee_code_service import ensure_employee_code
-                    ensure_employee_code(db, private_user)
-
         job_obj = None
-        if existing_job:
-            # Company-locked self-edit: keep the existing job as-is (employment
-            # fields such as first_date_of_employment are frozen). Admins bypass.
-            if not enforce_company_lock:
-                for key, value in job_data_dict.items():
-                    if hasattr(existing_job, key):
-                        setattr(existing_job, key, value)
+        if job_info.job_data is not None:
+            job_data_dict = job_info.job_data.model_dump(exclude_unset=True)
+
+            # Resolve employer_brn → company_id so the job is linkable via ID queries
+            if job_data_dict.get('employer_brn') and not job_data_dict.get('company_id'):
+                brn_lookup = job_data_dict['employer_brn'].strip().lower()
+                matched_company = db.query(Company).filter(
+                    func.lower(Company.brn) == brn_lookup
+                ).first()
+                if matched_company:
+                    job_data_dict['company_id'] = matched_company.company_id
+                    # Also link the PrivateUser to the company if not already set
+                    if not private_user.company_id:
+                        private_user.company_id = matched_company.company_id
+                        from services.employee_code_service import ensure_employee_code
+                        ensure_employee_code(db, private_user)
+
+            if existing_job:
+                # Company-locked self-edit: keep the existing job as-is (employment
+                # fields such as first_date_of_employment are frozen). Admins bypass.
+                if not enforce_company_lock:
+                    for key, value in job_data_dict.items():
+                        if hasattr(existing_job, key):
+                            setattr(existing_job, key, value)
+                job_obj = existing_job
+            else:
+                job_pydantic = CreateJob(**job_data_dict)
+                job_obj = await create_job(job_pydantic, db)
+        elif existing_job:
+            # No job payload but a job already exists — leave it intact. This
+            # is how an already-employed user saves identity/compliance edits
+            # without resubmitting the job block.
             job_obj = existing_job
-        else:
-            job_pydantic = CreateJob(**job_data_dict)
-            job_obj = await create_job(job_pydantic, db)
 
         # Finishing onboarding promotes a self-signup placeholder to a real job:
         # clear the draft flag so it now counts toward the employee's completed
@@ -1754,11 +1774,13 @@ async def onboard_job(job_info: OnboardJob, db: Session = Depends(config.get_db)
         if job_obj is not None and getattr(job_obj, 'is_onboarding_draft', False):
             job_obj.is_onboarding_draft = False
 
-        db.flush()  # Ensure job_obj has an ID for new jobs
+        if job_obj is not None:
+            db.flush()  # Ensure job_obj has an ID for new jobs
 
         # Upsert Salary — skipped for a company-locked self-edit (salary is a
-        # frozen company field; admins bypass).
-        if hasattr(job_info, 'salary_data') and job_info.salary_data and not enforce_company_lock:
+        # frozen company field; admins bypass) and when there is no job to
+        # attach it to (progressive onboarding / no-employer path).
+        if job_obj is not None and job_info.salary_data is not None and not enforce_company_lock:
             salary_data_dict = job_info.salary_data.model_dump(exclude_unset=True)
             existing_salary = db.query(Salary).filter(Salary.job_id == job_obj.job_id).first()
 

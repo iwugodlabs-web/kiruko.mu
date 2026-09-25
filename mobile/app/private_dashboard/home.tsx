@@ -1875,10 +1875,12 @@ const Dashboard = () => {
               />
             )}
 
-            {/* Profile Completion */}
+            {/* Profile Completion — Redesign v2: setup CTA or optional checklist */}
             <ProfileProgress
+              onboardComplete={user?.onboard_complete}
               profileData={user?.private_user ? { gender: user.private_user.gender, date_of_birth: user.private_user.date_of_birth, pass_port_number: user.private_user.pass_port_number } : null}
               jobData={jobData ? { job_title: jobData.job_title, employer_name: jobData.employer_name, work_start_time: jobData.work_start_time as any, work_end_time: jobData.work_end_time as any, work_days: jobData.work_days } : null}
+              salaryData={(jobData as any)?.salaries?.[0] ?? null}
             />
 
             {/* Earnings vs Expenses */}
