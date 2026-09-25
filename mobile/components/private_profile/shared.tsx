@@ -3,12 +3,13 @@ import { profileLock } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { StandardButton } from '@/app/design-system';
-import { Box, HStack, Pressable, Text } from '@gluestack-ui/themed';
+import { Box, Button, ButtonText, HStack, Heading, Pressable, Text } from '@gluestack-ui/themed';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useAuth from '@/app/hooks/useAuth';
 
@@ -33,29 +34,50 @@ export const str = (val: any): string => (val !== null && val !== undefined ? St
 
 // Time/date helpers ---------------------------------------------------------
 
-export const formatDate = (date: Date | string | undefined): string => {
-  if (!date) return '';
-  const d = new Date(date);
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Date-only strings are parsed/formatted in LOCAL time so the calendar never
+ *  shifts by a day (toISOString()/new Date('YYYY-MM-DD') are UTC and jump in
+ *  non-UTC locales — that was the "date jumps backwards" bug). */
+export const formatDate = (value: Date | string | undefined): string => {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  const d = value instanceof Date ? value : new Date(value as any);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().split('T')[0];
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 };
 
-export const formatTime = (date: Date | string | undefined): string => {
-  if (!date) return '';
-  if (typeof date === 'string' && /^\d{2}:\d{2}/.test(date)) return date.slice(0, 5);
-  const d = new Date(date as any);
+/** Always returns `HH:MM` (24h). Never uses toLocaleTimeString, which returns
+ *  locale formats like "08 h 00" that the backend's time parser rejects. Also
+ *  normalizes legacy values ("08 h 00", "8:0", "08:00:00") on read. */
+export const formatTime = (value: Date | string | undefined): string => {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    const m = value.match(/(\d{1,2})\s*(?::|h|H)\s*(\d{2})/);
+    if (m) return `${pad2(Number(m[1]))}:${m[2]}`;
+  }
+  const d = value instanceof Date ? value : new Date(value as any);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 };
 
 export const parseTimeDate = (value: string): Date => {
-  const [h, m] = (value || '').split(':').map(Number);
+  const m = (value || '').match(/(\d{1,2})\s*(?::|h|H)\s*(\d{2})/);
+  const h = m ? Number(m[1]) : 9;
+  const min = m ? Number(m[2]) : 0;
   const d = new Date();
-  d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
+  d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(min) ? min : 0, 0, 0);
   return d;
 };
 
 export const parseDate = (value: string): Date => {
+  if (value) {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+  }
   const d = value ? new Date(value) : new Date();
   return Number.isNaN(d.getTime()) ? new Date() : d;
 };
@@ -262,6 +284,79 @@ export const YesNo: React.FC<{ value: string; onChange: (v: 'true' | 'false') =>
   );
 };
 
+/**
+ * Cross-platform date/time picker.
+ *  - iOS: bottom-sheet modal with a spinner + explicit Done (an inline
+ *    spinner inside a ScrollView rendered as a blank area / could not be
+ *    dismissed — that was the "blank screen" report).
+ *  - Android: the native dialog via `display="default"`.
+ */
+export const MobileDatePicker: React.FC<{
+  visible: boolean;
+  mode: 'date' | 'time';
+  value: Date;
+  onClose: () => void;
+  onChange: (d: Date) => void;
+  minimumDate?: Date;
+  maximumDate?: Date;
+  title?: string;
+}> = ({ visible, mode, value, onClose, onChange, minimumDate, maximumDate, title }) => {
+  const { t } = useTranslation();
+  if (!visible) return null;
+
+  if (Platform.OS === 'ios') {
+    return (
+      <Modal transparent animationType="slide" visible onRequestClose={onClose}>
+        <View style={styles.pickerOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <Box bg={Palette.white} borderTopLeftRadius={16} borderTopRightRadius={16} overflow="hidden">
+              <HStack justifyContent="space-between" alignItems="center" p="$4" borderBottomWidth={1} borderBottomColor={Palette.gray200}>
+                <Box w={60} />
+                {title ? <Heading size="sm" color={Palette.ink}>{title}</Heading> : <Box />}
+                <Button variant="link" onPress={onClose}>
+                  <ButtonText color={Palette.blue} fontSize={17} fontWeight="600">
+                    {t('common.done', { defaultValue: 'Done' })}
+                  </ButtonText>
+                </Button>
+              </HStack>
+              <Box bg={Palette.white}>
+                <DateTimePicker
+                  value={value}
+                  mode={mode}
+                  display="spinner"
+                  is24Hour
+                  textColor={Palette.black}
+                  minimumDate={minimumDate}
+                  maximumDate={maximumDate}
+                  onChange={(_e: any, d?: Date) => {
+                    if (d) onChange(d);
+                  }}
+                />
+              </Box>
+            </Box>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  return (
+    <DateTimePicker
+      value={value}
+      mode={mode}
+      display="default"
+      is24Hour
+      minimumDate={minimumDate}
+      maximumDate={maximumDate}
+      onChange={(e: any, d?: Date) => {
+        onClose();
+        if (e?.type !== 'dismissed' && d) onChange(d);
+      }}
+    />
+  );
+};
+
 export const SavingOverlay = () => (
   <Box flex={1} alignItems="center" justifyContent="center" style={{ minHeight: 200 }}>
     <ActivityIndicator size="large" color={Palette.gold} />
@@ -279,6 +374,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     backgroundColor: Palette.gray50,
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
 });
 

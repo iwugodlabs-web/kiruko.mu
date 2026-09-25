@@ -3,8 +3,8 @@ import { Palette, Type } from '@/app/constants/theme';
 import { StandardButton } from '@/app/design-system';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { Box, HStack, Heading, Input, InputField, InputSlot, Pressable, Spinner, Text, VStack } from '@gluestack-ui/themed';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { Building2, Check, ChevronDown, ChevronUp, Clock } from 'lucide-react-native';
+import { MobileDatePicker } from '@/components/private_profile/shared';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React, { useMemo, useState } from 'react';
@@ -15,13 +15,18 @@ import useAuth from '../hooks/useAuth';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-const fmtTime = (d: Date) =>
-  d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+// Deterministic HH:MM — toLocaleTimeString returns locale formats like
+// "08 h 00" (French), which the backend rejects with a 422.
+const fmtTime = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
 const parseTime = (value: string): Date => {
-  const [h, m] = value.split(':').map(Number);
+  const m = (value || '').match(/(\d{1,2})\s*(?::|h|H)\s*(\d{2})/);
+  const h = m ? Number(m[1]) : 9;
+  const min = m ? Number(m[2]) : 0;
   const d = new Date();
-  d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
+  d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(min) ? min : 0, 0, 0);
   return d;
 };
 
@@ -304,30 +309,22 @@ export default function SetupScreen() {
               </Pressable>
             </HStack>
 
-            {showStartPicker && (
-              <DateTimePicker
-                value={startTime}
-                mode="time"
-                is24Hour
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(_, d) => {
-                  setShowStartPicker(Platform.OS === 'ios');
-                  if (d) setStartTime(d);
-                }}
-              />
-            )}
-            {showEndPicker && (
-              <DateTimePicker
-                value={endTime}
-                mode="time"
-                is24Hour
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(_, d) => {
-                  setShowEndPicker(Platform.OS === 'ios');
-                  if (d) setEndTime(d);
-                }}
-              />
-            )}
+            <MobileDatePicker
+              visible={showStartPicker}
+              mode="time"
+              value={startTime}
+              onClose={() => setShowStartPicker(false)}
+              onChange={setStartTime}
+              title={t('setup.start', { defaultValue: 'Start' })}
+            />
+            <MobileDatePicker
+              visible={showEndPicker}
+              mode="time"
+              value={endTime}
+              onClose={() => setShowEndPicker(false)}
+              onChange={setEndTime}
+              title={t('setup.end', { defaultValue: 'End' })}
+            />
 
             <HStack space="xs" flexWrap="wrap" mb="$2">
               {DAYS.map((day) => {

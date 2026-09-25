@@ -742,6 +742,26 @@ export const postResetPassword = async (token: string, new_password: string): Pr
 
 // ==================== ONBOARDING SERVICES ====================
 
+// FastAPI 422 responses put a structured array in `detail` (e.g. pydantic
+// time-parsing errors). Passing that array straight into Alert.alert crashes
+// the screen — always coerce to a human-readable string.
+export const stringifyApiDetail = (detail: any): string => {
+    if (detail == null) return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail
+            .map((d) => {
+                if (typeof d === 'string') return d;
+                const loc = Array.isArray(d?.loc) ? d.loc.filter((p: any) => p !== 'body').join('.') : '';
+                const msg = d?.msg || d?.message || JSON.stringify(d);
+                return loc ? `${loc}: ${msg}` : msg;
+            })
+            .join('\n');
+    }
+    if (typeof detail === 'object') return detail.message || detail.msg || JSON.stringify(detail);
+    return String(detail);
+};
+
 export const createOnboardJob = async (data: any): Promise<ApiResponse<User> | { error: string; status?: number }> => {
     // Always send salary_data as provided; job_id will be injected by backend
     console.log('Creating onboard job:', data);
@@ -751,8 +771,9 @@ export const createOnboardJob = async (data: any): Promise<ApiResponse<User> | {
         return response.data;
     } catch (error: any) {
         console.error('Onboard job creation error:', error.response?.data || error.message);
+        const detail = error.response?.data?.detail ?? error.response?.data?.message;
         return {
-            error: error.response?.data?.detail || error.response?.data?.message || error.message || 'Onboarding failed',
+            error: stringifyApiDetail(detail) || error.message || 'Onboarding failed',
             status: error.response?.status || 500
         };
     }

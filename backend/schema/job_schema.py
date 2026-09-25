@@ -1,7 +1,16 @@
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Dict, Optional, Union, List, Any
+
+
+# Locale-formatted times like "08 h 00" (French) or "8h0" were reaching the
+# API from older mobile builds and failing pydantic's time parser with a 422.
+# Normalize them to "HH:MM" before parsing rather than 422-ing the whole
+# onboarding write.
+_LOCALE_TIME_RE = re.compile(r"^\s*(\d{1,2})\s*(?::|h|H)\s*(\d{2})")
 
    
 class Job(BaseModel) : 
@@ -40,6 +49,16 @@ class Job(BaseModel) :
     updated_at: Optional[datetime] = None
     class Config:
         from_attributes=True
+
+    @field_validator('work_start_time', 'work_end_time', mode='before')
+    @classmethod
+    def _normalize_locale_time(cls, v):
+        """Accept "08 h 00" / "8h0" / "08:00:00" as well as "08:00"."""
+        if isinstance(v, str) and v.strip():
+            m = _LOCALE_TIME_RE.match(v)
+            if m:
+                return f"{int(m.group(1)):02d}:{m.group(2)}"
+        return v
 
 class CreateJob(Job):
    pass

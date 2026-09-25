@@ -11,6 +11,7 @@ that contract:
   * A user who neither supplies a job nor acks stays incomplete.
 """
 import uuid
+from datetime import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -154,6 +155,37 @@ def test_onboard_minimal_job_without_salary(db: Session, _engine):
     jobs = db.query(Job).filter(Job.private_user_id == pu.private_user_id).all()
     assert len(jobs) == 1
     assert db.query(Salary).filter(Salary.job_id == jobs[0].job_id).count() == 0
+
+
+def test_onboard_tolerates_locale_time_format(db: Session, _engine):
+    """French-locale "08 h 00" / "17 h 30" must not 422 the whole write."""
+    u, pu = _private_user(db)
+
+    client = _client(_engine, u.user_id)
+    try:
+        resp = client.post(
+            "/api/v1/user/onboard",
+            json={
+                "user_data": {"private_user_id": pu.private_user_id},
+                "job_data": {
+                    "private_user_id": pu.private_user_id,
+                    "job_title": "Vendeuse",
+                    "employer_name": "Zilwa Eklere Ltd",
+                    "employer_brn": f"ZILWA_{uuid.uuid4().hex[:6]}",
+                    "work_start_time": "08 h 00",
+                    "work_end_time": "17 h 30",
+                    "work_days": {"Monday": "8"},
+                },
+            },
+        )
+    finally:
+        _clear()
+
+    assert resp.status_code in (200, 201), resp.text
+    assert resp.json()["status"] == "success"
+    job = db.query(Job).filter(Job.private_user_id == pu.private_user_id).one()
+    assert job.work_start_time == time(8, 0)
+    assert job.work_end_time == time(17, 30)
 
 
 def test_onboard_without_job_or_ack_stays_incomplete(db: Session, _engine):

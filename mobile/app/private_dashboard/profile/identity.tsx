@@ -1,15 +1,15 @@
 import { getCountries, type Country } from '@/services/api';
 import { Palette, Type } from '@/app/constants/theme';
 import { Box, HStack, Input, InputField, Pressable, Text, VStack } from '@gluestack-ui/themed';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 import {
   Card,
   FieldLabel,
+  MobileDatePicker,
   SavingOverlay,
   SectionShell,
   formatDate,
@@ -219,18 +219,15 @@ export default function IdentityScreen() {
         </VStack>
       </Card>
 
-      {showDob && (
-        <DateTimePicker
-          value={dateOfBirth}
-          mode="date"
-          maximumDate={new Date()}
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={(_, d) => {
-            setShowDob(Platform.OS === 'ios');
-            if (d) setDateOfBirth(d);
-          }}
-        />
-      )}
+      <MobileDatePicker
+        visible={showDob}
+        mode="date"
+        value={dateOfBirth}
+        maximumDate={new Date()}
+        onClose={() => setShowDob(false)}
+        onChange={setDateOfBirth}
+        title={t('profile.labelDateOfBirth', { defaultValue: 'Date of birth' })}
+      />
     </SectionShell>
   );
 }

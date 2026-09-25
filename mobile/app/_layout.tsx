@@ -96,7 +96,12 @@ function IdleManager({ children }: { children: React.ReactNode }) {
   return (
     <View
       style={{ flex: 1 }}
-      onStartShouldSetResponder={() => {
+      // Use the CAPTURE phase: `onStartShouldSetResponder` is skipped whenever
+      // a child Pressable/Touchable claims the responder, so tapping buttons
+      // never reset the timer and the app locked after 2 min of active use.
+      // Capture runs top-down on every touch and returning false still lets
+      // children handle it normally.
+      onStartShouldSetResponderCapture={() => {
         if (isAuthenticated && !isLocked) resetTimer();
         return false;
       }}

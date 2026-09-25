@@ -1,15 +1,15 @@
 import { Palette, Type } from '@/app/constants/theme';
 import { Box, HStack, Input, InputField, Pressable, Text, VStack } from '@gluestack-ui/themed';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 import {
   Card,
   DAYS,
   FieldLabel,
+  MobileDatePicker,
   SectionShell,
   SavingOverlay,
   YesNo,
@@ -260,15 +260,31 @@ export default function WorkScheduleScreen() {
         <YesNo value={autoClockIn} onChange={setAutoClockIn} disabled={disabled} color={Palette.teal} />
       </Card>
 
-      {showStartDate && (
-        <DateTimePicker value={startDate} mode="date" display={Platform.OS === 'ios' ? 'spinner' : 'default'} onChange={(_, d) => { setShowStartDate(Platform.OS === 'ios'); if (d) setStartDate(d); }} />
-      )}
-      {showStartTime && (
-        <DateTimePicker value={startTime} mode="time" is24Hour display={Platform.OS === 'ios' ? 'spinner' : 'default'} onChange={(_, d) => { setShowStartTime(Platform.OS === 'ios'); if (d) setStartTime(d); }} />
-      )}
-      {showEndTime && (
-        <DateTimePicker value={endTime} mode="time" is24Hour display={Platform.OS === 'ios' ? 'spinner' : 'default'} onChange={(_, d) => { setShowEndTime(Platform.OS === 'ios'); if (d) setEndTime(d); }} />
-      )}
+      <MobileDatePicker
+        visible={showStartDate}
+        mode="date"
+        value={startDate}
+        maximumDate={new Date()}
+        onClose={() => setShowStartDate(false)}
+        onChange={setStartDate}
+        title={t('profile.labelEmploymentStartDate', { defaultValue: 'Employment start date' })}
+      />
+      <MobileDatePicker
+        visible={showStartTime}
+        mode="time"
+        value={startTime}
+        onClose={() => setShowStartTime(false)}
+        onChange={setStartTime}
+        title={t('setup.start', { defaultValue: 'Start' })}
+      />
+      <MobileDatePicker
+        visible={showEndTime}
+        mode="time"
+        value={endTime}
+        onClose={() => setShowEndTime(false)}
+        onChange={setEndTime}
+        title={t('setup.end', { defaultValue: 'End' })}
+      />
     </SectionShell>
   );
 }
