@@ -43,6 +43,13 @@ export const DATABASE_NAME = "mywitnesstree.db";
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
 
+// Session replay is a heavy native iOS module and the prime suspect for the
+// app relaunching to the splash screen when connectivity flips (airplane mode).
+// OFF by default; opt back in per-build with
+// EXPO_PUBLIC_POSTHOG_SESSION_REPLAY=true once the crash is confirmed fixed.
+const SESSION_REPLAY_ENABLED =
+  process.env.EXPO_PUBLIC_POSTHOG_SESSION_REPLAY === "true";
+
 // Manual screen tracking. expo-router doesn't expose a NavigationContainer, so
 // PostHog's automatic captureScreens can't hook it — we emit a $screen event on
 // each pathname change instead. This is what reveals the onboarding/signup
@@ -157,12 +164,13 @@ export default function RootLayout() {
               unhandledRejections: true,
             },
           },
-          // Session replay — watch real sessions to diagnose UX friction /
-          // where users get stuck. This is a payroll app, so mask everything
-          // sensitive by default (these are the SDK defaults, set explicitly
-          // to make the privacy stance unmistakable). Recording must ALSO be
-          // enabled in PostHog project settings ("Record user sessions").
-          enableSessionReplay: true,
+          // Session replay — gated OFF by default. It is a native iOS module
+          // and the prime suspect for the crash-on-connectivity-change that
+          // relaunched the app to the splash. Re-enable per-build with
+          // EXPO_PUBLIC_POSTHOG_SESSION_REPLAY=true (and PostHog project
+          // settings "Record user sessions"). When on, everything sensitive is
+          // masked (payroll app).
+          enableSessionReplay: SESSION_REPLAY_ENABLED,
           sessionReplayConfig: {
             maskAllTextInputs: true,
             maskAllImages: true,

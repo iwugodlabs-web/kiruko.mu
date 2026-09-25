@@ -15,7 +15,8 @@
       "environment": "preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1",
-        "EXPO_PUBLIC_POSTHOG_HOST": "https://eu.i.posthog.com"
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://eu.i.posthog.com",
+        "EXPO_PUBLIC_POSTHOG_SESSION_REPLAY": "false"
       },
       "android": {
         "buildType": "apk"
@@ -30,7 +31,8 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.kiruko.mu/api/v1",
-        "EXPO_PUBLIC_POSTHOG_HOST": "https://eu.i.posthog.com"
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://eu.i.posthog.com",
+        "EXPO_PUBLIC_POSTHOG_SESSION_REPLAY": "false"
       },
       "android": {
         "buildType": "app-bundle"
