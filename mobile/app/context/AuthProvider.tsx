@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState, useRef } from 'react';
 import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { checkAuthToken } from '../../services/api';
 import { api } from '../../services/apiClient';
 import AuthContext, { type IUser } from './AuthContext';
@@ -51,6 +52,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const checkAuth = async (opts?: { silent?: boolean }): Promise<boolean> => {
         console.log('🔍 AuthProvider: Starting authentication check...');
         console.log('🔍 Current API headers:', JSON.stringify(api.defaults.headers, null, 2));
+
+        // Offline short-circuit. A connectivity loss (airplane mode, tunnel)
+        // must NEVER flip isLoading — that unmounts the active navigator and
+        // resets the user to the home tab, which is what made offline clock-in
+        // unusable — nor log the user out on a client-side token-expiry check.
+        // Trust the cached session until the server is reachable again.
+        try {
+            const net = await NetInfo.fetch();
+            const offline = net.isConnected === false || net.isInternetReachable === false;
+            if (offline) {
+                const stored = await AsyncStorage.getItem('user');
+                if (stored) {
+                    try {
+                        setUser(JSON.parse(stored));
+                        setIsLoading(false);
+                        console.log('📴 AuthProvider: Offline — restored cached session.');
+                        return true;
+                    } catch {
+                        /* fall through to unauthenticated */
+                    }
+                }
+                setIsLoading(false);
+                return false;
+            }
+        } catch {
+            // NetInfo unavailable — continue with the online path.
+        }
+
         if (!opts?.silent) setIsLoading(true);
 
         try {
@@ -67,13 +96,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return false; // No need to call logout, nothing to clear
             }
 
-            // Client-side check for token expiration before hitting the server
+            // Client-side expiry is only a heads-up — we do NOT log out on it.
+            // If we did, an expired access token would sign the user out the
+            // moment they lost connectivity, breaking offline clock-in. Let the
+            // server be the authority: online an expired token 401s below and
+            // logs out; offline we fall through to the cached-session fallback.
             if (isTokenExpired(token)) {
-                console.log('⏰ AuthProvider: Token found but expired client-side. Skipping server validation.');
-                setUser(undefined);
-                delete api.defaults.headers.Authorization;
-                await logout(); // Clear storage just in case
-                return false;
+                console.log('⏰ AuthProvider: Token appears expired client-side; deferring to server validation.');
             }
 
             // Set the authorization header for API requests
