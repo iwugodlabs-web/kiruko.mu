@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from 'posthog-react-native';
 import { Alert, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useAuth from '../hooks/useAuth';
@@ -43,6 +44,7 @@ export default function SetupScreen() {
   const { t } = useTranslation();
   const { user, login } = useAuth();
   const insets = useSafeAreaInsets();
+  const posthog = usePostHog();
 
   const [noEmployer, setNoEmployer] = useState(false);
 
@@ -144,6 +146,7 @@ export default function SetupScreen() {
     if (!canSubmit) return;
 
     setIsSubmitting(true);
+    const wasAlreadyOnboarded = Boolean(user?.onboard_complete);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -180,6 +183,12 @@ export default function SetupScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Alert.alert(t('setup.saveFailed', { defaultValue: 'Could not save' }), result.error);
         return;
+      }
+
+      // Funnel: activation. Fire only on the first->complete transition so
+      // later profile edits don't inflate the count.
+      if (!wasAlreadyOnboarded) {
+        posthog?.capture('onboarding_completed', { user_type: 'private' });
       }
 
       await refreshAuth();
