@@ -13,6 +13,7 @@ import { Suspense, useState, useCallback, useEffect } from "react";
 import { View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BrandSplash from "@/components/BrandSplash";
+import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { PostHogProvider, usePostHog } from "posthog-react-native";
 
 // FONTS — Kiruko brand display font (Orbitron, matches the logo wordmark)
@@ -132,8 +133,9 @@ export default function RootLayout() {
   });
   if (!fontsLoaded) return <BrandSplash />;
   return (
-    <Suspense fallback={<BrandSplash />}>
-      <PostHogProvider
+    <AppErrorBoundary>
+      <Suspense fallback={<BrandSplash />}>
+        <PostHogProvider
         apiKey={POSTHOG_API_KEY}
         autocapture={{
           // expo-router: automatic screen capture can't hook the router, so we
@@ -195,6 +197,7 @@ export default function RootLayout() {
         </LanguageProvider>
       </SQLiteProvider>
       </PostHogProvider>
-    </Suspense>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }
