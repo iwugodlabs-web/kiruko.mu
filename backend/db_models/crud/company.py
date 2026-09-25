@@ -42,8 +42,23 @@ def get_company_by_id(company_id: int, db: Session) -> Company:
 
 
 def get_company_by_brn(brn: str, db: Session) -> Company:
-    """Return company by BRN (trims whitespace before lookup)"""
-    return db.query(Company).filter(Company.brn == brn.strip()).first()
+    """Return company by BRN, case-insensitively (trims whitespace first).
+
+    BRNs are typed by hand during signup and stored in mixed case (e.g.
+    "Demo001"), so matching must be case-insensitive: "demo001", "Demo001" and
+    "DEMO001" all resolve to the same company. Stored values are also trimmed
+    so legacy rows with trailing spaces still match.
+    """
+    if brn is None:
+        return None
+    normalized = brn.strip()
+    if not normalized:
+        return None
+    return (
+        db.query(Company)
+        .filter(func.lower(func.trim(Company.brn)) == normalized.lower())
+        .first()
+    )
 
 
 def get_company_stats(company_id: int, db: Session) -> dict:

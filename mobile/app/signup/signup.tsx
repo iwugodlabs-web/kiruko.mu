@@ -145,7 +145,7 @@ const InputFieldWrapper = ({
             </InputSlot>
             <InputField
               placeholder={placeholder}
-              autoCapitalize={name === "email" ? "none" : "words"}
+              autoCapitalize={name === "email" ? "none" : name === "brn" ? "characters" : "words"}
               onChangeText={onChange}
               onBlur={onBlur}
               value={value}
