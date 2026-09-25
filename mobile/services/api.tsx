@@ -2141,6 +2141,11 @@ export const handleApiError = (error: any, context: string = 'API call') => {
         // Expected when a role lacks a permission — the caller surfaces a
         // no-access / empty state. Log quietly instead of as a red error.
         console.log(`🔒 ${context}: permission denied (handled)`);
+    } else if (error?.isInternalGuard) {
+        // The request interceptor blocked a protected call because no auth
+        // token was available yet (e.g. push-token registration racing login).
+        // Expected during startup — not an app error.
+        console.log(`🔒 ${context}: skipped (no auth token yet)`);
     } else {
         console.error(`${context} failed:`, message);
     }
