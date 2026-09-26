@@ -551,6 +551,26 @@ const translationAR: ITranslationSchema = {
 			"You'll be able to request and track leave once you join or are added to a company. Ask your employer for an invite, or create a company to get started.",
 	},
 
+	setup: {
+		title: "إعداد تسجيل الحضور",
+		subtitle: "نحو 20 ثانية · قابل للتغيير في أي وقت",
+		whereDoYouWork: "أين تعمل؟",
+		whereHint: "ابحث برقم BRN أو أضِفه يدويًا.",
+		brnPlaceholder: "ابحث برقم BRN أو اسم الشركة",
+		employerName: "صاحب العمل / اسم الشركة",
+		jobTitle: "المسمى الوظيفي",
+		schedule: "جدولك",
+		scheduleHint: "مُعبّأ مسبقًا — اضغط للتعديل.",
+		start: "البداية",
+		end: "النهاية",
+		addSalary: "أضِف الراتب الآن (اختياري)",
+		addSalaryHint: "يساعد في تقدير كشف راتبك. يمكنك إضافته لاحقًا.",
+		cta: "ابدأ استخدام Kiruko",
+		pickDay: "اختر يوم عمل واحدًا على الأقل.",
+		noUser: "تعذّر تحديد حسابك. يُرجى تسجيل الخروج ثم الدخول مجددًا.",
+		saveFailed: "تعذّر الحفظ",
+		unexpected: "حدث خطأ ما. يُرجى المحاولة مرة أخرى.",
+	},
 	profile: {
 		lockedBanner: "Profile locked",
 		lockedDescription:

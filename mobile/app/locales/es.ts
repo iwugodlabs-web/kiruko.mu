@@ -551,6 +551,26 @@ const translationES: ITranslationSchema = {
 			"You'll be able to request and track leave once you join or are added to a company. Ask your employer for an invite, or create a company to get started.",
 	},
 
+	setup: {
+		title: "Configura tu fichaje",
+		subtitle: "Unos 20 segundos · cámbialo cuando quieras",
+		whereDoYouWork: "¿Dónde trabajas?",
+		whereHint: "Busca por BRN o añádelo manualmente.",
+		brnPlaceholder: "Buscar por BRN o nombre de la empresa",
+		employerName: "Empleador / nombre de la empresa",
+		jobTitle: "Tu puesto de trabajo",
+		schedule: "Tu horario",
+		scheduleHint: "Rellenado previamente: toca para ajustar.",
+		start: "Inicio",
+		end: "Fin",
+		addSalary: "Añadir salario ahora (opcional)",
+		addSalaryHint: "Ayuda a estimar tu nómina. Puedes añadirlo más tarde.",
+		cta: "Comenzar a usar Kiruko",
+		pickDay: "Elige al menos un día laboral.",
+		noUser: "No se pudo identificar tu cuenta. Cierra sesión y vuelve a entrar.",
+		saveFailed: "No se pudo guardar",
+		unexpected: "Algo salió mal. Inténtalo de nuevo.",
+	},
 	profile: {
 		lockedBanner: "Profile locked",
 		lockedDescription:

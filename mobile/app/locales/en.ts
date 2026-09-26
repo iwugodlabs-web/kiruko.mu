@@ -555,6 +555,26 @@ const translationEN: ITranslationSchema = {
 			"You'll be able to request and track leave once you join or are added to a company. Ask your employer for an invite, or create a company to get started.",
 	},
 
+	setup: {
+		title: "Set up your clock-in",
+		subtitle: "Takes ~20 seconds · change it anytime",
+		whereDoYouWork: "Where do you work?",
+		whereHint: "Search by BRN, or add it manually.",
+		brnPlaceholder: "Search BRN or company name",
+		employerName: "Employer / company name",
+		jobTitle: "Your job title",
+		schedule: "Your schedule",
+		scheduleHint: "Pre-filled — tap to adjust.",
+		start: "Start",
+		end: "End",
+		addSalary: "Add salary now (optional)",
+		addSalaryHint: "Helps estimate your payslip. You can add it later.",
+		cta: "Start using Kiruko",
+		pickDay: "Pick at least one work day.",
+		noUser: "Could not identify your account. Please log out and back in.",
+		saveFailed: "Could not save",
+		unexpected: "Something went wrong. Please try again.",
+	},
 	profile: {
 		lockedBanner: "Profile locked",
 		lockedDescription:

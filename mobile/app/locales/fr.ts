@@ -545,6 +545,26 @@ const translationFR: ITranslationSchema = {
 			"Vous pourrez demander et suivre vos congés une fois que vous aurez rejoint une entreprise ou y aurez été ajouté. Demandez une invitation à votre employeur, ou créez une entreprise pour commencer.",
 	},
 
+	setup: {
+		title: "Configurez votre pointage",
+		subtitle: "Environ 20 secondes · modifiable à tout moment",
+		whereDoYouWork: "Où travaillez-vous ?",
+		whereHint: "Recherchez par BRN ou ajoutez-le manuellement.",
+		brnPlaceholder: "Rechercher par BRN ou nom d'entreprise",
+		employerName: "Employeur / nom de l'entreprise",
+		jobTitle: "Votre intitulé de poste",
+		schedule: "Votre horaire",
+		scheduleHint: "Pré-rempli — appuyez pour ajuster.",
+		start: "Début",
+		end: "Fin",
+		addSalary: "Ajouter le salaire maintenant (facultatif)",
+		addSalaryHint: "Aide à estimer votre fiche de paie. Vous pouvez l'ajouter plus tard.",
+		cta: "Commencer à utiliser Kiruko",
+		pickDay: "Choisissez au moins un jour de travail.",
+		noUser: "Impossible d'identifier votre compte. Veuillez vous déconnecter et vous reconnecter.",
+		saveFailed: "Impossible d'enregistrer",
+		unexpected: "Une erreur s'est produite. Veuillez réessayer.",
+	},
 	profile: {
 		lockedBanner: "Profil verrouillé",
 		lockedDescription:

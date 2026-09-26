@@ -555,6 +555,26 @@ const translationSW: ITranslationSchema = {
 			"Utaweza kuomba na kufuatilia likizo pindi utakapojiunga au kuongezwa kwenye kampuni. Muombe mwajiri wako mwaliko, au unda kampuni ili kuanza.",
 	},
 
+	setup: {
+		title: "Weka mfumo wako wa kuingia kazini",
+		subtitle: "Takriban sekunde 20 · badilisha wakati wowote",
+		whereDoYouWork: "Unafanya kazi wapi?",
+		whereHint: "Tafuta kwa BRN, au ongeza mwenyewe.",
+		brnPlaceholder: "Tafuta kwa BRN au jina la kampuni",
+		employerName: "Mwajiri / jina la kampuni",
+		jobTitle: "Cheo chako cha kazi",
+		schedule: "Ratiba yako",
+		scheduleHint: "Imejazwa awali — gusa kurekebisha.",
+		start: "Anza",
+		end: "Mwisho",
+		addSalary: "Ongeza mshahara sasa (hiari)",
+		addSalaryHint: "Husaidia kukadiria malipo yako. Unaweza kuongeza baadaye.",
+		cta: "Anza kutumia Kiruko",
+		pickDay: "Chagua angalau siku moja ya kazi.",
+		noUser: "Imeshindwa kutambua akaunti yako. Tafadhali toka kisha uingie tena.",
+		saveFailed: "Imeshindwa kuhifadhi",
+		unexpected: "Hitilafu imetokea. Tafadhali jaribu tena.",
+	},
 	profile: {
 		lockedBanner: "Wasifu umefungwa",
 		lockedDescription:

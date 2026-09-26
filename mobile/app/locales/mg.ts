@@ -551,6 +551,26 @@ const translationMG: ITranslationSchema = {
 			"Afaka hangataka sy hanara-maso ny fialan-tsasatranao ianao rehefa miditra na ampidirina ao anaty orinasa iray. Mangataha fanasana amin'ny mpampiasa anao, na mamorona orinasa mba hanombohana.",
 	},
 
+	setup: {
+		title: "Amboary ny fidiranao",
+		subtitle: "Manodidina 20 segondra · azo ovaina amin'ny fotoana rehetra",
+		whereDoYouWork: "Aiza no iasanao?",
+		whereHint: "Karohy amin'ny BRN, na ampidiro an-tanana.",
+		brnPlaceholder: "Hitady amin'ny BRN na anaran'ny orinasa",
+		employerName: "Mpampiasa / anaran'ny orinasa",
+		jobTitle: "Ny asanao",
+		schedule: "Ny fandaharam-potoananao",
+		scheduleHint: "Efa voafeno mialoha — tsindrio hanovana.",
+		start: "Manomboka",
+		end: "Farany",
+		addSalary: "Ampidiro izao ny karama (tsy voatery)",
+		addSalaryHint: "Manampy amin'ny fanombanana ny karamanao. Azonao ampidirina any aoriana.",
+		cta: "Hanomboka mampiasa an'i Kiruko",
+		pickDay: "Mifidiana andro iasana iray farafahakeliny.",
+		noUser: "Tsy voafantatra ny kaontinao. Mivoaha dia midira indray azafady.",
+		saveFailed: "Tsy voatahiry",
+		unexpected: "Nisy olana. Andramo indray azafady.",
+	},
 	profile: {
 		lockedBanner: "Voahidy ny mombamomba",
 		lockedDescription:

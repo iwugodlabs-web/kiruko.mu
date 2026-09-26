@@ -553,6 +553,26 @@ interface ITranslationSchema {
 		noCompanyBody: string;
 	};
 
+	setup: {
+		title: string;
+		subtitle: string;
+		whereDoYouWork: string;
+		whereHint: string;
+		brnPlaceholder: string;
+		employerName: string;
+		jobTitle: string;
+		schedule: string;
+		scheduleHint: string;
+		start: string;
+		end: string;
+		addSalary: string;
+		addSalaryHint: string;
+		cta: string;
+		pickDay: string;
+		noUser: string;
+		saveFailed: string;
+		unexpected: string;
+	},
 	profile: {
 		lockedBanner: string;
 		lockedDescription: string;
