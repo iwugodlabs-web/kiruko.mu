@@ -6,10 +6,12 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert } from 'react-native';
 import { Card, FieldLabel, SavingOverlay, SectionShell, saveFailed, saveSuccess, str, submitOnboard, useProfileBootstrap } from '@/components/private_profile/shared';
+import useCurrency from '@/app/hooks/useCurrency';
 
 export default function PayScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const { currencyInfo } = useCurrency();
   const { privateUserId, job, salary, companyLocked, loading, refreshAuth } = useProfileBootstrap();
 
   const [monthlySalary, setMonthlySalary] = useState('');
@@ -104,13 +106,13 @@ export default function PayScreen() {
       <Card color={Palette.blue}>
         <VStack space="md">
           <Box>
-            <FieldLabel>{t('profile.labelMonthlySalary', { defaultValue: 'Monthly salary' })}</FieldLabel>
+            <FieldLabel>{t('profile.labelMonthlySalary', { defaultValue: 'Monthly salary', currency: currencyInfo.code })}</FieldLabel>
             <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50} isDisabled={disabled}>
               <InputField value={monthlySalary} onChangeText={setMonthlySalary} editable={!disabled} keyboardType="numeric" />
             </Input>
           </Box>
           <Box>
-            <FieldLabel>{t('profile.labelMonthlyAllowance', { defaultValue: 'Monthly allowance' })}</FieldLabel>
+            <FieldLabel>{t('profile.labelMonthlyAllowance', { defaultValue: 'Monthly allowance', currency: currencyInfo.code })}</FieldLabel>
             <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50} isDisabled={disabled}>
               <InputField value={monthlyAllowance} onChangeText={setMonthlyAllowance} editable={!disabled} keyboardType="numeric" />
             </Input>

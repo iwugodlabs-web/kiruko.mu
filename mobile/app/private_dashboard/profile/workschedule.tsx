@@ -1,10 +1,10 @@
 import { Palette, Type } from '@/app/constants/theme';
-import { Box, HStack, Input, InputField, Pressable, Text, VStack } from '@gluestack-ui/themed';
+import { Box, HStack, Input, InputField, InputSlot, Pressable, Text, VStack } from '@gluestack-ui/themed';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert } from 'react-native';
+import { ActivityIndicator, Alert } from 'react-native';
 import {
   Card,
   DAYS,
@@ -24,6 +24,7 @@ import {
   toBoolStr,
   useProfileBootstrap,
 } from '@/components/private_profile/shared';
+import { getCompanyByBrn } from '@/services/api';
 
 export default function WorkScheduleScreen() {
   const router = useRouter();
@@ -46,6 +47,13 @@ export default function WorkScheduleScreen() {
   const [showStartTime, setShowStartTime] = useState(false);
   const [showEndTime, setShowEndTime] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [brnLoading, setBrnLoading] = useState(false);
+  const [companyFound, setCompanyFound] = useState(false);
+  // True once the user types in the BRN field. Distinguishes a deliberate
+  // employer change (overwrite identity fields with the matched company) from
+  // the automatic mount-time backfill (only fill blanks, never clobber the
+  // user's existing employer/schedule data).
+  const brnUserEdited = useRef(false);
 
   useEffect(() => {
     if (loading) return;
@@ -69,6 +77,52 @@ export default function WorkScheduleScreen() {
     setSelectedDays(wd);
     setAutoClockIn(toBoolStr(job?.auto_clockin_enabled));
   }, [loading, job]);
+
+  // Look up the company by BRN (case-insensitive on the backend) and pre-fill
+  // the employer IDENTITY fields (name/email/phone/address). Never touches the
+  // schedule (work days, hours, times, start date) — those are the user's own.
+  //
+  // Two modes:
+  //  - mount/backfill (brnUserEdited=false): only fill blanks, so existing
+  //    employer + schedule data entered at signup is never overwritten. This is
+  //    what backfills a missing employer name for a BRN stored at signup.
+  //  - user changed the BRN (brnUserEdited=true): overwrite identity fields with
+  //    the matched company, because switching BRN means switching employer.
+  useEffect(() => {
+    if (loading || companyLocked) return;
+    const brn = employerBrn.trim();
+    if (brn.length < 3) {
+      setCompanyFound(false);
+      setBrnLoading(false);
+      return;
+    }
+    const timeoutId = setTimeout(async () => {
+      setBrnLoading(true);
+      try {
+        const result: any = await getCompanyByBrn(brn);
+        if (result?.status === 'success' && result.data) {
+          setCompanyFound(true);
+          const overwrite = brnUserEdited.current;
+          const apply = (setter: React.Dispatch<React.SetStateAction<string>>, next?: string | null) => {
+            if (next == null) return;
+            setter((prev) => (overwrite || !(prev && prev.trim()) ? String(next) : prev));
+          };
+          apply(setEmployer, result.data.company_name);
+          apply(setEmployerEmail, result.data.email);
+          apply(setEmployerPhone, result.data.phone);
+          apply(setEmployerAddress, result.data.address);
+        } else {
+          setCompanyFound(false);
+        }
+      } catch (e: any) {
+        console.debug('BRN lookup miss:', e?.message);
+        setCompanyFound(false);
+      } finally {
+        setBrnLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(timeoutId);
+  }, [employerBrn, loading, companyLocked]);
 
   const toggleDay = (day: string) =>
     setSelectedDays((prev) => ({ ...prev, [day]: !prev[day] }));
@@ -154,15 +208,32 @@ export default function WorkScheduleScreen() {
         </Text>
         <VStack space="md">
           <Box>
+            <FieldLabel>{t('profile.labelEmployerBrn', { defaultValue: 'Employer BRN' })}</FieldLabel>
+            <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50} isDisabled={disabled}>
+              <InputField
+                value={employerBrn}
+                onChangeText={(v) => { brnUserEdited.current = true; setEmployerBrn(v); }}
+                editable={!disabled}
+                autoCapitalize="characters"
+              />
+              <InputSlot pr="$3">
+                {brnLoading ? (
+                  <ActivityIndicator size="small" color={Palette.gray400} />
+                ) : companyFound ? (
+                  <MaterialIcons name="check-circle" size={20} color={Palette.teal} />
+                ) : null}
+              </InputSlot>
+            </Input>
+            {companyFound && (
+              <Text fontSize={Type.caption} color={Palette.teal} fontWeight="700" mt="$1">
+                {t('profile.brnCompanyFound', { defaultValue: 'Registered employer matched' })}
+              </Text>
+            )}
+          </Box>
+          <Box>
             <FieldLabel>{t('profile.labelEmployerName', { defaultValue: 'Employer name' })}</FieldLabel>
             <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50} isDisabled={disabled}>
               <InputField value={employer} onChangeText={setEmployer} editable={!disabled} />
-            </Input>
-          </Box>
-          <Box>
-            <FieldLabel>{t('profile.labelEmployerBrn', { defaultValue: 'Employer BRN' })}</FieldLabel>
-            <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50} isDisabled={disabled}>
-              <InputField value={employerBrn} onChangeText={setEmployerBrn} editable={!disabled} autoCapitalize="characters" />
             </Input>
           </Box>
           <Box>
