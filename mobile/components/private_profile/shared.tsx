@@ -417,7 +417,7 @@ export const EmployerSuggestions: React.FC<{
         <HStack space="sm" alignItems="center" p="$3">
           <ActivityIndicator size="small" color={Palette.gray400} />
           <Text fontSize={Type.small} color={Palette.gray400}>
-            {t('common.searching', { defaultValue: 'Searching…' })}
+            {t('profile.searching', { defaultValue: 'Searching…' })}
           </Text>
         </HStack>
       ) : (
