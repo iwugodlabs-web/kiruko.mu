@@ -610,6 +610,7 @@ const translationMG: ITranslationSchema = {
 		complianceTitle: "Zo & Fanarahan-dalàna",
 		complianceSub: "Ilaina amin'ny fandefasana tatitra",
 		complianceTodo: "Ilaina amin'ny fandefasana tatitra",
+		complianceDone: "Voatahiry ny antsipirian'ny fanarahan-dalàna",
 		needEmployerForPay: "Ampio ny mpampiasa ao amin'ny Asa & Fandaharam-potoana alohan'ny hitahirizana ny karama. Mbola afaka manombatombana amin'ny kajy ianao.",
 		needEmployerForCompliance: "Ampio aloha ny mpampiasanao ao amin'ny Asa & Fandaharam-potoana — ireo fanontaniana ireo dia momba ny asanao.",
 	},

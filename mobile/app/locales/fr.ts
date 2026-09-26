@@ -604,6 +604,7 @@ const translationFR: ITranslationSchema = {
 		complianceTitle: "Droits & Conformité",
 		complianceSub: "Requis pour déposer un signalement",
 		complianceTodo: "Requis pour déposer un signalement",
+		complianceDone: "Détails de conformité enregistrés",
 		needEmployerForPay: "Ajoutez un employeur dans Travail & Horaire avant d'enregistrer le salaire. Vous pouvez toujours estimer votre paie depuis la calculatrice.",
 		needEmployerForCompliance: "Ajoutez d'abord votre employeur dans Travail & Horaire — ces questions concernent votre poste.",
 	},

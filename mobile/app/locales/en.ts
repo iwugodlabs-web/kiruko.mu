@@ -614,6 +614,7 @@ const translationEN: ITranslationSchema = {
 		complianceTitle: "Rights & Compliance",
 		complianceSub: "Required to file a report",
 		complianceTodo: "Required to file a report",
+		complianceDone: "Compliance details saved",
 		needEmployerForPay: "Add an employer in Work & Schedule before saving salary details. You can still estimate payslips from the calculator.",
 		needEmployerForCompliance: "Add your employer in Work & Schedule first — these questions are about your job.",
 	},

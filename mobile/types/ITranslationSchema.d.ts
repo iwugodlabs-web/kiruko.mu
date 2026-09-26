@@ -612,6 +612,7 @@ interface ITranslationSchema {
 		complianceTitle: string;
 		complianceSub: string;
 		complianceTodo: string;
+		complianceDone: string;
 		needEmployerForPay: string;
 		needEmployerForCompliance: string;
 	},

@@ -610,6 +610,7 @@ const translationAR: ITranslationSchema = {
 		complianceTitle: "الحقوق والامتثال",
 		complianceSub: "مطلوب لتقديم تقرير",
 		complianceTodo: "مطلوب لتقديم تقرير",
+		complianceDone: "تم حفظ تفاصيل الامتثال",
 		needEmployerForPay: "أضف صاحب عمل في العمل والجدول قبل حفظ تفاصيل الراتب. لا يزال بإمكانك تقدير كشوف الرواتب من الحاسبة.",
 		needEmployerForCompliance: "أضف صاحب العمل أولًا في العمل والجدول — هذه الأسئلة تتعلق بوظيفتك.",
 	},

@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import Animated, { FadeIn } from '@/app/utils/animated';
 import { useTranslation } from 'react-i18next';
+import { isComplianceDone } from '@/components/private_profile/shared';
 
 const DISMISS_KEY = 'kiruko.profileChecklist.dismissed';
 
@@ -23,6 +24,11 @@ interface ProfileProgressProps {
     work_start_time?: string;
     work_end_time?: string;
     work_days?: Record<string, string>;
+    // Reliable "compliance saved" signal: the boolean answers all default to
+    // false in the DB (can't tell "No" from "unanswered"), but this JSONB field
+    // is NULL until the Rights & Compliance section is saved — the screen always
+    // writes it. A non-null value ⇒ the user has completed compliance.
+    reason_for_deduction?: Record<string, boolean> | null;
   } | null;
   salaryData?: { salary?: any } | null;
 }
@@ -93,6 +99,7 @@ const ProfileProgress: React.FC<ProfileProgressProps> = ({
   const identityDone = Boolean(profileData?.gender && profileData?.date_of_birth && profileData?.pass_port_number);
   const hasEmployer = Boolean(jobData?.job_title && jobData?.employer_name);
   const payDone = Boolean(salaryData?.salary && String(salaryData.salary).trim() !== '');
+  const complianceDone = isComplianceDone(jobData);
 
   const items: { id: string; label: string; icon: string; color: string; route: string }[] = [];
   // Skipped-employer case: onboarding is "complete" (they tapped "add employer
@@ -127,7 +134,7 @@ const ProfileProgress: React.FC<ProfileProgressProps> = ({
       route: '/private_dashboard/profile/identity',
     });
   }
-  if (hasEmployer) {
+  if (hasEmployer && !complianceDone) {
     items.push({
       id: 'compliance',
       label: t('privateHomeCards.tipCompliance', { defaultValue: 'Complete compliance details for reports' }),
