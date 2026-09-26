@@ -553,6 +553,26 @@ interface ITranslationSchema {
 		noCompanyBody: string;
 	};
 
+	setup: {
+		title: string;
+		subtitle: string;
+		whereDoYouWork: string;
+		whereHint: string;
+		brnPlaceholder: string;
+		employerName: string;
+		jobTitle: string;
+		schedule: string;
+		scheduleHint: string;
+		start: string;
+		end: string;
+		addSalary: string;
+		addSalaryHint: string;
+		cta: string;
+		pickDay: string;
+		noUser: string;
+		saveFailed: string;
+		unexpected: string;
+	},
 	profile: {
 		lockedBanner: string;
 		lockedDescription: string;
@@ -584,6 +604,10 @@ interface ITranslationSchema {
 		labelEmploymentStartDate: string;
 		labelEmployerName: string;
 		labelEmployerBrn: string;
+		brnSearchPlaceholder: string;
+		brnCompanyFound: string;
+		changeCountryAnyway: string;
+		countryFromPhone: string;
 		labelJobTitle: string;
 		labelEmployerEmail: string;
 		labelEmployerPhone: string;
@@ -938,6 +962,7 @@ interface ITranslationSchema {
 		calculating: string;
 		setupRequired: string;
 		configureSalary: string;
+		tipEmployer: string;
 		noPayBasisConfigured: string;
 		noClockinsThisPeriod: string;
 		fromSessionsSingular: string;
@@ -1466,6 +1491,7 @@ interface ITranslationSchema {
 		register: string;
 		alreadyHaveAccount: string;
 		logIn: string;
+		useDifferentEmail: string;
 		passwordStrength: string;
 		strengthWeak: string;
 		strengthMedium: string;

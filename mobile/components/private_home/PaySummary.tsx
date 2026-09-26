@@ -319,7 +319,11 @@ const PaySummary: React.FC<PaySummaryProps> = ({
                   </Text>
                   <Button
                     variant="link"
-                    onPress={() => router.push("/private_dashboard/calculator")}
+                    // Salary is SET on Pay & Payslip (profile/pay) — self-serve for
+                    // independents, employer/HR-managed (shown locked) for company
+                    // employees. The calculator only estimates; it can't save a
+                    // salary, so "Configure Salary" must not point there.
+                    onPress={() => router.push("/private_dashboard/profile/pay")}
                     justifyContent="flex-start"
                     p="$0"
                   >

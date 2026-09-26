@@ -58,6 +58,34 @@ async def list_invites_route(limit: int = 50, offset: int = 0, email: str | None
     return {'status': 'success', 'data': res['data'], 'total': res['total']}
 
 
+# Like `/invites`, this literal route must be declared before `/{company_id}`
+# so "search" isn't coerced to an int path param (→ 422).
+@router.get('/search', status_code=200)
+async def search_companies_route(
+    q: str,
+    limit: int = 8,
+    db: Session = Depends(config.get_db),
+    current_user = Depends(get_current_user),
+):
+    """Employer autocomplete for onboarding — matches BRN or company name
+    (case-insensitive). Auth-gated and capped (3-char minimum, ≤20 results) so
+    it stays a "find your employer" helper, not a directory export. Returns
+    only identifiers (name + BRN); contact details are fetched per-selection via
+    /company/lookup/{brn}.
+    """
+    try:
+        companies = company_crud.search_companies(q, db, limit=limit)
+        return {
+            'status': 'success',
+            'data': [
+                {'company_id': c.company_id, 'company_name': c.company_name, 'brn': c.brn}
+                for c in companies
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.get('/{company_id}', status_code=200)
 async def get_company(company_id: int, db: Session = Depends(config.get_db), current_user = Depends(get_current_user)):
     company = company_crud.get_company_by_id(company_id, db)

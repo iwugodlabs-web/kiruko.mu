@@ -867,7 +867,15 @@ const Dashboard = () => {
 
         // Authoritative pay estimate from the payroll engine (same figure
         // the web employer profile shows) — best-effort, non-blocking.
-        await refreshPayslipEstimate();
+        // The payslip ESTIMATE endpoint 400s without a linked company ("no
+        // company yet"), so only fetch it for company employees — for everyone
+        // else the result is the same (no estimate card) minus the 400 noise.
+        if (data.job?.company_id) {
+          await refreshPayslipEstimate();
+        }
+        // The salary PREVIEW works for self (incl. independents with no company),
+        // so it must run for them too — gating it on company_id wrongly blanked
+        // an independent's own resolved-salary breakdown.
         await refreshResolvedSalary(privateUserId);
 
         // Fetch financials for earnings vs expenses widget
@@ -1203,10 +1211,10 @@ const Dashboard = () => {
   // closed while this screen was idle doesn't leave PaySummary comparing
   // against a stale period.
   useEffect(() => {
-    if (selectedFilter === "month") {
+    if (selectedFilter === "month" && jobData?.company_id) {
       refreshPayslipEstimate();
     }
-  }, [selectedFilter, refreshPayslipEstimate]);
+  }, [selectedFilter, refreshPayslipEstimate, jobData?.company_id]);
 
   const filteredClockData = useMemo(() => {
     const now = new Date();
@@ -1875,10 +1883,12 @@ const Dashboard = () => {
               />
             )}
 
-            {/* Profile Completion */}
+            {/* Profile Completion — Redesign v2: setup CTA or optional checklist */}
             <ProfileProgress
+              onboardComplete={user?.onboard_complete}
               profileData={user?.private_user ? { gender: user.private_user.gender, date_of_birth: user.private_user.date_of_birth, pass_port_number: user.private_user.pass_port_number } : null}
               jobData={jobData ? { job_title: jobData.job_title, employer_name: jobData.employer_name, work_start_time: jobData.work_start_time as any, work_end_time: jobData.work_end_time as any, work_days: jobData.work_days } : null}
+              salaryData={(jobData as any)?.salaries?.[0] ?? null}
             />
 
             {/* Earnings vs Expenses */}

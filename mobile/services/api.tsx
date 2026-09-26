@@ -160,13 +160,18 @@ export const createSalary = async (data: Omit<Salary, 'salary_id'>): Promise<Sal
 export const getSalaryByJobId = async (jobId: number): Promise<Salary | { error: string; status: number }> => {
     try {
         const response = await api.get(`/job/salary/${jobId}`);
-        // Check if data is wrapped in standard API response structure
-        if (response.data && response.data.data) {
-            return response.data.data;
+        // "No salary yet" now comes back as 200 { data: null } (was a 404) so it
+        // no longer spams logs/the error interceptor. Unwrap the standard
+        // envelope and treat an absent salary as the same "no salary" sentinel
+        // callers already handle.
+        const body: any = response.data;
+        const salary = body && typeof body === 'object' && 'data' in body ? body.data : body;
+        if (salary == null) {
+            return { error: 'No salary found', status: 404 };
         }
-        return response.data;
+        return salary as Salary;
     } catch (error: any) {
-        // If 404, it might mean no salary, return null-like object or handle gracefully
+        // Back-compat: older backends still return 404 for "no salary".
         if (error.response?.status === 404) {
             return { error: 'No salary found', status: 404 };
         }
@@ -595,6 +600,27 @@ export const getCompanyByBrn = async (brn: string): Promise<ApiResponse<any> | {
     }
 };
 
+export interface CompanySearchResult {
+    company_id: number;
+    company_name: string;
+    brn: string | null;
+}
+
+/** Employer autocomplete — matches BRN or company name. Returns [] for short
+ *  queries or on error (never throws), so the caller can just render the list. */
+export const searchCompanies = async (q: string, limit = 8): Promise<CompanySearchResult[]> => {
+    const term = (q || '').trim();
+    if (term.length < 3) return [];
+    try {
+        const response = await api.get(`/company/search`, { params: { q: term, limit } });
+        const data = response.data?.data ?? response.data;
+        return Array.isArray(data) ? data : [];
+    } catch (error: any) {
+        console.debug('Company search failed:', error?.response?.status || error?.message);
+        return [];
+    }
+};
+
 export const updateCompanyProfile = async (
     companyId: number,
     payload: {
@@ -742,6 +768,26 @@ export const postResetPassword = async (token: string, new_password: string): Pr
 
 // ==================== ONBOARDING SERVICES ====================
 
+// FastAPI 422 responses put a structured array in `detail` (e.g. pydantic
+// time-parsing errors). Passing that array straight into Alert.alert crashes
+// the screen — always coerce to a human-readable string.
+export const stringifyApiDetail = (detail: any): string => {
+    if (detail == null) return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail
+            .map((d) => {
+                if (typeof d === 'string') return d;
+                const loc = Array.isArray(d?.loc) ? d.loc.filter((p: any) => p !== 'body').join('.') : '';
+                const msg = d?.msg || d?.message || JSON.stringify(d);
+                return loc ? `${loc}: ${msg}` : msg;
+            })
+            .join('\n');
+    }
+    if (typeof detail === 'object') return detail.message || detail.msg || JSON.stringify(detail);
+    return String(detail);
+};
+
 export const createOnboardJob = async (data: any): Promise<ApiResponse<User> | { error: string; status?: number }> => {
     // Always send salary_data as provided; job_id will be injected by backend
     console.log('Creating onboard job:', data);
@@ -751,8 +797,9 @@ export const createOnboardJob = async (data: any): Promise<ApiResponse<User> | {
         return response.data;
     } catch (error: any) {
         console.error('Onboard job creation error:', error.response?.data || error.message);
+        const detail = error.response?.data?.detail ?? error.response?.data?.message;
         return {
-            error: error.response?.data?.detail || error.response?.data?.message || error.message || 'Onboarding failed',
+            error: stringifyApiDetail(detail) || error.message || 'Onboarding failed',
             status: error.response?.status || 500
         };
     }
@@ -1057,20 +1104,18 @@ export const getDashboardDataResilient = async (privateUserId: number) => {
                 jobData = result;
                 console.log('✅ Job data fetched successfully');
 
-                // If job fetched successfully, fetch salary data
-                try {
-                    console.log('💰 Fetching salary data for job ID:', jobData.job_id);
-                    const salaryResult = await getSalaryByJobId(jobData.job_id);
-                    if ('error' in salaryResult) {
-                        salaryError = salaryResult.error;
-                        console.log('⚠️ Salary fetch error:', salaryError);
-                    } else {
-                        salaryData = salaryResult as Salary;
-                        console.log('✅ Salary data fetched successfully');
-                    }
-                } catch (error: any) {
-                    salaryError = 'Network error fetching salary data';
-                    console.error('❌ Error fetching salary data:', error);
+                // Salary is already embedded in the job payload (ShowJob.salaries),
+                // so read it from there instead of a second GET /job/salary/{id}.
+                // That extra request 404s — and noisily logs on the server — for a
+                // job with no salary yet (e.g. a freshly signed-up user's
+                // placeholder job on the private home screen).
+                const embeddedSalary = Array.isArray((jobData as any).salaries) ? (jobData as any).salaries[0] : null;
+                if (embeddedSalary) {
+                    salaryData = embeddedSalary as Salary;
+                    console.log('✅ Salary data read from job payload');
+                } else {
+                    salaryError = 'No salary found';
+                    console.log('ℹ️ No salary on job yet — skipping salary fetch');
                 }
             }
         } else {
@@ -2120,6 +2165,11 @@ export const handleApiError = (error: any, context: string = 'API call') => {
         // Expected when a role lacks a permission — the caller surfaces a
         // no-access / empty state. Log quietly instead of as a red error.
         console.log(`🔒 ${context}: permission denied (handled)`);
+    } else if (error?.isInternalGuard) {
+        // The request interceptor blocked a protected call because no auth
+        // token was available yet (e.g. push-token registration racing login).
+        // Expected during startup — not an app error.
+        console.log(`🔒 ${context}: skipped (no auth token yet)`);
     } else {
         console.error(`${context} failed:`, message);
     }

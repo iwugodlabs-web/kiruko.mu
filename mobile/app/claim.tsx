@@ -115,7 +115,7 @@ export default function ClaimScreen() {
         } else {
           // A freshly-claimed employee has a blank profile → send them to
           // complete it; the onboarding gate would bounce them there anyway.
-          router.replace(user.onboard_complete ? '/private_dashboard/home' : '/private_dashboard/profile');
+          router.replace(user.onboard_complete ? '/private_dashboard/home' : '/private_dashboard/setup' as any);
         }
       } else {
         // Password was set but auto-login failed — send them to sign in.

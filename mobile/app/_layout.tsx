@@ -13,6 +13,7 @@ import { Suspense, useState, useCallback, useEffect } from "react";
 import { View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BrandSplash from "@/components/BrandSplash";
+import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { PostHogProvider, usePostHog } from "posthog-react-native";
 
 // FONTS — Kiruko brand display font (Orbitron, matches the logo wordmark)
@@ -41,6 +42,13 @@ export const DATABASE_NAME = "mywitnesstree.db";
 // `disabled` short-circuits the SDK so nothing is sent and nothing errors.
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
+
+// Session replay is a heavy native iOS module and the prime suspect for the
+// app relaunching to the splash screen when connectivity flips (airplane mode).
+// OFF by default; opt back in per-build with
+// EXPO_PUBLIC_POSTHOG_SESSION_REPLAY=true once the crash is confirmed fixed.
+const SESSION_REPLAY_ENABLED =
+  process.env.EXPO_PUBLIC_POSTHOG_SESSION_REPLAY === "true";
 
 // Manual screen tracking. expo-router doesn't expose a NavigationContainer, so
 // PostHog's automatic captureScreens can't hook it — we emit a $screen event on
@@ -96,7 +104,12 @@ function IdleManager({ children }: { children: React.ReactNode }) {
   return (
     <View
       style={{ flex: 1 }}
-      onStartShouldSetResponder={() => {
+      // Use the CAPTURE phase: `onStartShouldSetResponder` is skipped whenever
+      // a child Pressable/Touchable claims the responder, so tapping buttons
+      // never reset the timer and the app locked after 2 min of active use.
+      // Capture runs top-down on every touch and returning false still lets
+      // children handle it normally.
+      onStartShouldSetResponderCapture={() => {
         if (isAuthenticated && !isLocked) resetTimer();
         return false;
       }}
@@ -127,8 +140,9 @@ export default function RootLayout() {
   });
   if (!fontsLoaded) return <BrandSplash />;
   return (
-    <Suspense fallback={<BrandSplash />}>
-      <PostHogProvider
+    <AppErrorBoundary>
+      <Suspense fallback={<BrandSplash />}>
+        <PostHogProvider
         apiKey={POSTHOG_API_KEY}
         autocapture={{
           // expo-router: automatic screen capture can't hook the router, so we
@@ -150,12 +164,13 @@ export default function RootLayout() {
               unhandledRejections: true,
             },
           },
-          // Session replay — watch real sessions to diagnose UX friction /
-          // where users get stuck. This is a payroll app, so mask everything
-          // sensitive by default (these are the SDK defaults, set explicitly
-          // to make the privacy stance unmistakable). Recording must ALSO be
-          // enabled in PostHog project settings ("Record user sessions").
-          enableSessionReplay: true,
+          // Session replay — gated OFF by default. It is a native iOS module
+          // and the prime suspect for the crash-on-connectivity-change that
+          // relaunched the app to the splash. Re-enable per-build with
+          // EXPO_PUBLIC_POSTHOG_SESSION_REPLAY=true (and PostHog project
+          // settings "Record user sessions"). When on, everything sensitive is
+          // masked (payroll app).
+          enableSessionReplay: SESSION_REPLAY_ENABLED,
           sessionReplayConfig: {
             maskAllTextInputs: true,
             maskAllImages: true,
@@ -190,6 +205,7 @@ export default function RootLayout() {
         </LanguageProvider>
       </SQLiteProvider>
       </PostHogProvider>
-    </Suspense>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }

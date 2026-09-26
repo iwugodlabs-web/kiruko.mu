@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Palette } from '@/app/constants/theme';
 import { useToken } from '@gluestack-style/react';
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useRouter, usePathname } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import {
   Calculator,
@@ -24,6 +24,7 @@ export default function DashboardLayout() {
   const inactive = useToken('colors', 'textDark700');
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuth();
   const { t } = useTranslation();
 
@@ -39,9 +40,14 @@ export default function DashboardLayout() {
   // is itself part of this layout so the bounce settles after one cycle.
   React.useEffect(() => {
     if (user && user.user_type === 'private' && user.onboard_complete === false) {
-      router.replace('/private_dashboard/profile');
+      // Redesign v2 — the mandatory gate is the single-screen Setup flow, not
+      // the old multi-step profile wall. Guard against re-replacing when we're
+      // already there (the bounce settles after one cycle).
+      if (!pathname?.includes('/private_dashboard/setup')) {
+        router.replace('/private_dashboard/setup' as any);
+      }
     }
-  }, [user, router]);
+  }, [user, router, pathname]);
 
   // Offline clock-out queue — register the drain worker once the authed
   // private subtree is live so queued clock-outs sync on network/appstate.
@@ -263,9 +269,11 @@ export default function DashboardLayout() {
       <Tabs.Screen
         name="profile"
         options={{
+          // Progressive-onboarding hub + sections — focused sub-flow, no tab bar.
           href: null,
           title: 'Profile',
           headerShown: false,
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
         }}
       />
@@ -327,6 +335,18 @@ export default function DashboardLayout() {
           href: null,
           title: 'Ad preferences',
           headerShown: false,
+          tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="setup"
+        options={{
+          // Progressive-onboarding gate — full-screen, no tab bar.
+          href: null,
+          title: 'Setup',
+          headerShown: false,
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
         }}
       />

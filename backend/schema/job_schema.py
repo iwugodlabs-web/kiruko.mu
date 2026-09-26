@@ -1,18 +1,31 @@
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Dict, Optional, Union, List, Any
+
+
+# Locale-formatted times like "08 h 00" (French) or "8h0" were reaching the
+# API from older mobile builds and failing pydantic's time parser with a 422.
+# Normalize them to "HH:MM" before parsing rather than 422-ing the whole
+# onboarding write.
+_LOCALE_TIME_RE = re.compile(r"^\s*(\d{1,2})\s*(?::|h|H)\s*(\d{2})")
 
    
 class Job(BaseModel) : 
     private_user_id: int
     company_id: Optional[int] = None
     job_title: str
-    employer_name:str
-    employer_brn:str
-    employer_email: Optional[str]  # OUTPUT: str not EmailStr (a deleted/sentinel email must not 500 serialization)
-    employer_phone: Optional[str]
-    employer_address: Optional[str]
+    # Progressive-onboarding: employer identity fields are only present once
+    # the employee adds an employer. A minimal setup (job title + schedule)
+    # must be submittable without them, so they default to None. No-employer
+    # users skip job_data entirely (see OnboardJob).
+    employer_name: Optional[str] = None
+    employer_brn: Optional[str] = None
+    employer_email: Optional[str] = None  # OUTPUT: str not EmailStr (a deleted/sentinel email must not 500 serialization)
+    employer_phone: Optional[str] = None
+    employer_address: Optional[str] = None
     first_date_of_employment: Optional[date] = None
     work_start_time: Optional[time] = None
     work_end_time: Optional[time] = None
@@ -36,6 +49,16 @@ class Job(BaseModel) :
     updated_at: Optional[datetime] = None
     class Config:
         from_attributes=True
+
+    @field_validator('work_start_time', 'work_end_time', mode='before')
+    @classmethod
+    def _normalize_locale_time(cls, v):
+        """Accept "08 h 00" / "8h0" / "08:00:00" as well as "08:00"."""
+        if isinstance(v, str) and v.strip():
+            m = _LOCALE_TIME_RE.match(v)
+            if m:
+                return f"{int(m.group(1)):02d}:{m.group(2)}"
+        return v
 
 class CreateJob(Job):
    pass
@@ -288,12 +311,20 @@ class UpdateUser(BaseModel):
     date_of_birth: Optional[date] = None
     pass_port_number: Optional[str] = None
     onboard_complete: Optional[bool] = None
+    # Escape hatch for users without a current employer (between jobs,
+    # informal work). When True, onboarding is satisfied without a Job row,
+    # so they can use the payslip calculator while clock-in stays disabled.
+    # Read by core.onboarding._evaluate_private.
+    onboarding_acknowledged_no_employer: Optional[bool] = None
 
 
 class OnboardJob(BaseModel):
     user_data: UpdateUser
-    job_data: Job
-    salary_data: CreateSalary
+    # Both optional to support progressive onboarding:
+    #  - job_data omitted ⇒ no-employer path (requires the ack flag).
+    #  - salary_data omitted ⇒ payslip estimate not yet provided.
+    job_data: Optional[Job] = None
+    salary_data: Optional[CreateSalary] = None
     class Config:
         from_attributes = True
 
