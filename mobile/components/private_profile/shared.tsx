@@ -1,4 +1,4 @@
-import { createOnboardJob, createSalary, getJobById, getUserDetail, updateJob, updateUserProfile } from '@/services/api';
+import { createOnboardJob, createSalary, getJobById, getUserDetail, searchCompanies, updateJob, updateUserProfile, type CompanySearchResult } from '@/services/api';
 import { profileLock } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { PremiumHeader } from '@/components/PremiumHeader';
@@ -7,7 +7,7 @@ import { Box, Button, ButtonText, HStack, Heading, Pressable, Text } from '@glue
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -354,6 +354,88 @@ export const MobileDatePicker: React.FC<{
         if (e?.type !== 'dismissed' && d) onChange(d);
       }}
     />
+  );
+};
+
+/**
+ * Employer autocomplete dropdown. Render it directly beneath a BRN input: it
+ * watches `query` (the BRN text), debounces a BRN-or-name search, and lists up
+ * to a handful of matches. Tapping one calls `onSelect(company)` — the parent
+ * decides what to fill. Self-contained (no input of its own) so it drops into
+ * both the setup and Work & Schedule screens without disturbing their fields.
+ */
+export const EmployerSuggestions: React.FC<{
+  query: string;
+  onSelect: (company: CompanySearchResult) => void;
+  disabled?: boolean;
+}> = ({ query, onSelect, disabled }) => {
+  const { t } = useTranslation();
+  const [results, setResults] = useState<CompanySearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  // The query value we were just dismissed for (after a pick), so selecting a
+  // row — which sets the BRN to the exact value — doesn't immediately reopen.
+  const dismissedFor = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const term = (query || '').trim();
+    if (timer.current) clearTimeout(timer.current);
+    if (disabled || term.length < 3 || term === dismissedFor.current) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    timer.current = setTimeout(async () => {
+      const r = await searchCompanies(term);
+      setResults(r);
+      setSearching(false);
+    }, 350);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [query, disabled]);
+
+  const pick = (c: CompanySearchResult) => {
+    dismissedFor.current = c.brn ?? '';
+    setResults([]);
+    setSearching(false);
+    onSelect(c);
+  };
+
+  if (disabled) return null;
+  if (!searching && results.length === 0) return null;
+
+  return (
+    <Box mt="$1" bg={Palette.white} rounded="$xl" borderWidth={1} borderColor={Palette.gray200} overflow="hidden">
+      {searching && results.length === 0 ? (
+        <HStack space="sm" alignItems="center" p="$3">
+          <ActivityIndicator size="small" color={Palette.gray400} />
+          <Text fontSize={Type.small} color={Palette.gray400}>
+            {t('common.searching', { defaultValue: 'Searching…' })}
+          </Text>
+        </HStack>
+      ) : (
+        results.map((c, i) => (
+          <Pressable key={c.company_id} onPress={() => pick(c)}>
+            <Box
+              p="$3"
+              borderTopWidth={i === 0 ? 0 : 1}
+              borderTopColor={Palette.gray100}
+            >
+              <Text fontSize={Type.body} fontWeight="700" color={Palette.ink} numberOfLines={1}>
+                {c.company_name}
+              </Text>
+              {!!c.brn && (
+                <Text fontSize={Type.caption} color={Palette.gray500}>
+                  {c.brn}
+                </Text>
+              )}
+            </Box>
+          </Pressable>
+        ))
+      )}
+    </Box>
   );
 };
 

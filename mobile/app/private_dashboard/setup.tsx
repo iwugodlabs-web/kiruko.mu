@@ -4,7 +4,7 @@ import { StandardButton } from '@/app/design-system';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { Box, HStack, Heading, Input, InputField, InputSlot, Pressable, Spinner, Text, VStack } from '@gluestack-ui/themed';
 import { Building2, Check, ChevronDown, ChevronUp, Clock } from 'lucide-react-native';
-import { FieldLabel, MobileDatePicker } from '@/components/private_profile/shared';
+import { EmployerSuggestions, FieldLabel, MobileDatePicker } from '@/components/private_profile/shared';
 import useCurrency from '@/app/hooks/useCurrency';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -286,7 +286,7 @@ export default function SetupScreen() {
               <VStack space="md">
                 <Input size="xl" variant="outline" rounded="$xl" bg={Palette.white}>
                   <InputField
-                    placeholder={t('setup.brnPlaceholder', { defaultValue: 'Employer BRN' })}
+                    placeholder={t('setup.brnPlaceholder', { defaultValue: 'Search BRN or company name' })}
                     value={brn}
                     onChangeText={onBrnChange}
                     autoCapitalize="characters"
@@ -299,6 +299,14 @@ export default function SetupScreen() {
                     ) : null}
                   </InputSlot>
                 </Input>
+                <EmployerSuggestions
+                  query={brn}
+                  onSelect={(c) => {
+                    setBrn(c.brn ?? '');
+                    setCompanyName(c.company_name ?? '');
+                    setCompanyFound(true);
+                  }}
+                />
 
                 <Input size="xl" variant="outline" rounded="$xl" bg={companyFound ? Palette.gray50 : Palette.white}>
                   <InputField

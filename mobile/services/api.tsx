@@ -600,6 +600,27 @@ export const getCompanyByBrn = async (brn: string): Promise<ApiResponse<any> | {
     }
 };
 
+export interface CompanySearchResult {
+    company_id: number;
+    company_name: string;
+    brn: string | null;
+}
+
+/** Employer autocomplete — matches BRN or company name. Returns [] for short
+ *  queries or on error (never throws), so the caller can just render the list. */
+export const searchCompanies = async (q: string, limit = 8): Promise<CompanySearchResult[]> => {
+    const term = (q || '').trim();
+    if (term.length < 3) return [];
+    try {
+        const response = await api.get(`/company/search`, { params: { q: term, limit } });
+        const data = response.data?.data ?? response.data;
+        return Array.isArray(data) ? data : [];
+    } catch (error: any) {
+        console.debug('Company search failed:', error?.response?.status || error?.message);
+        return [];
+    }
+};
+
 export const updateCompanyProfile = async (
     companyId: number,
     payload: {

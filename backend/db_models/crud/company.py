@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case, or_
 from core.model import Company, Country, Job, PrivateUser, Salary
 
 
@@ -58,6 +58,36 @@ def get_company_by_brn(brn: str, db: Session) -> Company:
         db.query(Company)
         .filter(func.lower(func.trim(Company.brn)) == normalized.lower())
         .first()
+    )
+
+
+def search_companies(q: str, db: Session, limit: int = 8) -> List[Company]:
+    """Autocomplete search over BRN + company name (case-insensitive substring).
+
+    Powers the employee onboarding "find your employer" field. Requires a
+    3-char minimum (returns [] otherwise) and caps results so it's a lookup
+    helper, not a bulk directory export. Ranks exact-BRN first, then
+    starts-with (BRN then name), then contains — so a precise BRN wins over an
+    incidental name substring.
+    """
+    if not q or len(q.strip()) < 3:
+        return []
+    term = q.strip()
+    like = f"%{term}%"
+    starts = f"{term}%"
+    rank = case(
+        (func.lower(func.trim(Company.brn)) == term.lower(), 0),
+        (func.lower(Company.brn).like(starts.lower()), 1),
+        (func.lower(Company.company_name).like(starts.lower()), 2),
+        else_=3,
+    )
+    return (
+        db.query(Company)
+        .filter(Company.status != 'deleted')
+        .filter(or_(Company.brn.ilike(like), Company.company_name.ilike(like)))
+        .order_by(rank, Company.company_name.asc())
+        .limit(max(1, min(limit, 20)))
+        .all()
     )
 
 

@@ -8,6 +8,7 @@ import { ActivityIndicator, Alert } from 'react-native';
 import {
   Card,
   DAYS,
+  EmployerSuggestions,
   FieldLabel,
   MobileDatePicker,
   SectionShell,
@@ -215,6 +216,7 @@ export default function WorkScheduleScreen() {
                 onChangeText={(v) => { brnUserEdited.current = true; setEmployerBrn(v); }}
                 editable={!disabled}
                 autoCapitalize="characters"
+                placeholder={t('profile.brnSearchPlaceholder', { defaultValue: 'Search BRN or company name' })}
               />
               <InputSlot pr="$3">
                 {brnLoading ? (
@@ -224,6 +226,15 @@ export default function WorkScheduleScreen() {
                 ) : null}
               </InputSlot>
             </Input>
+            <EmployerSuggestions
+              query={employerBrn}
+              disabled={disabled}
+              onSelect={(c) => {
+                brnUserEdited.current = true;
+                setEmployer(c.company_name ?? '');
+                setEmployerBrn(c.brn ?? '');
+              }}
+            />
             {companyFound && (
               <Text fontSize={Type.caption} color={Palette.teal} fontWeight="700" mt="$1">
                 {t('profile.brnCompanyFound', { defaultValue: 'Registered employer matched' })}
