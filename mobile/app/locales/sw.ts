@@ -614,6 +614,7 @@ const translationSW: ITranslationSchema = {
 		complianceTitle: "Haki na Uzingatiaji",
 		complianceSub: "Inahitajika kuwasilisha ripoti",
 		complianceTodo: "Inahitajika kuwasilisha ripoti",
+		complianceDone: "Maelezo ya uzingatiaji yamehifadhiwa",
 		needEmployerForPay: "Ongeza mwajiri katika Kazi na Ratiba kabla ya kuhifadhi maelezo ya mshahara. Bado unaweza kukadiria malipo kwa kikokotoo.",
 		needEmployerForCompliance: "Ongeza mwajiri wako kwanza katika Kazi na Ratiba — maswali haya ni kuhusu kazi yako.",
 	},

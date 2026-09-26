@@ -204,6 +204,23 @@ export function jobBase(job: any, privateUserId: number) {
   };
 }
 
+/**
+ * Single source of truth for "has the worker completed the Rights & Compliance
+ * section?" — used by both the home nudge and the profile hub so they never
+ * disagree.
+ *
+ * The 12 compliance answers are booleans that default to `false` in the DB
+ * (nullable=False, server_default='False'), so they can't distinguish "answered
+ * No" from "never filled". `reason_for_deduction` is a JSONB column that is NULL
+ * until the compliance screen is saved — which ALWAYS writes it (see
+ * profile/compliance.tsx onSave) — so a non-null value is the reliable
+ * "section was saved" marker. If that write is ever removed, update this helper
+ * (one place) rather than the call sites.
+ */
+export function isComplianceDone(job: any): boolean {
+  return job?.reason_for_deduction != null;
+}
+
 export async function submitOnboard(payload: Record<string, any>): Promise<void> {
   const res: any = await createOnboardJob(payload);
   if (res?.error) throw new Error(res.error);

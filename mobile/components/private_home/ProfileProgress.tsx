@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import Animated, { FadeIn } from '@/app/utils/animated';
 import { useTranslation } from 'react-i18next';
+import { isComplianceDone } from '@/components/private_profile/shared';
 
 const DISMISS_KEY = 'kiruko.profileChecklist.dismissed';
 
@@ -98,9 +99,7 @@ const ProfileProgress: React.FC<ProfileProgressProps> = ({
   const identityDone = Boolean(profileData?.gender && profileData?.date_of_birth && profileData?.pass_port_number);
   const hasEmployer = Boolean(jobData?.job_title && jobData?.employer_name);
   const payDone = Boolean(salaryData?.salary && String(salaryData.salary).trim() !== '');
-  // reason_for_deduction is NULL until the compliance section is saved (the
-  // screen always writes it), so a non-null value means compliance is done.
-  const complianceDone = jobData?.reason_for_deduction != null;
+  const complianceDone = isComplianceDone(jobData);
 
   const items: { id: string; label: string; icon: string; color: string; route: string }[] = [];
   // Skipped-employer case: onboarding is "complete" (they tapped "add employer

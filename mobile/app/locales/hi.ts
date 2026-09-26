@@ -602,6 +602,7 @@ const translationHI: ITranslationSchema = {
 		complianceTitle: "अधिकार और अनुपालन",
 		complianceSub: "रिपोर्ट दर्ज करने के लिए आवश्यक",
 		complianceTodo: "रिपोर्ट दर्ज करने के लिए आवश्यक",
+		complianceDone: "अनुपालन विवरण सहेजा गया",
 		needEmployerForPay: "वेतन विवरण सहेजने से पहले काम और शेड्यूल में नियोक्ता जोड़ें। आप कैलकुलेटर से अभी भी अनुमान लगा सकते हैं।",
 		needEmployerForCompliance: "पहले काम और शेड्यूल में अपना नियोक्ता जोड़ें — ये प्रश्न आपकी नौकरी के बारे में हैं।",
 	},

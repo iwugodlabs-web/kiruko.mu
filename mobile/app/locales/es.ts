@@ -610,6 +610,7 @@ const translationES: ITranslationSchema = {
 		complianceTitle: "Derechos y cumplimiento",
 		complianceSub: "Requerido para presentar un informe",
 		complianceTodo: "Requerido para presentar un informe",
+		complianceDone: "Detalles de cumplimiento guardados",
 		needEmployerForPay: "Añade un empleador en Trabajo y horario antes de guardar los datos salariales. Aún puedes estimar nóminas con la calculadora.",
 		needEmployerForCompliance: "Añade primero tu empleador en Trabajo y horario — estas preguntas tratan sobre tu trabajo.",
 	},

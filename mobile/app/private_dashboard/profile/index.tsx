@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, SafeAreaView, ScrollView } from 'react-native';
-import { useProfileBootstrap } from '@/components/private_profile/shared';
+import { isComplianceDone, useProfileBootstrap } from '@/components/private_profile/shared';
 
 interface HubRow {
   id: string;
@@ -33,6 +33,7 @@ export default function ProfileHub() {
     job?.job_title && job?.work_start_time && job?.work_end_time && job?.work_days && Object.keys(job.work_days).length > 0,
   );
   const payComplete = Boolean(salary?.salary && String(salary.salary).trim() !== '');
+  const complianceComplete = isComplianceDone(job);
 
   const rows: HubRow[] = [
     {
@@ -74,12 +75,14 @@ export default function ProfileHub() {
     {
       id: 'compliance',
       title: t('profileHub.complianceTitle', { defaultValue: 'Rights & Compliance' }),
-      subtitle: t('profileHub.complianceTodo', { defaultValue: 'Required to file a report' }),
+      subtitle: complianceComplete
+        ? t('profileHub.complianceDone', { defaultValue: 'Compliance details saved' })
+        : t('profileHub.complianceTodo', { defaultValue: 'Required to file a report' }),
       icon: 'gavel',
       color: Palette.green,
       bg: Palette.greenTint,
       route: '/private_dashboard/profile/compliance',
-      status: companyLocked ? 'locked' : 'optional',
+      status: companyLocked ? 'locked' : complianceComplete ? 'complete' : 'optional',
     },
   ];
 
