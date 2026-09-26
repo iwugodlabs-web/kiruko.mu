@@ -4,7 +4,8 @@ import { StandardButton } from '@/app/design-system';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { Box, HStack, Heading, Input, InputField, InputSlot, Pressable, Spinner, Text, VStack } from '@gluestack-ui/themed';
 import { Building2, Check, ChevronDown, ChevronUp, Clock } from 'lucide-react-native';
-import { MobileDatePicker } from '@/components/private_profile/shared';
+import { FieldLabel, MobileDatePicker } from '@/components/private_profile/shared';
+import useCurrency from '@/app/hooks/useCurrency';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -45,6 +46,7 @@ export default function SetupScreen() {
   const { user, login } = useAuth();
   const insets = useSafeAreaInsets();
   const posthog = usePostHog();
+  const { currencyInfo } = useCurrency();
 
   const [noEmployer, setNoEmployer] = useState(false);
 
@@ -435,23 +437,38 @@ export default function SetupScreen() {
           {salaryOpen && (
             <Box bg={Palette.white} rounded="$2xl" p="$5" mb="$4" borderWidth={1} borderColor={Palette.gray200}>
               <VStack space="md">
-                <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
-                  <InputField placeholder={t('setup.salary', { defaultValue: 'Monthly salary' })} keyboardType="numeric" value={salary} onChangeText={setSalary} />
-                </Input>
-                <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
-                  <InputField placeholder={t('setup.allowance', { defaultValue: 'Monthly allowance' })} keyboardType="numeric" value={allowance} onChangeText={setAllowance} />
-                </Input>
+                <Box>
+                  <FieldLabel>{t('profile.labelMonthlySalary', { defaultValue: 'Monthly salary', currency: currencyInfo.code })}</FieldLabel>
+                  <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
+                    <InputField keyboardType="numeric" value={salary} onChangeText={setSalary} />
+                  </Input>
+                </Box>
+                <Box>
+                  <FieldLabel>{t('profile.labelMonthlyAllowance', { defaultValue: 'Monthly allowance', currency: currencyInfo.code })}</FieldLabel>
+                  <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
+                    <InputField keyboardType="numeric" value={allowance} onChangeText={setAllowance} />
+                  </Input>
+                </Box>
                 <HStack space="md">
-                  <Input flex={1} size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
-                    <InputField placeholder={t('setup.hours', { defaultValue: 'Hours / month' })} keyboardType="numeric" value={monthlyHours} onChangeText={setMonthlyHours} />
-                  </Input>
-                  <Input flex={1} size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
-                    <InputField placeholder={t('setup.days', { defaultValue: 'Days / month' })} keyboardType="numeric" value={workingDays} onChangeText={setWorkingDays} />
-                  </Input>
+                  <Box flex={1}>
+                    <FieldLabel>{t('profile.labelHoursPerMonth', { defaultValue: 'Hours / month' })}</FieldLabel>
+                    <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
+                      <InputField keyboardType="numeric" value={monthlyHours} onChangeText={setMonthlyHours} />
+                    </Input>
+                  </Box>
+                  <Box flex={1}>
+                    <FieldLabel>{t('profile.labelDaysPerMonth', { defaultValue: 'Days / month' })}</FieldLabel>
+                    <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
+                      <InputField keyboardType="numeric" value={workingDays} onChangeText={setWorkingDays} />
+                    </Input>
+                  </Box>
                 </HStack>
-                <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
-                  <InputField placeholder={t('setup.break', { defaultValue: 'Break minutes / day' })} keyboardType="numeric" value={breakMinutes} onChangeText={setBreakMinutes} />
-                </Input>
+                <Box>
+                  <FieldLabel>{t('profile.labelBreakMinutes', { defaultValue: 'Break minutes / day' })}</FieldLabel>
+                  <Input size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}>
+                    <InputField keyboardType="numeric" value={breakMinutes} onChangeText={setBreakMinutes} />
+                  </Input>
+                </Box>
               </VStack>
             </Box>
           )}
