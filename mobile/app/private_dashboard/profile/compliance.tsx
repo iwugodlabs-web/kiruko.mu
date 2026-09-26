@@ -22,6 +22,14 @@ import {
 
 const PERMIT_TYPES = ['occupational', 'work', 'none'];
 
+// Permit type values are sent to the backend as-is; `profile.permit*` are the
+// existing display labels in the i18n schema.
+const PERMIT_LABEL_KEYS: Record<string, string> = {
+  occupational: 'permitOccupational',
+  work: 'permitWork',
+  none: 'permitNone',
+};
+
 export default function ComplianceScreen() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -186,7 +194,7 @@ export default function ComplianceScreen() {
                       alignItems="center"
                     >
                       <Text fontSize={Type.caption} fontWeight="700" color={active ? Palette.green : Palette.gray500}>
-                        {t(`profile.permit_${pt}`, { defaultValue: pt })}
+                        {t(`profile.${PERMIT_LABEL_KEYS[pt] ?? 'permitNone'}`, { defaultValue: pt })}
                       </Text>
                     </Box>
                   </Pressable>
@@ -214,7 +222,7 @@ export default function ComplianceScreen() {
                       opacity={disabled ? 0.5 : 1}
                     >
                       <Text fontSize={Type.small} fontWeight="700" color={active ? Palette.green : Palette.gray500}>
-                        {r}
+                        {t(`profile.deduction${r}`, { defaultValue: r })}
                       </Text>
                     </Box>
                   </Pressable>

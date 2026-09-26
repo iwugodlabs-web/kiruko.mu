@@ -4,7 +4,7 @@ import { StandardButton } from '@/app/design-system';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { Box, HStack, Heading, Input, InputField, InputSlot, Pressable, Spinner, Text, VStack } from '@gluestack-ui/themed';
 import { Building2, Check, ChevronDown, ChevronUp, Clock } from 'lucide-react-native';
-import { EmployerSuggestions, FieldLabel, MobileDatePicker } from '@/components/private_profile/shared';
+import { EmployerSuggestions, FieldLabel, MobileDatePicker, dayTranslationKey } from '@/components/private_profile/shared';
 import useCurrency from '@/app/hooks/useCurrency';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -410,7 +410,7 @@ export default function SetupScreen() {
                       bg={active ? Palette.tealTint : Palette.white}
                     >
                       <Text fontSize={Type.small} fontWeight="800" color={active ? Palette.teal : Palette.gray400}>
-                        {day.slice(0, 3)}
+                        {t(dayTranslationKey(day), { defaultValue: day.slice(0, 3) })}
                       </Text>
                     </Box>
                   </Pressable>

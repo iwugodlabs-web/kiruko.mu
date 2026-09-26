@@ -27,6 +27,21 @@ export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sa
 export const DEDUCTION_REASONS = ['Food', 'Lodging', 'Transport', 'Uniform'] as const;
 export const AUTO_LOCK_REASON = 'Auto-locked on admin company-edit';
 
+// English day names are the wire values stored in `work_days` keys; only the
+// display label is translated. Map each canonical day to its i18n key so the
+// weekday chips render in the user's language without corrupting the payload.
+export const DAY_TRANSLATION_KEYS: Record<string, string> = {
+  Monday: 'common.dayMon',
+  Tuesday: 'common.dayTue',
+  Wednesday: 'common.dayWed',
+  Thursday: 'common.dayThu',
+  Friday: 'common.dayFri',
+  Saturday: 'common.daySat',
+  Sunday: 'common.daySun',
+};
+
+export const dayTranslationKey = (day: string): string => DAY_TRANSLATION_KEYS[day] ?? day;
+
 export const toBoolStr = (val: any): 'true' | 'false' | '' =>
   val === true ? 'true' : val === false ? 'false' : '';
 

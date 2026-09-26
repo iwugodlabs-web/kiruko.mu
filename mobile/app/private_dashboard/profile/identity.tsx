@@ -225,7 +225,7 @@ export default function IdentityScreen() {
                       alignItems="center"
                     >
                       <Text fontSize={Type.small} fontWeight="700" color={active ? Palette.violet : Palette.gray500}>
-                        {g}
+                        {t(`profile.gender${g}`, { defaultValue: g })}
                       </Text>
                     </Box>
                   </Pressable>
