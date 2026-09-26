@@ -23,6 +23,7 @@ import {
   submitOnboard,
   toBool,
   toBoolStr,
+  dayTranslationKey,
   useProfileBootstrap,
 } from '@/components/private_profile/shared';
 import { getCompanyByBrn } from '@/services/api';
@@ -317,7 +318,7 @@ export default function WorkScheduleScreen() {
                   opacity={disabled ? 0.5 : 1}
                 >
                   <Text fontSize={Type.small} fontWeight="800" color={active ? Palette.teal : Palette.gray400}>
-                    {day.slice(0, 3)}
+                    {t(dayTranslationKey(day), { defaultValue: day.slice(0, 3) })}
                   </Text>
                 </Box>
               </Pressable>

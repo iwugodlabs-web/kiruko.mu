@@ -43,6 +43,14 @@ interface ITranslationSchema {
 		unknown: string;
 		invalid: string;
 		notAvailable: string;
+		done: string;
+		dayMon: string;
+		dayTue: string;
+		dayWed: string;
+		dayThu: string;
+		dayFri: string;
+		daySat: string;
+		daySun: string;
 	};
 
 	transfersScreen: {
@@ -572,6 +580,40 @@ interface ITranslationSchema {
 		noUser: string;
 		saveFailed: string;
 		unexpected: string;
+		later: string;
+		notWorking: string;
+		summary: string;
+	},
+	profileHub: {
+		title: string;
+		you: string;
+		employee: string;
+		independent: string;
+		allSet: string;
+		finishSetup: string;
+		finish: string;
+		optionalHeading: string;
+		locked: string;
+		complete: string;
+		optional: string;
+		incomplete: string;
+		workTitle: string;
+		workSub: string;
+		workDone: string;
+		workTodo: string;
+		payTitle: string;
+		paySub: string;
+		payDone: string;
+		payTodo: string;
+		identityTitle: string;
+		identitySub: string;
+		identityDone: string;
+		identityTodo: string;
+		complianceTitle: string;
+		complianceSub: string;
+		complianceTodo: string;
+		needEmployerForPay: string;
+		needEmployerForCompliance: string;
 	},
 	profile: {
 		lockedBanner: string;
@@ -640,6 +682,20 @@ interface ITranslationSchema {
 		placeholderHoursMonth: string;
 		placeholderDaysMonth: string;
 		placeholderBreakMins: string;
+		save: string;
+		saveFailed: string;
+		searching: string;
+		dobRequired: string;
+		passportRequired: string;
+		salaryRequired: string;
+		jobRequired: string;
+		autoClockHint: string;
+		labelDormitory: string;
+		labelDecentHousing: string;
+		labelYourPhone: string;
+		genderMale: string;
+		genderFemale: string;
+		genderOther: string;
 	};
 
 	settings: {
@@ -1004,6 +1060,13 @@ interface ITranslationSchema {
 		completeProfile: string;
 		profilePercent: string;
 		converting: string;
+		tipPayslip: string;
+		tipIdentity: string;
+		tipCompliance: string;
+		finishSetupTitle: string;
+		finishSetupBody: string;
+		getMostTitle: string;
+		getMostBody: string;
 	};
 
 	savingsGoal: {
