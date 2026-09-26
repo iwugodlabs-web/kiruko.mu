@@ -228,6 +228,7 @@ export default function WorkScheduleScreen() {
             </Input>
             <EmployerSuggestions
               query={employerBrn}
+              suppressQuery={job?.employer_brn ?? undefined}
               disabled={disabled}
               onSelect={(c) => {
                 brnUserEdited.current = true;

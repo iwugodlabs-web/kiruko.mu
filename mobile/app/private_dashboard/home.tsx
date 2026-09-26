@@ -867,15 +867,16 @@ const Dashboard = () => {
 
         // Authoritative pay estimate from the payroll engine (same figure
         // the web employer profile shows) — best-effort, non-blocking.
-        // Both are company-scoped: the estimate endpoint 400s ("no company
-        // yet") and the salary preview is empty for a user with no linked
-        // employer (someone who tapped "add employer later", or an independent
-        // worker). Skip them entirely for those users — the result is the same
-        // (no estimate card) without the pointless 400/404 noise.
+        // The payslip ESTIMATE endpoint 400s without a linked company ("no
+        // company yet"), so only fetch it for company employees — for everyone
+        // else the result is the same (no estimate card) minus the 400 noise.
         if (data.job?.company_id) {
           await refreshPayslipEstimate();
-          await refreshResolvedSalary(privateUserId);
         }
+        // The salary PREVIEW works for self (incl. independents with no company),
+        // so it must run for them too — gating it on company_id wrongly blanked
+        // an independent's own resolved-salary breakdown.
+        await refreshResolvedSalary(privateUserId);
 
         // Fetch financials for earnings vs expenses widget
         try {

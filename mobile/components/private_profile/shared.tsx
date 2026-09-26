@@ -368,7 +368,11 @@ export const EmployerSuggestions: React.FC<{
   query: string;
   onSelect: (company: CompanySearchResult) => void;
   disabled?: boolean;
-}> = ({ query, onSelect, disabled }) => {
+  /** A value that must NOT auto-open the dropdown — e.g. the BRN pre-filled
+   *  from signup/job (which arrives asynchronously). Only a query that differs
+   *  from this (i.e. the user actually changed it) triggers a search. */
+  suppressQuery?: string;
+}> = ({ query, onSelect, disabled, suppressQuery }) => {
   const { t } = useTranslation();
   const [results, setResults] = useState<CompanySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -379,8 +383,9 @@ export const EmployerSuggestions: React.FC<{
 
   useEffect(() => {
     const term = (query || '').trim();
+    const suppressed = (suppressQuery || '').trim();
     if (timer.current) clearTimeout(timer.current);
-    if (disabled || term.length < 3 || term === dismissedFor.current) {
+    if (disabled || term.length < 3 || term === dismissedFor.current || (!!suppressed && term === suppressed)) {
       setResults([]);
       setSearching(false);
       return;
@@ -394,7 +399,7 @@ export const EmployerSuggestions: React.FC<{
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [query, disabled]);
+  }, [query, disabled, suppressQuery]);
 
   const pick = (c: CompanySearchResult) => {
     dismissedFor.current = c.brn ?? '';

@@ -59,7 +59,10 @@ export default function IdentityScreen() {
 
   const phoneCountry = detectPhoneCountry(phone);
   const countryLockedByPhone = phoneCountry === 'MU' && !countryOverride;
-  const selectedCountry = countryLockedByPhone ? 'MU' : currentCountry;
+  // Show the actual stored country; only fall back to the phone-derived MU when
+  // nothing is stored yet. Never force-display 'MU' over a stored value — that
+  // would lie about what's saved and (previously) clobber a deliberate override.
+  const selectedCountry = currentCountry ?? (countryLockedByPhone ? 'MU' : undefined);
 
   useEffect(() => {
     if (loading) return;
@@ -97,18 +100,6 @@ export default function IdentityScreen() {
       Alert.alert(t('common.errorTitle', { defaultValue: 'Error' }), t('settings.countryUpdateFailed', { defaultValue: 'Could not update country.' }));
     }
   };
-
-  // Enforce the rule: a Mauritian phone with a *different* country explicitly
-  // stored gets corrected back to MU (unless the user invoked the override).
-  // Skipped when nothing is stored — the backend already defaults MU from the
-  // phone — so this only fires on a real mismatch, not on every load.
-  useEffect(() => {
-    if (loading || !isIndependentUser || identityLocked) return;
-    if (countryLockedByPhone && currentCountry && currentCountry !== 'MU') {
-      saveCountry('MU');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, isIndependentUser, identityLocked, countryLockedByPhone, currentCountry]);
 
   const onSave = async () => {
     if (privateUserId === undefined) return;

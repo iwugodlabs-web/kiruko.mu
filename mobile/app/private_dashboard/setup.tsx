@@ -51,6 +51,9 @@ export default function SetupScreen() {
   const [noEmployer, setNoEmployer] = useState(false);
 
   const [brn, setBrn] = useState('');
+  // The BRN pre-filled from the placeholder job — used to keep the suggestions
+  // dropdown from auto-opening on load (only user edits should trigger it).
+  const [prefilledBrn, setPrefilledBrn] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [companyFound, setCompanyFound] = useState(false);
   const [isBrnLoading, setIsBrnLoading] = useState(false);
@@ -133,7 +136,7 @@ export default function SetupScreen() {
         const job: any = await getJobById(Number(privateUserId));
         if (cancelled || !job || 'error' in job) return;
         const jbrn = job.employer_brn ? String(job.employer_brn) : '';
-        if (jbrn) setBrn(jbrn);
+        if (jbrn) { setBrn(jbrn); setPrefilledBrn(jbrn); }
         if (job.employer_name) setCompanyName(String(job.employer_name));
         if (job.job_title) setJobTitle(String(job.job_title));
         if (job.work_start_time) setStartTime(parseTime(String(job.work_start_time)));
@@ -301,6 +304,7 @@ export default function SetupScreen() {
                 </Input>
                 <EmployerSuggestions
                   query={brn}
+                  suppressQuery={prefilledBrn || undefined}
                   onSelect={(c) => {
                     setBrn(c.brn ?? '');
                     setCompanyName(c.company_name ?? '');
