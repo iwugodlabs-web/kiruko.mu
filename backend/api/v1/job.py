@@ -1,5 +1,6 @@
 from db_models.crud.job import (create_job, create_time_log, get_job_by_id, get_all_jobs, get_jobs_by_company, update_job, delete_job, get_all_time_logs, get_time_logs_by_user, get_time_logs_by_job, get_time_logs_by_company, get_job_history, update_job_simple, create_salary, update_salary, create_schedule, get_schedule, get_schedules_by_company, delete_schedule, update_schedule, update_my_schedule_status, verify_schedule_completion, update_time_log, create_break_log, update_break_log)
 from fastapi import APIRouter, Depends, status, HTTPException, Query, UploadFile, File, Request
+from fastapi.responses import JSONResponse
 import fastapi as _fastapi
 import logging
 import sys
@@ -134,7 +135,12 @@ async def get_salary_by_job_id(job_id: int, current_user: User = Depends(get_cur
     try:
         salary = db.query(SalaryORM).filter(SalaryORM.job_id == job_id).first()
         if not salary:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salary not found for this job")
+            # "No salary yet" is a normal state for a new/placeholder job (e.g. a
+            # freshly signed-up employee), NOT an error. Returning 404 here spammed
+            # the server access log and the mobile client's response-error
+            # interceptor on every home/clock-in load. Return 200 with a null body
+            # instead; the client maps null → "no salary" exactly as it did the 404.
+            return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "success", "data": None})
         from core.model import Job as JobORM
         _job = db.query(JobORM).filter(JobORM.job_id == job_id).first()
         # A private user may always read the salary on their OWN job, even when the

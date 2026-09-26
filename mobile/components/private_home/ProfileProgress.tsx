@@ -95,6 +95,20 @@ const ProfileProgress: React.FC<ProfileProgressProps> = ({
   const payDone = Boolean(salaryData?.salary && String(salaryData.salary).trim() !== '');
 
   const items: { id: string; label: string; icon: string; color: string; route: string }[] = [];
+  // Skipped-employer case: onboarding is "complete" (they tapped "add employer
+  // later"), but with no employer linked the pay/compliance steps stay locked
+  // and there's otherwise no path back to add it. Surface it as the first item
+  // so the needed employer info isn't stranded after reopening the app. Still
+  // dismissable, so genuine independents aren't nagged.
+  if (!hasEmployer) {
+    items.push({
+      id: 'employer',
+      label: t('privateHomeCards.tipEmployer', { defaultValue: 'Add your employer to unlock payslips & schedule' }),
+      icon: 'business',
+      color: Palette.blue,
+      route: '/private_dashboard/setup',
+    });
+  }
   if (hasEmployer && !payDone) {
     items.push({
       id: 'pay',

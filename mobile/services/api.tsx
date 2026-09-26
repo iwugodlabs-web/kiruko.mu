@@ -160,13 +160,18 @@ export const createSalary = async (data: Omit<Salary, 'salary_id'>): Promise<Sal
 export const getSalaryByJobId = async (jobId: number): Promise<Salary | { error: string; status: number }> => {
     try {
         const response = await api.get(`/job/salary/${jobId}`);
-        // Check if data is wrapped in standard API response structure
-        if (response.data && response.data.data) {
-            return response.data.data;
+        // "No salary yet" now comes back as 200 { data: null } (was a 404) so it
+        // no longer spams logs/the error interceptor. Unwrap the standard
+        // envelope and treat an absent salary as the same "no salary" sentinel
+        // callers already handle.
+        const body: any = response.data;
+        const salary = body && typeof body === 'object' && 'data' in body ? body.data : body;
+        if (salary == null) {
+            return { error: 'No salary found', status: 404 };
         }
-        return response.data;
+        return salary as Salary;
     } catch (error: any) {
-        // If 404, it might mean no salary, return null-like object or handle gracefully
+        // Back-compat: older backends still return 404 for "no salary".
         if (error.response?.status === 404) {
             return { error: 'No salary found', status: 404 };
         }
@@ -1078,20 +1083,18 @@ export const getDashboardDataResilient = async (privateUserId: number) => {
                 jobData = result;
                 console.log('✅ Job data fetched successfully');
 
-                // If job fetched successfully, fetch salary data
-                try {
-                    console.log('💰 Fetching salary data for job ID:', jobData.job_id);
-                    const salaryResult = await getSalaryByJobId(jobData.job_id);
-                    if ('error' in salaryResult) {
-                        salaryError = salaryResult.error;
-                        console.log('⚠️ Salary fetch error:', salaryError);
-                    } else {
-                        salaryData = salaryResult as Salary;
-                        console.log('✅ Salary data fetched successfully');
-                    }
-                } catch (error: any) {
-                    salaryError = 'Network error fetching salary data';
-                    console.error('❌ Error fetching salary data:', error);
+                // Salary is already embedded in the job payload (ShowJob.salaries),
+                // so read it from there instead of a second GET /job/salary/{id}.
+                // That extra request 404s — and noisily logs on the server — for a
+                // job with no salary yet (e.g. a freshly signed-up user's
+                // placeholder job on the private home screen).
+                const embeddedSalary = Array.isArray((jobData as any).salaries) ? (jobData as any).salaries[0] : null;
+                if (embeddedSalary) {
+                    salaryData = embeddedSalary as Salary;
+                    console.log('✅ Salary data read from job payload');
+                } else {
+                    salaryError = 'No salary found';
+                    console.log('ℹ️ No salary on job yet — skipping salary fetch');
                 }
             }
         } else {

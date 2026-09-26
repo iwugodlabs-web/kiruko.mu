@@ -23,6 +23,22 @@ import {
 
 const GENDERS = ['Male', 'Female', 'Other'];
 
+// Mirrors backend core/phone_utils.normalize_phone country inference: a +230 or
+// bare 7–8 digit local number is Mauritius; +255 / bare 9-digit is Tanzania.
+// Foreign numbers carry some other calling code and return null — those stay
+// free to choose their country (the migrant-worker-in-Mauritius flow). We only
+// hard-lock the country for a clearly Mauritian phone, to stop an MU number
+// from claiming another country (currency/rate gaming).
+const detectPhoneCountry = (raw: string): string | null => {
+  const digits = (raw || '').replace(/\D/g, '').replace(/^00/, '');
+  if (!digits) return null;
+  if (digits.startsWith('230')) return 'MU';
+  if (digits.startsWith('255')) return 'TZ';
+  if (digits.length >= 7 && digits.length <= 8) return 'MU';
+  if (digits.length === 9) return 'TZ';
+  return null;
+};
+
 export default function IdentityScreen() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -37,6 +53,13 @@ export default function IdentityScreen() {
 
   const [countries, setCountries] = useState<Country[]>([]);
   const [currentCountry, setCurrentCountry] = useState<string | undefined>(undefined);
+  // Escape hatch: lets a Mauritian-phone user deliberately pick a different
+  // country ("except we have a use case then we allow them to change it").
+  const [countryOverride, setCountryOverride] = useState(false);
+
+  const phoneCountry = detectPhoneCountry(phone);
+  const countryLockedByPhone = phoneCountry === 'MU' && !countryOverride;
+  const selectedCountry = countryLockedByPhone ? 'MU' : currentCountry;
 
   useEffect(() => {
     if (loading) return;
@@ -74,6 +97,18 @@ export default function IdentityScreen() {
       Alert.alert(t('common.errorTitle', { defaultValue: 'Error' }), t('settings.countryUpdateFailed', { defaultValue: 'Could not update country.' }));
     }
   };
+
+  // Enforce the rule: a Mauritian phone with a *different* country explicitly
+  // stored gets corrected back to MU (unless the user invoked the override).
+  // Skipped when nothing is stored — the backend already defaults MU from the
+  // phone — so this only fires on a real mismatch, not on every load.
+  useEffect(() => {
+    if (loading || !isIndependentUser || identityLocked) return;
+    if (countryLockedByPhone && currentCountry && currentCountry !== 'MU') {
+      saveCountry('MU');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, isIndependentUser, identityLocked, countryLockedByPhone, currentCountry]);
 
   const onSave = async () => {
     if (privateUserId === undefined) return;
@@ -143,9 +178,10 @@ export default function IdentityScreen() {
               <Text size="sm" color={Palette.gray400}>{t('common.loading', { defaultValue: 'Loading…' })}</Text>
             ) : (
               countries.map((c) => {
-                const active = currentCountry === c.code;
+                const active = selectedCountry === c.code;
+                const chipDisabled = identityLocked || countryLockedByPhone;
                 return (
-                  <Pressable key={c.code} onPress={() => !identityLocked && saveCountry(c.code)} disabled={identityLocked} mb="$2">
+                  <Pressable key={c.code} onPress={() => !chipDisabled && saveCountry(c.code)} disabled={chipDisabled} mb="$2">
                     <Box
                       px="$3"
                       py="$2"
@@ -153,7 +189,7 @@ export default function IdentityScreen() {
                       borderWidth={1.5}
                       borderColor={active ? Palette.violet : Palette.gray200}
                       bg={active ? Palette.violetTint : Palette.white}
-                      opacity={identityLocked ? 0.5 : 1}
+                      opacity={chipDisabled && !active ? 0.5 : 1}
                     >
                       <Text fontSize={Type.small} fontWeight="800" color={active ? Palette.violet : Palette.gray500}>
                         {c.name}
@@ -164,6 +200,19 @@ export default function IdentityScreen() {
               })
             )}
           </HStack>
+          {countryLockedByPhone && !identityLocked && (
+            <HStack space="xs" alignItems="center" mt="$2" flexWrap="wrap">
+              <MaterialIcons name="lock" size={13} color={Palette.gray400} />
+              <Text fontSize={Type.caption} color={Palette.gray500} flexShrink={1}>
+                {t('profile.countryFromPhone', { defaultValue: 'Set from your Mauritian phone number.' })}
+              </Text>
+              <Pressable onPress={() => setCountryOverride(true)} hitSlop={8}>
+                <Text fontSize={Type.caption} fontWeight="800" color={Palette.violet}>
+                  {t('profile.changeCountryAnyway', { defaultValue: 'Change country' })}
+                </Text>
+              </Pressable>
+            </HStack>
+          )}
         </Card>
       )}
 

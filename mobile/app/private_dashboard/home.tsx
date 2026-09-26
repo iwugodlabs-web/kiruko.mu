@@ -867,8 +867,15 @@ const Dashboard = () => {
 
         // Authoritative pay estimate from the payroll engine (same figure
         // the web employer profile shows) — best-effort, non-blocking.
-        await refreshPayslipEstimate();
-        await refreshResolvedSalary(privateUserId);
+        // Both are company-scoped: the estimate endpoint 400s ("no company
+        // yet") and the salary preview is empty for a user with no linked
+        // employer (someone who tapped "add employer later", or an independent
+        // worker). Skip them entirely for those users — the result is the same
+        // (no estimate card) without the pointless 400/404 noise.
+        if (data.job?.company_id) {
+          await refreshPayslipEstimate();
+          await refreshResolvedSalary(privateUserId);
+        }
 
         // Fetch financials for earnings vs expenses widget
         try {
@@ -1203,10 +1210,10 @@ const Dashboard = () => {
   // closed while this screen was idle doesn't leave PaySummary comparing
   // against a stale period.
   useEffect(() => {
-    if (selectedFilter === "month") {
+    if (selectedFilter === "month" && jobData?.company_id) {
       refreshPayslipEstimate();
     }
-  }, [selectedFilter, refreshPayslipEstimate]);
+  }, [selectedFilter, refreshPayslipEstimate, jobData?.company_id]);
 
   const filteredClockData = useMemo(() => {
     const now = new Date();

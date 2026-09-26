@@ -314,10 +314,16 @@ export default function SignupPage() {
         // `.message` previously dropped the backend's detail entirely.
         const detail = (result as any).error || (result as any).message;
         if (status === 409) {
-          // Duplicate account (email/phone already registered). Don't
-          // dead-end the user on a failure alert — offer a path to log in.
+          // Duplicate account (email/phone already registered). Primary path is
+          // to correct the entry, NOT a forced redirect to login: send the user
+          // back to the details step and flag the email so the inline error
+          // shows and "Next" is blocked until they change it. "Log in" stays as
+          // a secondary option for people who already have an account.
+          const isPhoneDup = /phone|mobile|number/i.test(String(detail || ""));
+          setCurrentStep(1);
+          if (!isPhoneDup) setEmailExists(true);
           Alert.alert(t("signup.signupFailed"), detail || t("signup.unableToCreate"), [
-            { text: t("common.cancel"), style: "cancel" },
+            { text: t("signup.useDifferentEmail", { defaultValue: "Use a different email" }), style: "cancel" },
             { text: t("signup.logIn"), onPress: () => router.push({ pathname: "/login", params: { email: data.email } }) },
           ]);
         } else {

@@ -1,4 +1,4 @@
-import { createOnboardJob, getCompanyByBrn, getUserDetail } from '@/services/api';
+import { createOnboardJob, getCompanyByBrn, getJobById, getUserDetail } from '@/services/api';
 import { Palette, Type } from '@/app/constants/theme';
 import { StandardButton } from '@/app/design-system';
 import { PremiumHeader } from '@/components/PremiumHeader';
@@ -7,7 +7,7 @@ import { Building2, Check, ChevronDown, ChevronUp, Clock } from 'lucide-react-na
 import { MobileDatePicker } from '@/components/private_profile/shared';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from 'posthog-react-native';
 import { Alert, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView } from 'react-native';
@@ -118,6 +118,53 @@ export default function SetupScreen() {
       (user?.user_id !== undefined ? Number(user.user_id) : undefined),
     [user],
   );
+
+  // Pre-fill from the placeholder job the backend stores at private self-signup
+  // (crud/user.py persists the employer BRN/name the user typed during signup so
+  // this screen can pre-fill instead of starting blank). Also rehydrates a
+  // returning user's partially-saved job/salary/schedule.
+  useEffect(() => {
+    let cancelled = false;
+    if (privateUserId === undefined) return;
+    (async () => {
+      try {
+        const job: any = await getJobById(Number(privateUserId));
+        if (cancelled || !job || 'error' in job) return;
+        const jbrn = job.employer_brn ? String(job.employer_brn) : '';
+        if (jbrn) setBrn(jbrn);
+        if (job.employer_name) setCompanyName(String(job.employer_name));
+        if (job.job_title) setJobTitle(String(job.job_title));
+        if (job.work_start_time) setStartTime(parseTime(String(job.work_start_time)));
+        if (job.work_end_time) setEndTime(parseTime(String(job.work_end_time)));
+        if (job.work_days && typeof job.work_days === 'object' && Object.keys(job.work_days).length) {
+          const wd: Record<string, string> = {};
+          Object.entries(job.work_days).forEach(([d, h]) => { wd[d] = String(h ?? '8'); });
+          setWorkDays(wd);
+        }
+        const sal = job.salaries?.[0];
+        if (sal) {
+          if (sal.salary != null) setSalary(String(sal.salary));
+          if (sal.allowance != null) setAllowance(String(sal.allowance));
+          if (sal.monthly_hours != null) setMonthlyHours(String(sal.monthly_hours));
+          if (sal.days_of_work_per_month != null) setWorkingDays(String(sal.days_of_work_per_month));
+          if (sal.break_in_minutes_per_day != null) setBreakMinutes(String(sal.break_in_minutes_per_day));
+        }
+        // Confirm the BRN against a registered company — non-destructive: only
+        // flips the "found" badge and fills the name if it was blank, never
+        // clobbers the employer name the user typed at signup.
+        if (jbrn.trim().length >= 3) {
+          try {
+            const r: any = await getCompanyByBrn(jbrn.trim());
+            if (!cancelled && r?.status === 'success' && r.data) {
+              setCompanyFound(true);
+              if (r.data.company_name) setCompanyName((prev) => (prev && prev.trim() ? prev : r.data.company_name));
+            }
+          } catch { /* lookup miss — leave manual entry as-is */ }
+        }
+      } catch { /* no job yet — start blank */ }
+    })();
+    return () => { cancelled = true; };
+  }, [privateUserId]);
 
   const canSubmit = noEmployer
     ? true
