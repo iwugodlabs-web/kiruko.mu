@@ -32,10 +32,14 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
   }, []);
 
   const triggerAuth = useCallback(async () => {
-    // If the device has no lock set, skip authentication entirely
+    // No device passcode/biometric to authenticate against. Previously we just
+    // called onUnlock() here, which made the idle lock a silent no-op on any
+    // unsecured device — the timeout would fire and instantly dismiss. For a
+    // payroll app that's a real gap, so end the session instead: the user must
+    // log back in. Devices WITH biometrics keep the fast unlock path below.
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!enrolled) {
-      onUnlock();
+      onLogout();
       return;
     }
 
@@ -68,7 +72,7 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
     } finally {
       setIsAuthenticating(false);
     }
-  }, [onUnlock, t]);
+  }, [onUnlock, onLogout, t]);
 
   useEffect(() => {
     triggerAuth();
