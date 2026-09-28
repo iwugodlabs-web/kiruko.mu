@@ -164,10 +164,15 @@ def _cleanup(db: Session, ctx: dict) -> None:
         sql_text("DELETE FROM companies WHERE company_id=:c"),
         {"c": ctx["company_id"]},
     )
+    # Deleting the owner triggers audit_logs' actor_user_id ON DELETE SET NULL,
+    # which the append-only trigger rejects. Disable it around the cascade
+    # (mirrors test_account_deletion._purge_users_and_company).
+    db.execute(sql_text("ALTER TABLE audit_logs DISABLE TRIGGER USER"))
     db.execute(
         sql_text("DELETE FROM users WHERE email=:e"),
         {"e": ctx["owner_email"]},
     )
+    db.execute(sql_text("ALTER TABLE audit_logs ENABLE TRIGGER USER"))
     db.commit()
 
 

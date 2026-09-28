@@ -446,8 +446,9 @@ async def transfer_company_ownership(company_id: int, payload: TransferOwnership
     if target_user.private_user.company_id != company_id:
         raise HTTPException(status_code=400, detail='New owner must belong to the company')
 
+    prev_owner_user_id = company.user_id
     updated_company = company_crud.transfer_company_ownership(company_id, payload.new_owner_user_id, current_user.user_id, db)
-    # TODO: add audit entry/logging here
+    company_crud.log_audit(company_id, 'company.ownership_transferred', current_user.user_id, f'company:{company_id}', db, metadata={'prev_owner_user_id': prev_owner_user_id, 'new_owner_user_id': payload.new_owner_user_id})
     return {'company_id': company_id, 'new_owner_user_id': payload.new_owner_user_id}
 
 
