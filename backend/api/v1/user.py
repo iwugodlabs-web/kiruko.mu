@@ -817,11 +817,14 @@ async def delete_my_account(
 ):
     """Self-service account deletion (GDPR + App Store / Google Play requirement).
 
-    Soft-deletes and anonymizes the authenticated user: login is disabled and all
-    personal identifiers are scrubbed. Sensitive uploads (documents, receipt
-    images) and their stored files are removed; notifications and sessions are
-    purged. Employment, payroll and audit records the employer must retain by law
-    are KEPT but de-identified (they link only to an anonymized user record).
+    Soft-deletes and anonymizes the authenticated user: login is disabled and
+    contact identifiers (email, phone, username, push token) are scrubbed. The
+    person's name is intentionally RETAINED so retained employment/payroll rows
+    stay attributable and the deletion is recorded (with name + original email)
+    in the append-only audit log. Sensitive uploads (documents, receipt images)
+    and their stored files are removed; notifications and sessions are purged.
+    Employment, payroll and audit records the employer must retain by law are
+    KEPT.
 
     Blocked when the caller owns a company that still has other members — they
     must transfer ownership or offboard their team first, so no workforce is
@@ -891,9 +894,8 @@ async def delete_my_account(
             pass
 
         # 4) Anonymize the PrivateUser PII (employment record retained, de-identified).
+        #    Name is intentionally KEPT so the employment record stays attributable.
         if private is not None:
-            private.first_name = "Deleted"
-            private.last_name = "User"
             private.phone = None
             private.date_of_birth = None
             private.pass_port_number = None
@@ -908,8 +910,24 @@ async def delete_my_account(
         user.password_hash = "ACCOUNT_DELETED"
         user.expo_push_token = None
 
-        # 6) Audit (append-only INSERT; no PII in the payload).
-        create_audit_log(db, user.user_id, "account_deleted", "users", user.user_id, {"self_service": True}, commit=False)
+        # 6) Audit (append-only INSERT). Capture who deleted the account so it stays
+        #    attributable after the user row is anonymized.
+        deleted_name = " ".join(
+            p for p in [getattr(private, "first_name", None), getattr(private, "last_name", None)] if p
+        ).strip() if private is not None else None
+        create_audit_log(
+            db,
+            user.user_id,
+            "account_deleted",
+            "users",
+            user.user_id,
+            {
+                "self_service": True,
+                "name": deleted_name or None,
+                "email": original_email,
+            },
+            commit=False,
+        )
 
         db.commit()
     except SQLAlchemyError as e:
