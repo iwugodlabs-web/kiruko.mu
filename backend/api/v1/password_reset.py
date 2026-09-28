@@ -4,6 +4,7 @@ from core import config
 from core.model import VerificationToken
 from schema.password_reset_schema import ForgotPasswordRequest, VerifyOTPRequest, ResetPasswordRequest
 from db_models.crud.user import get_user_by_email, update_password_by_email
+from db_models.crud.audit import create_audit_log
 from services.email_service import send_password_reset_otp
 from core.security import create_access_token, decode_token, generate_passwd_hash
 from core.limiter import limiter, RATE_LIMITING_ENABLED
@@ -131,5 +132,12 @@ def reset_password(request: Request, body: ResetPasswordRequest, db: Session = D
 
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    reset_user = get_user_by_email(email, db)
+    reset_user_id = getattr(reset_user, "user_id", None)
+    create_audit_log(
+        db, reset_user_id, "auth.password_reset", "user", reset_user_id,
+        {"method": "reset_token", "email": email},
+    )
 
     return {"status": "success", "message": "Password has been reset successfully."}

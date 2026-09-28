@@ -267,17 +267,26 @@ async def get_leaves_by_company_route(company_id: int, db: Session = Depends(con
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(leaves)})
 
 @router.put('/leave/{leave_id}', status_code=200, response_model=ShowLeave)
-async def update_leave_route(leave_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_leave_route(leave_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     leave = update_leave(leave_id, update_data, db)
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
+    create_audit_log(
+        db, current_user.user_id, "leave.update", "leave", leave_id,
+        {"changed": {k: jsonable_encoder(v) for k, v in (update_data or {}).items()}},
+    )
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(leave)})
 
 @router.delete('/leave/{leave_id}', status_code=204)
-async def delete_leave_route(leave_id: int, db: Session = Depends(config.get_db)):
+async def delete_leave_route(leave_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
+    existing = get_leave_by_id(leave_id, db)
     success = delete_leave(leave_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Leave request not found")
+    create_audit_log(
+        db, current_user.user_id, "leave.delete", "leave", leave_id,
+        {"private_user_id": getattr(existing, "private_user_id", None)},
+    )
     return _fastapi.Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.put('/leave/{leave_id}/approve', status_code=200, response_model=ShowLeave)
@@ -306,6 +315,15 @@ async def approve_or_reject_leave_route(leave_id: int, approval_data: ApproveLea
         leave = approve_or_reject_leave(leave_id, approval_data.action, approval_data.rejection_reason, approval_data.approver_comments, current_user.user_id, db)
         if not leave:
             raise HTTPException(status_code=404, detail="Leave request not found")
+        create_audit_log(
+            db, current_user.user_id, f"leave.{approval_data.action}", "leave", leave_id,
+            {
+                "company_id": company_id,
+                "private_user_id": getattr(pu, "private_user_id", None),
+                "status": getattr(leave, "status", None),
+                "rejection_reason": approval_data.rejection_reason,
+            },
+        )
         # Notify employee of status change
         try:
             from services.notification_service import NotificationService

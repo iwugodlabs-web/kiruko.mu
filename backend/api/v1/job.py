@@ -12,6 +12,7 @@ from core import config
 from core.dependencies import get_current_user, require_company_read_access, require_company_scope, assert_company_access
 from core.idempotency import require_idempotency_key
 from core.model import Salary as SalaryORM, User
+from db_models.crud.audit import create_audit_log
 from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult
 from sqlalchemy.orm import Session
 from core.exceptions import EnrollmentException as onbording_exceptions
@@ -171,7 +172,26 @@ async def update_salary_endpoint(salary_id: int, salary: dict = _fastapi.Body(..
     """Update an existing salary record. Scoped to the salary's company."""
     try:
         _assert_salary_access(salary_id, current_user, db)
+        before = db.query(SalaryORM).filter(SalaryORM.salary_id == salary_id).first()
+        before_snap = {
+            "salary": str(before.salary),
+            "allowance": str(before.allowance),
+            "revenue": str(getattr(before, "revenue", None)),
+        } if before else {}
         updated_salary = await update_salary(salary_id, salary, db)
+        create_audit_log(
+            db, current_user.user_id, "salary.update", "salary", salary_id,
+            {
+                "before": before_snap,
+                "after": {
+                    "salary": str(updated_salary.salary),
+                    "allowance": str(updated_salary.allowance),
+                    "revenue": str(getattr(updated_salary, "revenue", None)),
+                },
+                "private_user_id": getattr(updated_salary, "private_user_id", None),
+            },
+            commit=False,
+        )
         db.commit()
         db.refresh(updated_salary)
     except HTTPException:
