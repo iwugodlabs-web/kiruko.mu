@@ -150,12 +150,30 @@ export default function AuditLogsSection() {
                           : JSON.stringify(l.details ?? l.meta, null, 2)}</code>
                       </pre>
                     )}
-                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-50 dark:border-gray-800">
-                      <div className="w-6 h-6 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[10px] font-semibold text-gray-600 dark:text-gray-400">
-                        {String(l.user_id || l.actor_user_id || '?').slice(0, 2).toUpperCase()}
-                      </div>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">User {l.user_id || l.actor_user_id || 'System'}</span>
-                    </div>
+                    {(() => {
+                      // Resolve WHO acted: prefer the backend-resolved name, fall
+                      // back to the numeric id, then "System" for actor-less rows
+                      // (automations, kiosk, anonymous filings).
+                      const actorId = l.actor_user_id ?? l.user_id;
+                      const name: string | null = l.actor_name ?? null;
+                      const email: string | null = l.actor_email ?? null;
+                      const primary = name || (actorId ? `User ${actorId}` : 'System');
+                      const initials = name
+                        ? name.split(/\s+/).map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
+                        : String(actorId || 'SY').slice(0, 2).toUpperCase();
+                      return (
+                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-50 dark:border-gray-800">
+                          <div className="w-6 h-6 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[10px] font-semibold text-gray-600 dark:text-gray-400">
+                            {initials}
+                          </div>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {primary}
+                            {email ? <span className="text-gray-400 dark:text-gray-500"> · {email}</span> : null}
+                            {name && actorId ? <span className="text-gray-300 dark:text-gray-600"> (#{actorId})</span> : null}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

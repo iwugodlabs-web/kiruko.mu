@@ -34,9 +34,21 @@ from schema.payroll_schema import (
     PayslipRead,
 )
 from services import payroll_engine, payroll_rules
+from db_models.crud.audit import create_audit_log
 
 
 router = APIRouter(tags=["Payroll"])
+
+
+def _run_meta(run: PayrollRun, **extra) -> dict:
+    """Common audit payload for payroll-run state changes."""
+    meta = {
+        "company_id": run.company_id,
+        "period_start": run.period_start,
+        "period_end": run.period_end,
+    }
+    meta.update(extra)
+    return meta
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +329,10 @@ def finalize_run(
         raise HTTPException(status_code=404, detail=f"PayrollRun {run_id} not found")
     _require_admin_for_company(current_user, run.company_id, db, permission="finalize_payroll")
     finalized = payroll_engine.finalize_run(db, run_id, actor_user_id=current_user.user_id)
+    create_audit_log(
+        db, current_user.user_id, "payroll.run.finalize", "payroll_run", run_id,
+        _run_meta(run), commit=False,
+    )
     db.commit()
     db.refresh(finalized)
     return finalized
@@ -332,7 +348,12 @@ def cancel_run(
     if run is None:
         raise HTTPException(status_code=404, detail=f"PayrollRun {run_id} not found")
     _require_admin_for_company(current_user, run.company_id, db, permission="manage_payroll")
+    prev_status = run.status
     cancelled = payroll_engine.cancel_run(db, run_id)
+    create_audit_log(
+        db, current_user.user_id, "payroll.run.cancel", "payroll_run", run_id,
+        _run_meta(run, prev_status=prev_status), commit=False,
+    )
     db.commit()
     db.refresh(cancelled)
     return cancelled
@@ -396,6 +417,10 @@ def redo_run(
                 "remediation": "Run scripts/seed_overtime_rules_{country}.py or supersede an existing rule via the admin UI.",
             },
         )
+    create_audit_log(
+        db, current_user.user_id, "payroll.run.redo", "payroll_run", run_id,
+        _run_meta(run, new_run_id=fresh.id), commit=False,
+    )
     db.commit()
     db.refresh(fresh)
     return fresh
@@ -432,6 +457,10 @@ def recompute_run(
                 "remediation": "Run scripts/seed_overtime_rules_{country}.py or supersede an existing rule via the admin UI.",
             },
         )
+    create_audit_log(
+        db, current_user.user_id, "payroll.run.recompute", "payroll_run", run_id,
+        _run_meta(run), commit=False,
+    )
     db.commit()
     db.refresh(recomputed)
     return recomputed
@@ -595,6 +624,19 @@ def create_payslip_adjustment(
         **{f: deltas[f] for f in money_fields},
     )
     db.add(adjustment)
+    db.flush()
+    create_audit_log(
+        db, current_user.user_id, "payroll.payslip.adjustment", "payslip", adjustment.id,
+        {
+            "run_id": run.id,
+            "original_payslip_id": original.id,
+            "private_user_id": original.private_user_id,
+            "net_delta": str(deltas["net_pay"]),
+            "currency": original.currency,
+            "reason": body.get("reason") or None,
+        },
+        commit=False,
+    )
     db.commit()
     db.refresh(adjustment)
 

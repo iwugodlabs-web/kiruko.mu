@@ -22,9 +22,26 @@ from schema.one_off_schema import (
     OneOffAllowanceRead,
 )
 from services import one_off_allowances_service
+from db_models.crud.audit import create_audit_log
 
 
 router = APIRouter(tags=["One-off Allowances"])
+
+
+def _audit_one_off(db: Session, actor_user_id: int, action: str, o: EmployeeOneOffAllowance, company_id: Optional[int]) -> None:
+    """Audit payload for one-off allowance mutations (affects an employee's pay)."""
+    create_audit_log(
+        db, actor_user_id, action, "one_off_allowance", o.id,
+        {
+            "company_id": company_id,
+            "private_user_id": o.private_user_id,
+            "component_id": o.component_id,
+            "amount": str(o.amount),
+            "payable_in_year": o.payable_in_year,
+            "payable_in_month": o.payable_in_month,
+        },
+        commit=False,
+    )
 
 
 def _require_admin_for_target(actor: User, target: PrivateUser, db: Session, permission: str = "manage_allowances") -> None:
@@ -115,6 +132,8 @@ def create_one_off(
         created_by_user_id=current_user.user_id,
     )
     db.add(o)
+    db.flush()
+    _audit_one_off(db, current_user.user_id, "one_off_allowance.create", o, target.company_id)
     db.commit()
     db.refresh(o)
     # joinedload via re-query so component_code/label populate
@@ -177,6 +196,8 @@ def grant_additional_remuneration(
         created_by_user_id=current_user.user_id,
     )
     db.add(o)
+    db.flush()
+    _audit_one_off(db, current_user.user_id, "one_off_allowance.additional_remuneration", o, target.company_id)
     db.commit()
     db.refresh(o)
     o = (
@@ -235,6 +256,8 @@ def grant_ad_hoc_deduction(
         created_by_user_id=current_user.user_id,
     )
     db.add(o)
+    db.flush()
+    _audit_one_off(db, current_user.user_id, "one_off_allowance.ad_hoc_deduction", o, target.company_id)
     db.commit()
     db.refresh(o)
     o = (
@@ -312,5 +335,6 @@ def delete_one_off(
         current_user, target.company_id, "manage_allowances", db,
         endpoint=f"/one-off-allowances/{one_off_id}", method="DELETE",
     )
+    _audit_one_off(db, current_user.user_id, "one_off_allowance.delete", o, target.company_id)
     db.delete(o)
     db.commit()

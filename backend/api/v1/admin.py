@@ -162,6 +162,15 @@ async def invite_platform_user(
 
         logger.info(f"Platform invite created: {invite_data.email} with role {invite_data.role}")
 
+        from db_models.crud.audit import create_audit_log
+        try:
+            create_audit_log(
+                db, current_user.user_id, 'platform.invite_created', 'platform_invite', invite.invite_id,
+                {'email': invite.email, 'role': invite.role_name},
+            )
+        except Exception:
+            logger.warning('audit log for platform invite failed (non-fatal)')
+
         return {
             "status": "success",
             "message": f"Invitation sent to {invite_data.email}",
@@ -498,7 +507,16 @@ async def assign_role_to_user_endpoint(
     """
     try:
         assign_role_to_user(user_id, role_name, current_user.user_id, db)
-        
+
+        from db_models.crud.audit import create_audit_log
+        try:
+            create_audit_log(
+                db, current_user.user_id, 'platform.role_assigned', 'user', user_id,
+                {'role': role_name},
+            )
+        except Exception:
+            logger.warning('audit log for platform role assign failed (non-fatal)')
+
         return {
             "status": "success",
             "message": f"Role '{role_name}' assigned to user {user_id}"
@@ -532,6 +550,16 @@ async def remove_role_from_user_endpoint(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User does not have this role"
             )
+
+        from db_models.crud.audit import create_audit_log
+        try:
+            create_audit_log(
+                db, current_user.user_id, 'platform.role_removed', 'user', user_id,
+                {'role': role_name},
+            )
+        except Exception:
+            logger.warning('audit log for platform role remove failed (non-fatal)')
+
         return None
     
     except HTTPException:

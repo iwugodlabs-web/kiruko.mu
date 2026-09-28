@@ -12,6 +12,7 @@ from datetime import datetime
 from core import config
 from core.model import CompanyRole, Company, PrivateUser, User, CompanyUserRole
 from core.tenant_context import bypass_tenant_guard
+from db_models.crud.audit import create_audit_log
 from api.v1.user import get_current_user
 
 router = APIRouter(prefix="/company", tags=["Company Roles"])
@@ -295,6 +296,12 @@ async def create_role(
         permissions=payload.permissions,
     )
     db.add(role)
+    db.flush()
+    create_audit_log(
+        db, current_user.user_id, "company.role.create", "company_role", role.role_id,
+        {"company_id": company_id, "name": role.name, "permissions": role.permissions or []},
+        commit=False,
+    )
     db.commit()
     db.refresh(role)
     return {"role_id": role.role_id, "name": role.name, "message": "Role created."}
@@ -322,6 +329,11 @@ async def update_role(
         role.name = payload.name
     if payload.description is not None:
         role.description = payload.description
+    create_audit_log(
+        db, current_user.user_id, "company.role.update", "company_role", role_id,
+        {"company_id": company_id, "name": role.name, "description": role.description},
+        commit=False,
+    )
     db.commit()
     db.refresh(role)
     return {"role_id": role.role_id, "name": role.name}
@@ -371,6 +383,11 @@ async def update_role_permissions(
         raise HTTPException(status_code=400, detail=f"Unknown permissions: {unknown}")
 
     role.permissions = list(set(payload.permissions))  # deduplicate
+    create_audit_log(
+        db, current_user.user_id, "company.role.permissions_changed", "company_role", role_id,
+        {"company_id": company_id, "permissions": role.permissions},
+        commit=False,
+    )
     db.commit()
     return {"role_id": role.role_id, "permission_count": len(role.permissions)}
 
@@ -392,7 +409,13 @@ async def delete_role(
         raise HTTPException(status_code=404, detail="Role not found.")
     if role.is_system:
         raise HTTPException(status_code=403, detail="System roles cannot be deleted.")
+    role_name = role.name
     db.delete(role)
+    create_audit_log(
+        db, current_user.user_id, "company.role.delete", "company_role", role_id,
+        {"company_id": company_id, "name": role_name},
+        commit=False,
+    )
     db.commit()
     return {"success": True}
 

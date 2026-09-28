@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import text as sql_text
 
 from api.v1.user import delete_my_account
-from core.model import Company, Notification, NotificationRecipient, PrivateUser, User, UserType
+from core.model import AuditLog, Company, Notification, NotificationRecipient, PrivateUser, User, UserType
 
 
 def _run(coro):
@@ -113,10 +113,21 @@ def test_delete_account_anonymizes_employee_and_scrubs_personal_data(db):
 
         p = db.query(PrivateUser).filter(PrivateUser.user_id == emp_id).first()
         assert p is not None                         # employment record retained...
-        assert p.first_name == "Deleted"             # ...but de-identified
-        assert p.last_name == "User"
-        assert p.phone is None
+        assert p.first_name == "Jane"                # ...name KEPT so it stays attributable
+        assert p.last_name == "Doe"
+        assert p.phone is None                        # ...other PII still scrubbed
         assert p.pass_port_number is None
+
+        # Deletion is attributable: audit log captures who (name + original email).
+        log = (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "account_deleted", AuditLog.target_id == str(emp_id))
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+        assert log is not None
+        assert log.meta.get("name") == "Jane Doe"
+        assert log.meta.get("email", "").startswith("deltest-emp-")
 
         # Personal notification deliveries are gone.
         assert db.query(NotificationRecipient).filter(NotificationRecipient.user_id == emp_id).count() == 0

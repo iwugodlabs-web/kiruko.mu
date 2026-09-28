@@ -365,6 +365,7 @@ async def invite_company_user(company_id: int, payload: InviteCompanyUser, backg
                 send_account_claim_email, payload.email, None, token, company.company_name)
         except Exception:
             pass
+        company_crud.log_audit(company_id, 'invite_created', current_user.user_id, f'user:{new_user.user_id}', db, metadata={'email': payload.email, 'role': 'employee', 'claim': True})
         return {'company_id': company_id, 'email': payload.email, 'role': 'employee', 'claim': True, 'user_id': new_user.user_id}
 
     invite = company_crud.invite_company_user(company_id, payload.email, payload.role, current_user.user_id, db)
@@ -375,7 +376,9 @@ async def invite_company_user(company_id: int, payload: InviteCompanyUser, backg
     except Exception:
         pass
 
-    return {'company_id': company_id, 'email': payload.email, 'role': payload.role, 'invite_id': invite.get('invite_id') if isinstance(invite, dict) else getattr(invite, 'invite_id', None)}
+    invite_id_val = invite.get('invite_id') if isinstance(invite, dict) else getattr(invite, 'invite_id', None)
+    company_crud.log_audit(company_id, 'invite_created', current_user.user_id, f'invite:{invite_id_val}', db, metadata={'email': payload.email, 'role': payload.role})
+    return {'company_id': company_id, 'email': payload.email, 'role': payload.role, 'invite_id': invite_id_val}
 
 
 # GET /invites is now declared above /{company_id} (see top of this file) to
@@ -386,9 +389,12 @@ async def revoke_invite_route(invite_id: int, db: Session = Depends(config.get_d
     """Revoke an invite (platform administrators only)."""
     if not getattr(current_user, 'is_superuser', False) and not ((getattr(current_user, 'roles', None) or []) and 'platform_admin' in current_user.roles):
         raise HTTPException(status_code=403, detail='Only platform administrators can revoke invites')
+    from core.model import CompanyInvite
+    inv = db.query(CompanyInvite).filter(CompanyInvite.invite_id == invite_id).first()
     ok = company_crud.revoke_invite(invite_id, db)
     if not ok:
         raise HTTPException(status_code=404, detail='Invite not found')
+    company_crud.log_audit(getattr(inv, 'company_id', None), 'invite_revoked', current_user.user_id, f'invite:{invite_id}', db, metadata={'email': getattr(inv, 'email', None), 'role': getattr(inv, 'role', None)})
     return None
 
 
@@ -440,8 +446,9 @@ async def transfer_company_ownership(company_id: int, payload: TransferOwnership
     if target_user.private_user.company_id != company_id:
         raise HTTPException(status_code=400, detail='New owner must belong to the company')
 
+    prev_owner_user_id = company.user_id
     updated_company = company_crud.transfer_company_ownership(company_id, payload.new_owner_user_id, current_user.user_id, db)
-    # TODO: add audit entry/logging here
+    company_crud.log_audit(company_id, 'company.ownership_transferred', current_user.user_id, f'company:{company_id}', db, metadata={'prev_owner_user_id': prev_owner_user_id, 'new_owner_user_id': payload.new_owner_user_id})
     return {'company_id': company_id, 'new_owner_user_id': payload.new_owner_user_id}
 
 
