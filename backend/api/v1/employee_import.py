@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from core import config
@@ -154,7 +154,7 @@ class SingleEmployeePayload(BaseModel):
     truth for what a payroll-ready employee needs and how the claim link is sent."""
     first_name: str
     last_name: str
-    email: str
+    email: EmailStr
     job_title: str
     start_date: str            # YYYY-MM-DD
     base_salary: float
