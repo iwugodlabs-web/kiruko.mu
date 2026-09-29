@@ -21,6 +21,8 @@ from typing import Optional
 
 from sqlalchemy import text
 
+from email_validator import validate_email, EmailNotValidError
+
 from core import config
 from core.model import EmailJob
 
@@ -36,6 +38,30 @@ _BACKOFF_S = [30, 120, 600, 1800, 3600]
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _validate_email(to_email: str) -> Optional[str]:
+    """Normalize and validate a recipient address. Returns the normalized
+    address, or None if it's undeliverable.
+
+    Brevo (and SendGrid) reject malformed recipients with a 400 — a permanent
+    failure that the retry loop keeps hammering for nothing. Validating here
+    (the single funnel every outbound email passes through) stops invalid
+    addresses from ever entering the queue, so a typo'd or empty email can't
+    generate a week of noisy Brevo 400s.
+
+    `test_environment=True` keeps the special-use `.test` TLD deliverable (used
+    by the test suite), while still rejecting reserved TLDs like `.invalid`
+    (the `deleted+<id>@deleted.invalid` anonymization sentinel) and malformed
+    addresses (missing @, spaces, no dot, leading hyphen, …).
+    """
+    candidate = (to_email or "").strip()
+    if not candidate:
+        return None
+    try:
+        return validate_email(candidate, check_deliverability=False, test_environment=True).normalized
+    except EmailNotValidError:
+        return None
 
 
 def _session():
@@ -63,9 +89,17 @@ def enqueue_email(
     except Exception:
         logger.error("email_queue: cannot enqueue (no DB) — to=%s subject=%r", to_email, subject)
         return None
+    normalized = _validate_email(to_email)
+    if normalized is None:
+        logger.warning(
+            "email_queue: refusing to enqueue invalid recipient to=%r kind=%s subject=%r",
+            to_email, kind, subject,
+        )
+        db.close()
+        return None
     try:
         job = EmailJob(
-            to_email=to_email, subject=subject, html=html, kind=kind,
+            to_email=normalized, subject=subject, html=html, kind=kind,
             status="pending", attempts=0, max_attempts=max_attempts,
             next_attempt_at=_now(), meta=meta,
         )
@@ -112,6 +146,21 @@ def process_due_jobs(db, *, batch_size: int = BATCH_SIZE, now: Optional[datetime
     processed = 0
     for job in rows:
         processed += 1
+        # A recipient that's already in the queue but invalid (e.g. legacy data,
+        # an anonymized `deleted+<id>@deleted.invalid` address, or a row inserted
+        # before enqueue-time validation existed) can never be delivered — Brevo
+        # will 400 forever. Dead-letter it now with a clear reason instead of
+        # burning all its retry attempts on a permanent failure.
+        if _validate_email(job.to_email) is None:
+            job.attempts += 1
+            job.status = "dead"
+            job.last_error = f"invalid recipient email: {job.to_email!r}"
+            logger.error(
+                "email_queue: job=%s DEAD — invalid recipient to=%r kind=%s",
+                job.id, job.to_email, job.kind,
+            )
+            db.add(job)
+            continue
         try:
             email_service.deliver(job.to_email, job.subject, job.html)
             job.status = "sent"

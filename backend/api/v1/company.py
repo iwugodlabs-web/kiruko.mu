@@ -146,7 +146,7 @@ async def get_company_stats(
 
 
 # ---------------------- Admin CRUD for companies ----------------------
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from fastapi import BackgroundTasks
 from services.email_service import send_invite_email
 
@@ -274,7 +274,7 @@ async def create_company(payload: CompanyCreate, db: Session = Depends(config.ge
 
 
 class InviteCompanyUser(BaseModel):
-    email: str = Field(..., min_length=3)
+    email: EmailStr
     role: str = Field('employee')  # allowed: owner/admin/manager/employee
 
 class TransferOwnershipPayload(BaseModel):
