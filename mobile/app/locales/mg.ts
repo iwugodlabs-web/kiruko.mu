@@ -441,6 +441,7 @@ const translationMG: ITranslationSchema = {
 		couldNotLoad: "Tsy afaka nampiditra ny taratasy karama",
 		sharingNotAvailable: "Tsy mety ny fizarana PDF amin'ity fitaovana ity.",
 		couldNotOpenPdf: "Tsy nety nosokafana ny PDF.",
+		notFinalized: "Mbola tsy vita ity karama ity — jereo indray rehefa vita ny karama ataon'ny mpampiasa anao.",
 		brnLabel: "BRN",
 		payPeriodLabel: "Vanim-potoanan'ny karama",
 		homeSiteLabel: "Branch",

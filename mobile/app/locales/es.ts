@@ -440,6 +440,7 @@ const translationES: ITranslationSchema = {
 		couldNotLoad: "Could not load payslips",
 		sharingNotAvailable: "PDF sharing is not available on this device.",
 		couldNotOpenPdf: "Could not open PDF.",
+		notFinalized: "Esta nómina aún no está finalizada — vuelve cuando tu empleador finalice la nómina.",
 		brnLabel: "BRN",
 		payPeriodLabel: "Período de pago",
 		homeSiteLabel: "Branch",

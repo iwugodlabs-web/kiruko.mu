@@ -445,6 +445,7 @@ const translationEN: ITranslationSchema = {
 		couldNotLoad: "Could not load payslips",
 		sharingNotAvailable: "PDF sharing is not available on this device.",
 		couldNotOpenPdf: "Could not open PDF.",
+		notFinalized: "This payslip isn't finalized yet — check back once your employer finalizes payroll.",
 		brnLabel: "BRN",
 		payPeriodLabel: "Pay period",
 		homeSiteLabel: "Branch",

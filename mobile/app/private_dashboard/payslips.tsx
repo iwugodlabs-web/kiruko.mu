@@ -17,8 +17,6 @@ import {
   Divider,
 } from '@gluestack-ui/themed';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
 import Animated, { FadeIn, FadeInUp } from '@/app/utils/animated';
 import { useRouter } from 'expo-router';
 import { Alert, RefreshControl, StyleSheet } from 'react-native';
@@ -26,11 +24,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { useTranslation } from 'react-i18next';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import useAuth from '../hooks/useAuth';
 import { activeLocale } from '@/app/utils/intl';
 import { format, parseISO, isValid } from 'date-fns';
 import { payroll } from '@/services/payroll-api';
+import { downloadAndSharePdf } from '@/services/payslip-download';
 import type { LeaveBalanceResponse } from '@/services/payroll-api';
 import type { Payslip, PayslipComponent } from '../../../shared/types/payroll';
 
@@ -175,34 +173,17 @@ export default function PayslipsScreen() {
 
   const handleOpenPdf = async (slip: Payslip) => {
     if (!slip.pdf_url) return;
-    try {
-      // Download via the authenticated API stream endpoint into the app
-      // cache, then hand the local file URI to expo-sharing. Direct
-      // Sharing.shareAsync(slip.pdf_url) doesn't work because pdf_url is
-      // a server-relative path the device can't fetch on its own and,
-      // for S3, requires the auth header.
-      const url = payroll.payslipPdfUrl(slip.id);
-      const token = await AsyncStorage.getItem('authToken');
-      const localUri = `${FileSystem.cacheDirectory}payslip_${slip.id}.pdf`;
-      const result = await FileSystem.downloadAsync(url, localUri, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (result.status !== 200) {
-        Alert.alert(t('common.errorTitle'), t('payslip.couldNotOpenPdf'));
-        return;
-      }
-      const ok = await Sharing.isAvailableAsync();
-      if (!ok) {
-        Alert.alert(t('common.errorTitle'), t('payslip.sharingNotAvailable'));
-        return;
-      }
-      await Sharing.shareAsync(result.uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: t('payslip.title'),
-        UTI: 'com.adobe.pdf',
-      });
-    } catch (err) {
-      console.warn('payslip: download/share failed', err);
+    const res = await downloadAndSharePdf({
+      url: payroll.payslipPdfUrl(slip.id),
+      filenamePrefix: `payslip_${slip.id}`,
+      dialogTitle: t('payslip.title'),
+    });
+    if (res.status === 'shared') return;
+    if (res.code === 'PAYSLIP_NOT_FINALIZED') {
+      Alert.alert(t('payslip.title'), t('payslip.notFinalized'));
+    } else if (res.code === 'SHARING_UNAVAILABLE') {
+      Alert.alert(t('common.errorTitle'), t('payslip.sharingNotAvailable'));
+    } else {
       Alert.alert(t('common.errorTitle'), t('payslip.couldNotOpenPdf'));
     }
   };
@@ -237,65 +218,39 @@ export default function PayslipsScreen() {
   // 409 means the official payslip for this month is now ready; we route
   // there instead. 503 means the holdback flag is off in this env.
   const handleDownloadEstimate = async () => {
-    try {
-      const url = payroll.estimatedPayslipPdfUrl();
-      const token = await AsyncStorage.getItem('authToken');
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const localUri = `${FileSystem.cacheDirectory}estimated_payslip_${ts}.pdf`;
-      const result = await FileSystem.downloadAsync(url, localUri, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (result.status === 409) {
-        // 409 has three flavors: NO_CLOCKINS_FOR_PERIOD and
-        // NO_PAY_BASIS_CONFIGURED (both block the download with their own
-        // message) and OFFICIAL_PAYSLIP_EXISTS (route to the real payslip).
-        // Discriminate by the error code the server wrote to disk.
-        let code: string | undefined;
-        try {
-          const body = await FileSystem.readAsStringAsync(result.uri);
-          code = JSON.parse(body)?.detail?.code;
-        } catch {
-          // body not JSON — fall through to generic alert.
-        }
-        if (code === 'NO_CLOCKINS_FOR_PERIOD') {
-          Alert.alert(t('payslip.title'), t('payslip.noClockinsForEstimate'));
-          return;
-        }
-        if (code === 'NO_PAY_BASIS_CONFIGURED') {
-          Alert.alert(t('payslip.title'), t('payslip.noPayBasis'));
-          return;
-        }
-        Alert.alert(
-          t('payslip.title'),
-          t('payslip.officialExists'),
-        );
+    const res = await downloadAndSharePdf({
+      url: payroll.estimatedPayslipPdfUrl(),
+      filenamePrefix: 'estimated_payslip',
+      dialogTitle: t('payslip.estimateDialogTitle'),
+    });
+    if (res.status === 'shared') return;
+    // 409 flavors: NO_CLOCKINS_FOR_PERIOD and NO_PAY_BASIS_CONFIGURED
+    // block the download with their own message; OFFICIAL_PAYSLIP_EXISTS
+    // routes to the real payslip. 503 = holdback flag off in this env.
+    switch (res.code) {
+      case 'NO_CLOCKINS_FOR_PERIOD':
+        Alert.alert(t('payslip.title'), t('payslip.noClockinsForEstimate'));
+        break;
+      case 'NO_PAY_BASIS_CONFIGURED':
+        Alert.alert(t('payslip.title'), t('payslip.noPayBasis'));
+        break;
+      case 'OFFICIAL_PAYSLIP_EXISTS':
+        Alert.alert(t('payslip.title'), t('payslip.officialExists'));
         load();
-        return;
-      }
-      if (result.status === 503) {
-        Alert.alert(
-          t('payslip.title'),
-          t('payslip.estimatedNotAvailable'),
-        );
-        return;
-      }
-      if (result.status !== 200) {
-        Alert.alert(t('common.errorTitle'), t('payslip.couldNotOpenPdf'));
-        return;
-      }
-      const ok = await Sharing.isAvailableAsync();
-      if (!ok) {
+        break;
+      case 'SHARING_UNAVAILABLE':
         Alert.alert(t('common.errorTitle'), t('payslip.sharingNotAvailable'));
-        return;
-      }
-      await Sharing.shareAsync(result.uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: t('payslip.estimateDialogTitle'),
-        UTI: 'com.adobe.pdf',
-      });
-    } catch (err) {
-      console.warn('estimated payslip: download/share failed', err);
-      Alert.alert(t('common.errorTitle'), t('payslip.couldNotOpenPdf'));
+        break;
+      case 'HTTP_ERROR':
+        if (res.httpStatus === 503) {
+          Alert.alert(t('payslip.title'), t('payslip.estimatedNotAvailable'));
+        } else {
+          Alert.alert(t('common.errorTitle'), t('payslip.couldNotOpenPdf'));
+        }
+        break;
+      default:
+        Alert.alert(t('common.errorTitle'), t('payslip.couldNotOpenPdf'));
+        break;
     }
   };
 
