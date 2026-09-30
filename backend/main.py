@@ -269,6 +269,16 @@ def get_application():
                                     KioskService.purge_old_idempotency_rows(db)
                                 except Exception as ke:
                                     print(f"⚠️ Kiosk idempotency sweep failed: {ke}")
+                                # General Idempotency-Key cache retention — same
+                                # no-pg-cron arrangement as the kiosk sweep
+                                # above (see core/idempotency.py).
+                                try:
+                                    from core.idempotency import purge_old_entries
+                                    purged_idem = purge_old_entries(db)
+                                    if purged_idem > 0:
+                                        print(f"✅ Purged {purged_idem} old idempotency cache row(s)")
+                                except Exception as ie:
+                                    print(f"⚠️ Idempotency sweep failed: {ie}")
                                 # Clock-in / clock-out reminder pushes — also no
                                 # external cron, so it rides this same advisory-
                                 # locked tick. The job's per-day dedup makes the

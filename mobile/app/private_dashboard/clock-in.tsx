@@ -404,6 +404,15 @@ export default function ClockInPage() {
   // Offline queue — count of clock actions waiting to reach the server. Fed by
   // the sync worker's drain events; drives the "waiting to sync" banner.
   const [queuedPunchCount, setQueuedPunchCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const onRetrySync = useCallback(() => {
+    setSyncing(true);
+    punchSyncWorker
+      .runOnce()
+      .then((r) => setQueuedPunchCount(r.remaining))
+      .catch(() => undefined)
+      .finally(() => setSyncing(false));
+  }, []);
 
   // Notifications and Overtime State
   const [activeOvertimeNotification, setActiveOvertimeNotification] = useState<Notification | null>(null);
@@ -1202,6 +1211,10 @@ export default function ClockInPage() {
             if (isMounted) {
               if (jobResponse && !('error' in jobResponse) && jobResponse.job_id) {
                 setJobId(jobResponse.job_id);
+                // Cache for offline clock-in — when the network is off,
+                // getJobById fails and jobId state stays null, which would
+                // otherwise make every offline punch send job_id=null.
+                AsyncStorage.setItem('cachedJobId', String(jobResponse.job_id)).catch(() => undefined);
                 const threshold = (jobResponse as any).minimum_break_minutes;
                 if (threshold && threshold > 0) setMinBreakThresholdMinutes(threshold);
               } else if (jobResponse && 'error' in jobResponse && jobResponse.status !== 404) {
@@ -1379,10 +1392,25 @@ export default function ClockInPage() {
           );
           return;
         }
-        // Clock In
+        // Clock In — resolve job_id with offline fallback. When the
+        // network is off, getJobById never populated state, so fall back
+        // to the last cached job id instead of sending null (backend 4xx,
+        // which is NOT queued and would block offline clock-in entirely).
+        let effectiveJobId = jobId;
+        if (!effectiveJobId) {
+          const cached = await AsyncStorage.getItem('cachedJobId');
+          if (cached && !isNaN(Number(cached))) effectiveJobId = Number(cached);
+        }
+        if (!effectiveJobId || !numericPrivateUserId) {
+          throw new Error(
+            !effectiveJobId
+              ? 'No job found. Connect once so we can load your job, then you can clock in offline.'
+              : 'Missing user identity. Please reconnect and retry.',
+          );
+        }
         const timeLogData = {
-          job_id: jobId!,
-          private_user_id: numericPrivateUserId!,
+          job_id: effectiveJobId,
+          private_user_id: numericPrivateUserId,
           day_of_week: dayOfWeek,
           start_time: nowISO,
           location: locationData,
@@ -1894,6 +1922,11 @@ export default function ClockInPage() {
                 <Text style={{ flex: 1, fontSize: 13, color: Palette.gray700 }}>
                   {t('clockIn.syncPendingBanner', { count: queuedPunchCount })}
                 </Text>
+                <Pressable onPress={onRetrySync} disabled={syncing}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: Palette.gray700, textDecorationLine: 'underline' }}>
+                    {syncing ? '…' : t('common.retry', { defaultValue: 'Retry' })}
+                  </Text>
+                </Pressable>
               </View>
             )}
             {/* Page Header Banner */}

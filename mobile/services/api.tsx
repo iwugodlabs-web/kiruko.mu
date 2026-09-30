@@ -1438,7 +1438,11 @@ export const postClockIn = async (data: any, idempotencyKey?: string): Promise<T
         console.log('Time log created successfully');
         return response.data;
     } catch (error) {
-        return { error: handleApiError(error, 'creating time log'), status: (error as any).response?.status || 500 };
+        // No `response` = pure network failure (offline/DNS/timeout) → status 0
+        // so offline callers can distinguish "still down, queue it" from a real
+        // 5xx. (Previously defaulted to 500, which conflated the two.)
+        const status = (error as any).response?.status ?? 0;
+        return { error: handleApiError(error, 'creating time log'), status };
     }
 };
 
@@ -1713,7 +1717,8 @@ export const postClockOut = async (
         });
         return response.data;
     } catch (error: any) {
-        return { error: handleApiError(error, 'clocking out'), status: error.response?.status };
+        // Same 0-on-no-response contract as postClockIn above.
+        return { error: handleApiError(error, 'clocking out'), status: error.response?.status ?? 0 };
     }
 };
 

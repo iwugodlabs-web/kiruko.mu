@@ -27,6 +27,7 @@ from core.idempotency import (
     IdempotencyMiddleware,
     compute_request_hash,
     lookup_cached,
+    purge_old_entries,
     require_idempotency_key,
     store_cached,
 )
@@ -116,6 +117,50 @@ class TestStoreLookup:
         finally:
             db.execute(sql_text("DELETE FROM idempotency_keys WHERE key=:k"), {"k": key})
             db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Retention sweep
+# ---------------------------------------------------------------------------
+
+
+class TestPurgeOldEntries:
+    def test_purges_only_rows_older_than_retention(self, db: Session):
+        suffix = datetime.utcnow().strftime("%H%M%S%f")
+        old_key = f"purge-old-{suffix}"
+        fresh_key = f"purge-fresh-{suffix}"
+        try:
+            for key in (old_key, fresh_key):
+                store_cached(
+                    db,
+                    key=key, method="POST", path="/sweep",
+                    user_id=None, request_hash="h",
+                    response_status=200, response_body={"ok": True},
+                )
+            # Backdate one row past the retention window.
+            db.execute(
+                sql_text(
+                    "UPDATE idempotency_keys SET created_at = now() - make_interval(days => 8) "
+                    "WHERE key = :k"
+                ),
+                {"k": old_key},
+            )
+            db.commit()
+
+            deleted = purge_old_entries(db)
+
+            assert deleted >= 1
+            assert lookup_cached(db, old_key, "POST", "/sweep") is None
+            assert lookup_cached(db, fresh_key, "POST", "/sweep") is not None
+        finally:
+            db.execute(
+                sql_text("DELETE FROM idempotency_keys WHERE key IN (:o, :f)"),
+                {"o": old_key, "f": fresh_key},
+            )
+            db.commit()
+
+    def test_noop_when_nothing_old(self, db: Session):
+        assert purge_old_entries(db, days=36500) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,43 @@ function db() {
   return _db;
 }
 
+/**
+ * Self-heal for devices that ran the app while drizzle/migrations.js was
+ * missing the 0002 entry (journal/migrations conflict). The migrator tracks
+ * applied migrations, so those devices never created `punch_queue` — every
+ * queue op would fail and offline punches would be silently lost. This
+ * CREATE TABLE IF NOT EXISTS is a no-op when the migrator already did its
+ * job, and rescues the table when it didn't. Runs best-effort before writes.
+ */
+let _ensured = false;
+async function ensureTable(): Promise<void> {
+  if (_ensured) return;
+  _ensured = true;
+  try {
+    const sqlite = openDatabaseSync("mywitnesstree.db");
+    await sqlite.execAsync(
+      `CREATE TABLE IF NOT EXISTS \`punch_queue\` (` +
+        `\`id\` text PRIMARY KEY NOT NULL, ` +
+        `\`action\` text NOT NULL, ` +
+        `\`timelog_id\` integer, ` +
+        `\`depends_on_key\` text, ` +
+        `\`payload_json\` text NOT NULL, ` +
+        `\`idempotency_key\` text NOT NULL, ` +
+        `\`attempts\` integer DEFAULT 0 NOT NULL, ` +
+        `\`last_error\` text, ` +
+        `\`created_at\` integer NOT NULL, ` +
+        `\`dead_lettered\` integer DEFAULT 0 NOT NULL);`,
+    );
+    await sqlite
+      .execAsync(
+        `CREATE INDEX IF NOT EXISTS \`punch_queue_created_at_idx\` ON \`punch_queue\` (\`created_at\`);`,
+      )
+      .catch(() => undefined);
+  } catch {
+    /* best-effort — callers already handle per-op failures */
+  }
+}
+
 function rowToEntry(row: typeof punchQueue.$inferSelect): QueuedPunch {
   return {
     id: row.id,
@@ -78,6 +115,7 @@ export const punchQueueStore = {
   }): Promise<string | null> => {
     const rowId = args.idempotencyKey;
     try {
+      await ensureTable();
       await db()
         .insert(punchQueue)
         .values({
@@ -140,6 +178,7 @@ export const punchQueueStore = {
   /** Pending rows, oldest first, excluding dead-lettered. */
   listPending: async (): Promise<QueuedPunch[]> => {
     try {
+      await ensureTable();
       const rows = await db()
         .select()
         .from(punchQueue)
