@@ -445,6 +445,7 @@ const translationSW: ITranslationSchema = {
 		couldNotLoad: "Haikuweza kupakia hati za malipo",
 		sharingNotAvailable: "Kushiriki PDF hakupatikani kwenye kifaa hiki.",
 		couldNotOpenPdf: "Haikuweza kufungua PDF.",
+		notFinalized: "Payslip hii bado haijakamilishwa — angalia tena mwajiri wako atakapokamilisha malipo.",
 		brnLabel: "BRN",
 		payPeriodLabel: "Kipindi cha malipo",
 		homeSiteLabel: "Tawi",

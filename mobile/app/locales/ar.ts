@@ -440,6 +440,7 @@ const translationAR: ITranslationSchema = {
 		couldNotLoad: "Could not load payslips",
 		sharingNotAvailable: "PDF sharing is not available on this device.",
 		couldNotOpenPdf: "Could not open PDF.",
+		notFinalized: "كشف الراتب هذا غير نهائي بعد — تحقق لاحقًا بعد اعتماد صاحب العمل لكشوف الرواتب.",
 		brnLabel: "BRN",
 		payPeriodLabel: "فترة الدفع",
 		homeSiteLabel: "Branch",

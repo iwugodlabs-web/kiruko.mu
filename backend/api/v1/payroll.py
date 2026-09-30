@@ -1457,8 +1457,31 @@ def stream_payslip_pdf(
                 detail="PDF could not be generated. Check backend logs for the WeasyPrint error.",
             )
 
-    # S3 / external URL → 302 to the CDN; client downloads directly.
+    # Object-store URL → stream the bytes same-origin through this
+    # authenticated endpoint instead of 302-redirecting to the CDN.
+    # Why: mobile downloads via expo-file-system with an Authorization
+    # header, and native downloaders forward that header onto the
+    # redirect target — S3/Spaces rejects the foreign Bearer token
+    # (403) or the object is private, so the "PDF" saved on the device
+    # is an XML error page and sharing/opening fails. Same-origin
+    # bytes need no second hop and no CORS/Auth juggling. This mirrors
+    # the vault file proxy (GET /user/vault/doc/{id}/file).
+    # Falls back to the 302 only when the proxy can't fetch the object.
     if ps.pdf_url.startswith("http://") or ps.pdf_url.startswith("https://"):
+        from services.storage_service import get_storage_service
+
+        data = get_storage_service().download_bytes(ps.pdf_url)
+        if data is not None:
+            from fastapi.responses import Response
+
+            return Response(
+                content=data,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'attachment; filename="payslip_{payslip_id}.pdf"',
+                    "Cache-Control": "private, max-age=86400",
+                },
+            )
         return RedirectResponse(url=ps.pdf_url, status_code=302)
 
     # Local storage — pdf_url is a path like "/uploads/payslips/.../X.pdf".

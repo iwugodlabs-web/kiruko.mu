@@ -505,6 +505,7 @@ interface ITranslationSchema {
 		couldNotLoad: string;
 		sharingNotAvailable: string;
 		couldNotOpenPdf: string;
+		notFinalized: string;
 		brnLabel: string;
 		payPeriodLabel: string;
 		homeSiteLabel: string;

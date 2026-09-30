@@ -435,6 +435,7 @@ const translationFR: ITranslationSchema = {
 		couldNotLoad: "Impossible de charger les bulletins",
 		sharingNotAvailable: "Le partage PDF n'est pas disponible sur cet appareil.",
 		couldNotOpenPdf: "Impossible d'ouvrir le PDF.",
+		notFinalized: "Ce bulletin n'est pas encore finalisé — revenez une fois que votre employeur aura finalisé la paie.",
 		brnLabel: "BRN",
 		payPeriodLabel: "Période de paie",
 		homeSiteLabel: "Branch",

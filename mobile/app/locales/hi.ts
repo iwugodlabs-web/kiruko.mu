@@ -434,6 +434,7 @@ const translationHI: ITranslationSchema = {
 		couldNotLoad: "वेतन पर्चियाँ लोड नहीं हो सकीं",
 		sharingNotAvailable: "इस डिवाइस पर PDF साझाकरण उपलब्ध नहीं है।",
 		couldNotOpenPdf: "PDF नहीं खुल सका।",
+		notFinalized: "यह वेतन पर्ची अभी अंतिम नहीं हुई है — नियोक्ता द्वारा पेरोल अंतिम किए जाने के बाद पुनः देखें।",
 		brnLabel: "BRN",
 		payPeriodLabel: "वेतन अवधि",
 		homeSiteLabel: "Branch",
