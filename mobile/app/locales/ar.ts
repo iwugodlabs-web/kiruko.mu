@@ -822,6 +822,7 @@ const translationAR: ITranslationSchema = {
 		unlockFingerprint: "الفتح ببصمة الإصبع",
 		unlockPasscode: "الفتح برمز المرور",
 		signOutInstead: "تسجيل الخروج بدلاً من ذلك",
+		attemptsLeft: "تبقى {{count}} محاولات فاشلة قبل تسجيل الخروج التلقائي.",
 	},
 
 	profileErrorBoundary: {

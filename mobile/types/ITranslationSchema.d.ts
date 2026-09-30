@@ -834,6 +834,7 @@ interface ITranslationSchema {
 		unlockFingerprint: string;
 		unlockPasscode: string;
 		signOutInstead: string;
+		attemptsLeft: string;
 	};
 
 	profileErrorBoundary: {

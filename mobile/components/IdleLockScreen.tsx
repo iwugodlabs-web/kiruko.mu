@@ -18,11 +18,16 @@ interface IdleLockScreenProps {
   userName?: string;
 }
 
+// Brute-force escalation: this many failed biometric/passcode attempts ends
+// the session instead of letting retries continue indefinitely.
+const MAX_FAILED_ATTEMPTS = 5;
+
 export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLockScreenProps) {
   const { t } = useTranslation();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasBiometrics, setHasBiometrics] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   useEffect(() => {
     LocalAuthentication.hasHardwareAsync().then(async (compatible) => {
@@ -64,15 +69,33 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
           'PasscodeNotSet',
         ];
         if (!silentErrors.includes(result.error as string)) {
-          setError(t('idleLock.authFailed'));
+          // Escalation: repeated biometric failures end the session instead
+          // of letting an attacker retry indefinitely against the lock.
+          const next = failedAttempts + 1;
+          setFailedAttempts(next);
+          if (next >= MAX_FAILED_ATTEMPTS) {
+            onLogout();
+            return;
+          }
+          setError(
+            `${t('idleLock.authFailed')} ${t('idleLock.attemptsLeft', { count: MAX_FAILED_ATTEMPTS - next })}`,
+          );
         }
       }
     } catch {
-      setError(t('idleLock.authFailed'));
+      const next = failedAttempts + 1;
+      setFailedAttempts(next);
+      if (next >= MAX_FAILED_ATTEMPTS) {
+        onLogout();
+        return;
+      }
+      setError(
+        `${t('idleLock.authFailed')} ${t('idleLock.attemptsLeft', { count: MAX_FAILED_ATTEMPTS - next })}`,
+      );
     } finally {
       setIsAuthenticating(false);
     }
-  }, [onUnlock, onLogout, t]);
+  }, [onUnlock, onLogout, t, failedAttempts]);
 
   useEffect(() => {
     triggerAuth();
