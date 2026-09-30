@@ -833,6 +833,7 @@ const translationMG: ITranslationSchema = {
 		unlockFingerprint: "Sokafy amin'ny dian-tanana",
 		unlockPasscode: "Sokafy amin'ny kaody",
 		signOutInstead: "Mivoaha kosa",
+		attemptsLeft: "{{count}} andrana tsy nahomby sisa alohan'ny fivoahana ho azy.",
 	},
 
 	profileErrorBoundary: {

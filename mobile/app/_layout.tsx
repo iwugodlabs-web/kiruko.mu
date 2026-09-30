@@ -9,8 +9,8 @@ import { drizzle } from "drizzle-orm/expo-sqlite";
 import { useMigrations } from "drizzle-orm/expo-sqlite/migrator";
 import { Stack, usePathname } from "expo-router";
 import { SQLiteProvider, openDatabaseSync } from "expo-sqlite";
-import { Suspense, useState, useCallback, useEffect } from "react";
-import { View } from "react-native";
+import { Suspense, useState, useRef, useCallback, useEffect } from "react";
+import { View, TextInput } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BrandSplash from "@/components/BrandSplash";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
@@ -32,6 +32,7 @@ import { CurrencyProvider } from "./context/CurrencyContext";
 import usePushNotifications from "@/hooks/usePushNotifications";
 import useRescheduleClockReminders from "@/hooks/useRescheduleClockReminders";
 import useIdleTimeout from "@/hooks/useIdleTimeout";
+import { emitIdleActivity, subscribeIdleActivity } from "@/hooks/idleActivityBus";
 import IdleLockScreen from "@/components/IdleLockScreen";
 import useAuth from "./hooks/useAuth";
 
@@ -76,11 +77,38 @@ function ClockReminderResync() {
   return null;
 }
 
+// Best practice: 2 min of inactivity LOCKS (fast biometric resume, works
+// offline); the session only ENDS on escalation — no device passcode, 5
+// failed unlocks, or 30 min locked. Full sign-out wipes authToken +
+// refreshToken via AuthProvider.logout so silent refresh can't re-mint.
+// (Backend JWTs are stateless with no server revocation, so this ends the
+// session on this device; other devices keep theirs until tokens expire.)
+const LOCKED_ESCALATION_MS = 30 * 60 * 1000; // 30 min locked → sign out
+
+// Typing produces no touch events, so a long uninterrupted typing stretch
+// would lock mid-form. There is no global keystroke API in RN and inputs are
+// used raw in 100+ screens, so focus is polled as a typing proxy instead.
+// Bounded: focus only extends the session within FOCUS_GRACE_MS of the last
+// real touch — otherwise an abandoned phone with the keyboard open would
+// never lock. Worst case the lock is non-destructive (overlay only, form
+// state preserved) and costs a 1-second biometric resume.
+const FOCUS_POLL_MS = 15 * 1000;
+const FOCUS_GRACE_MS = 5 * 60 * 1000;
+
 // Manages idle timeout and lock screen — sits inside AuthProvider so it has auth access
 function IdleManager({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [isLocked, setIsLocked] = useState(false);
   const isAuthenticated = !!user?.isAuthenticated;
+
+  // Hold logout in a ref so handleIdle keeps a stable identity. logout isn't
+  // memoized, so depending on it directly would tear down and restart the
+  // idle timer's effect on every render — the countdown could keep resetting
+  // and never fire. Assigned in an effect to stay concurrent-mode safe.
+  const logoutRef = useRef(logout);
+  useEffect(() => {
+    logoutRef.current = logout;
+  }, [logout]);
 
   const handleIdle = useCallback(() => {
     if (isAuthenticated) setIsLocked(true);
@@ -95,25 +123,64 @@ function IdleManager({ children }: { children: React.ReactNode }) {
 
   const handleLogout = useCallback(async () => {
     setIsLocked(false);
-    await logout();
-  }, [logout]);
+    await logoutRef.current();
+  }, []);
 
-  // Reset lock when user logs out
-  if (!isAuthenticated && isLocked) setIsLocked(false);
+  // Activity subscription: the touch-catcher sits at the very root (above
+  // GluestackUIProvider's overlay portal) and publishes every touch here.
+  // Guarded by refs so the subscription stays stable across renders.
+  const activityGuardRef = useRef({ isAuthenticated, isLocked });
+  useEffect(() => {
+    activityGuardRef.current = { isAuthenticated, isLocked };
+  }, [isAuthenticated, isLocked]);
+
+  // Last real touch — stamps activity for the focus-grace poll below.
+  const lastTouchRef = useRef(0);
+
+  useEffect(
+    () =>
+      subscribeIdleActivity(() => {
+        lastTouchRef.current = Date.now();
+        const guard = activityGuardRef.current;
+        if (guard.isAuthenticated && !guard.isLocked) resetTimer();
+      }),
+    [resetTimer],
+  );
+
+  // Typing proxy poll (see FOCUS_GRACE_MS note above).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const id = setInterval(() => {
+      if (activityGuardRef.current.isLocked) return;
+      const focused = TextInput.State.currentlyFocusedInput?.();
+      if (focused != null && Date.now() - lastTouchRef.current < FOCUS_GRACE_MS) {
+        resetTimer();
+      }
+    }, FOCUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [isAuthenticated, resetTimer]);
+
+  // Clear a stale lock when the session ends elsewhere (e.g. token 401).
+  // Effect, not render-time setState — setting state during render re-renders
+  // the parent and can loop with the navigator guard.
+  useEffect(() => {
+    if (!isAuthenticated && isLocked) setIsLocked(false);
+  }, [isAuthenticated, isLocked]);
+
+  // Escalation: a lock left unresolved for 30 min ends the session. Taps on
+  // the lock screen deliberately do NOT reset this — otherwise the timer
+  // could be kept alive forever without ever authenticating.
+  useEffect(() => {
+    if (!isLocked) return;
+    const id = setTimeout(() => {
+      setIsLocked(false);
+      void logoutRef.current();
+    }, LOCKED_ESCALATION_MS);
+    return () => clearTimeout(id);
+  }, [isLocked]);
 
   return (
-    <View
-      style={{ flex: 1 }}
-      // Use the CAPTURE phase: `onStartShouldSetResponder` is skipped whenever
-      // a child Pressable/Touchable claims the responder, so tapping buttons
-      // never reset the timer and the app locked after 2 min of active use.
-      // Capture runs top-down on every touch and returning false still lets
-      // children handle it normally.
-      onStartShouldSetResponderCapture={() => {
-        if (isAuthenticated && !isLocked) resetTimer();
-        return false;
-      }}
-    >
+    <>
       {children}
       {isLocked && (
         <IdleLockScreen
@@ -122,7 +189,7 @@ function IdleManager({ children }: { children: React.ReactNode }) {
           userName={user?.private_user?.first_name}
         />
       )}
-    </View>
+    </>
   );
 }
 
@@ -142,6 +209,21 @@ export default function RootLayout() {
   return (
     <AppErrorBoundary>
       <Suspense fallback={<BrandSplash />}>
+        <View
+          style={{ flex: 1 }}
+          // Root touch-catcher for the idle timer. Placed here — above
+          // GluestackUIProvider — deliberately: GlueStack Modals/toasts render
+          // in an overlay portal at the provider level, so a catcher next to
+          // the Stack never sees those touches and the app would lock mid-use
+          // inside any modal. Capture phase runs top-down on every touch start
+          // even when a child claims the responder; returning false lets
+          // children handle the touch normally. Publishes to IdleManager via
+          // the activity bus (it owns the timer + auth state).
+          onStartShouldSetResponderCapture={() => {
+            emitIdleActivity();
+            return false;
+          }}
+        >
         <PostHogProvider
         apiKey={POSTHOG_API_KEY}
         autocapture={{
@@ -205,6 +287,7 @@ export default function RootLayout() {
         </LanguageProvider>
       </SQLiteProvider>
       </PostHogProvider>
+        </View>
       </Suspense>
     </AppErrorBoundary>
   );

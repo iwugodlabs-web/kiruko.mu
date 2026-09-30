@@ -826,6 +826,7 @@ const translationFR: ITranslationSchema = {
 		unlockFingerprint: "Déverrouiller avec l'empreinte",
 		unlockPasscode: "Déverrouiller avec le code",
 		signOutInstead: "Se déconnecter plutôt",
+		attemptsLeft: "{{count}} tentatives échouées restantes avant déconnexion automatique.",
 	},
 
 	profileErrorBoundary: {

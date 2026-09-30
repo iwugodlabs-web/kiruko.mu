@@ -824,6 +824,7 @@ const translationHI: ITranslationSchema = {
 		unlockFingerprint: "फिंगरप्रिंट से अनलॉक करें",
 		unlockPasscode: "पासकोड से अनलॉक करें",
 		signOutInstead: "इसके बजाय साइन आउट करें",
+		attemptsLeft: "स्वचालित साइन-आउट से पहले {{count}} और असफल प्रयास शेष।",
 	},
 
 	profileErrorBoundary: {
