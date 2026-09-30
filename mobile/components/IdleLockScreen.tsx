@@ -56,24 +56,16 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
 
   const triggerAuth = useCallback(async () => {
     // Never stack prompts — a second call while one is open would layer
-    // system dialogs and produce the same flashing symptom.
+    // system dialogs and produce the same flashing symptom. Flag is set
+    // synchronously (before any await) so concurrent calls — rapid taps,
+    // StrictMode double-effects — can't both slip through.
     if (authInFlightRef.current) return;
-    // No device passcode/biometric to authenticate against. Previously we just
-    // called onUnlock() here, which made the idle lock a silent no-op on any
-    // unsecured device — the timeout would fire and instantly dismiss. For a
-    // payroll app that's a real gap, so end the session instead: the user must
-    // log back in. Devices WITH biometrics keep the fast unlock path below.
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!enrolled) {
-      callbacksRef.current.onLogout();
-      return;
-    }
-
     authInFlightRef.current = true;
     setIsAuthenticating(true);
     setError(null);
     const startedAt = Date.now();
-    // Counts one genuine (human-driven) failure toward escalation.
+    // Counts one genuine (human-driven) failure toward escalation. Defined
+    // before try: a const inside try is block-scoped and invisible in catch.
     const registerFailure = (): void => {
       if (Date.now() - startedAt < MIN_HUMAN_AUTH_MS) {
         setError(t('idleLock.authFailed'));
@@ -90,6 +82,17 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
       );
     };
     try {
+      // No device passcode/biometric to authenticate against. Previously we just
+      // called onUnlock() here, which made the idle lock a silent no-op on any
+      // unsecured device — the timeout would fire and instantly dismiss. For a
+      // payroll app that's a real gap, so end the session instead: the user must
+      // log back in. Devices WITH biometrics keep the fast unlock path below.
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!enrolled) {
+        callbacksRef.current.onLogout();
+        return;
+      }
+
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: t('idleLock.promptMessage'),
         fallbackLabel: t('idleLock.fallbackLabel'),
