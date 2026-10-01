@@ -1,6 +1,6 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
-import { punchQueueStore, newIdempotencyKey } from './services/punchQueue';
-import { punchSyncWorker } from './services/syncWorker';
+import { punchQueueStore, newIdempotencyKey } from '@/services/punchQueue';
+import { punchSyncWorker } from '@/services/punchSyncWorker';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -882,6 +882,19 @@ export default function ClockInPage() {
       // log" from an empty list and wipe a queued clock-in below.
       if (!Array.isArray(timeLogsResponse)) {
         console.log('Time-log refresh failed (likely offline). Preserving local clock state.');
+        // Cold start with no signal: the weekly dashboard and timesheet derive
+        // from `history` state, which would otherwise stay empty. Serve the last
+        // persisted snapshot (written on every successful load) so hours/days
+        // remain visible offline. Earnings may read 0 without salary data.
+        try {
+          const cached = await AsyncStorage.getItem('history');
+          if (cached && (!isMountedRef || isMountedRef.current)) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) setHistory(parsed);
+          }
+        } catch {
+          /* best-effort — empty dashboard is acceptable, crash is not */
+        }
         return;
       }
       let timeLogs: any[] = timeLogsResponse;

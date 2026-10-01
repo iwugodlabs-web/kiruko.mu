@@ -20,8 +20,8 @@
 import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, type AppStateStatus } from "react-native";
-import { postClockIn, postClockOut } from "../../../services/api";
-import { track } from "../../../services/analytics";
+import { postClockIn, postClockOut } from "./api";
+import { track } from "./analytics";
 import { punchQueueStore, type QueuedAction, type QueuedPunch } from "./punchQueue";
 
 export interface SyncResult {
