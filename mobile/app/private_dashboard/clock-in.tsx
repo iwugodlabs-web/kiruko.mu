@@ -54,6 +54,7 @@ import { StandardButton } from '../design-system';
 // Extracted components
 import ClockInModeTabs from '../../components/calculator/ClockInModeTabs';
 import { resolveShowBreakAlert } from '@/components/clock_in/resolveShowBreakAlert';
+import { useResolvedAddress } from '@/services/geocode';
 
 type EventHistoryEntry = {
   id?: number;
@@ -107,6 +108,23 @@ const formatHoursToDisplay = (hours: number) => {
 };
 
 // Memoized History Item Component for Performance
+// Location row with display-time geocoding: offline `Coordinates:` strings
+// upgrade to street addresses once online (cached). Extracted so the hook
+// below doesn't run inside the events map (Rules of Hooks).
+const EventLocation = ({ location, onPress }: { location: string; onPress: (resolved: string) => void }) => {
+  const display = useResolvedAddress(location);
+  return (
+    <Pressable onPress={() => onPress(display)}>
+      <HStack alignItems="center" space="sm" minWidth={0} bg={Palette.gray50} p="$3" rounded="$lg">
+        <MaterialIcons name="location-on" size={16} color={Palette.gray500} />
+        <Text color={Palette.gray800} fontSize={Type.body} fontWeight="700" numberOfLines={1} ellipsizeMode="tail" flex={1}>
+          {display}
+        </Text>
+      </HStack>
+    </Pressable>
+  );
+};
+
 const HistoryItem = React.memo(({ group, onLocationPress, t }: { group: DailyHistoryGroup, onLocationPress: (location: string) => void, t: (key: string, options?: any) => string }) => {
   if (!group || !group.date) {
     return null;
@@ -285,16 +303,9 @@ const HistoryItem = React.memo(({ group, onLocationPress, t }: { group: DailyHis
                         </Text>
                       </HStack>
 
-                      {/* Location Display */}
+                      {/* Location Display (display-time geocoded — see EventLocation) */}
                       {event.location ? (
-                        <Pressable onPress={() => onLocationPress(event.location!)}>
-                          <HStack alignItems="center" space="sm" minWidth={0} bg={Palette.gray50} p="$3" rounded="$lg">
-                            <MaterialIcons name="location-on" size={16} color={Palette.gray500} />
-                            <Text color={Palette.gray800} fontSize={Type.body} fontWeight="700" numberOfLines={1} ellipsizeMode="tail" flex={1}>
-                              {event.location}
-                            </Text>
-                          </HStack>
-                        </Pressable>
+                        <EventLocation location={event.location} onPress={onLocationPress} />
                       ) : null}
                     </VStack>
 
@@ -1250,6 +1261,15 @@ export default function ClockInPage() {
         try {
           const privateUserId = user?.private_user_id || user?.private_user?.private_user_id;
           if (privateUserId && isMounted) {
+            // Cache-first: hydrate from the last known job id immediately so
+            // the clock button, labels, and punch payloads work on a cold
+            // offline start. The network fetch below overwrites on success.
+            try {
+              const cached = await AsyncStorage.getItem('cachedJobId');
+              if (cached && !isNaN(Number(cached)) && isMounted) setJobId(Number(cached));
+            } catch {
+              /* best-effort */
+            }
             const numericPrivateUserId = Number(privateUserId);
             if (isNaN(numericPrivateUserId)) {
               console.error('Invalid private_user_id - not a number:', privateUserId);
@@ -1265,7 +1285,13 @@ export default function ClockInPage() {
                 AsyncStorage.setItem('cachedJobId', String(jobResponse.job_id)).catch(() => undefined);
                 const threshold = (jobResponse as any).minimum_break_minutes;
                 if (threshold && threshold > 0) setMinBreakThresholdMinutes(threshold);
-              } else if (jobResponse && 'error' in jobResponse && jobResponse.status !== 404) {
+              } else if (jobResponse && 'error' in jobResponse && jobResponse.status === 404) {
+                // Explicit "no job" (not a network failure): the cached id is
+                // stale (assignment removed) — drop it so we don't punch
+                // against a dead job when offline.
+                AsyncStorage.removeItem('cachedJobId').catch(() => undefined);
+                if (isMounted) setJobId(null);
+              } else if (jobResponse && 'error' in jobResponse) {
                 console.error('Job API returned error:', jobResponse);
               }
             }
