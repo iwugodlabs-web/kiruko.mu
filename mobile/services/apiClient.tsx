@@ -1,6 +1,7 @@
 import axios from "axios";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { track } from "./analytics";
 
 // Base URL resolves from EXPO_PUBLIC_API_URL so each build profile targets
 // the right backend (see eas.json):
@@ -27,8 +28,13 @@ if (!__DEV__ && isDevLikeUrl) {
   );
 }
 // Create shared API client instance.
+// NOTE: `timeout` is load-bearing for offline behavior. Without it, requests
+// issued as the radios drop hang until OS-level TCP timeout (minutes on iOS),
+// leaving screens in loading states and — worse — never producing the failure
+// the offline queue needs to enqueue. 15s matches the kiosk client.
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 15000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -195,10 +201,21 @@ api.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
           return api(originalRequest);
         }
-      } catch (refreshError) {
+      } catch (refreshError: any) {
         console.error("❌ API Client: Silent refresh failed:", refreshError);
-        // Clear tokens and logout happens via AuthProvider or by rejecting
-        await AsyncStorage.multiRemove(["authToken", "refreshToken"]);
+        // Wipe ONLY on explicit revocation (refresh endpoint 401/403). A
+        // network-class failure or server 5xx mid-refresh must NOT destroy
+        // the tokens: the refresh token is still the valid recovery path
+        // and the next attempt (or reconnect) can succeed. Wiping here turned
+        // every flaky-network refresh into a permanent local logout.
+        const refreshStatus = refreshError?.response?.status;
+        if (refreshStatus === 401 || refreshStatus === 403) {
+          track("auth_logout", { trigger: "refresh_revoked", status: refreshStatus });
+          await AsyncStorage.multiRemove(["authToken", "refreshToken"]);
+        } else {
+          track("auth_refresh_failed_kept", { status: refreshStatus ?? 0 });
+        }
+        // Logout itself happens via AuthProvider on the next 401, never here.
         return Promise.reject(refreshError);
       }
     }

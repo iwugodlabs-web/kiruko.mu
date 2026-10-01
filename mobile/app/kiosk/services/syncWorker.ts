@@ -34,37 +34,68 @@ import {
   offlineQueue,
   type QueuedClockEntry,
 } from "./offlineQueue";
+import { track } from "../../../services/analytics";
 
 export interface SyncResult {
   attempted: number;
   succeeded: number;
   failed: number;
+  deadLettered: number;
   remaining: number;
 }
 
-type SyncListener = (status: { pending: number; lastResult: "ok" | "partial" | "error" | null }) => void;
+export interface DeadLetter {
+  action: QueuedClockEntry["action"];
+  id: string;
+}
+
+type SyncListener = (status: {
+  pending: number;
+  lastResult: "ok" | "partial" | "error" | null;
+  deadLetters: DeadLetter[];
+  deadCount: number;
+}) => void;
 
 let _inFlight: Promise<SyncResult> | null = null;
 let _registered = false;
 const _listeners = new Set<SyncListener>();
 
-async function _drainOnce(): Promise<SyncResult> {
+async function _drainOnce(): Promise<{ result: SyncResult; deadLetters: DeadLetter[] }> {
   const pending = await offlineQueue.listPending();
   if (pending.length === 0) {
-    return { attempted: 0, succeeded: 0, failed: 0, remaining: 0 };
+    const deadCount = await offlineQueue.countDead().catch(() => 0);
+    return {
+      result: { attempted: 0, succeeded: 0, failed: 0, deadLettered: 0, remaining: 0 },
+      deadLetters: [],
+    };
   }
   let succeeded = 0;
   let failed = 0;
+  const deadLetters: DeadLetter[] = [];
   for (const row of pending) {
-    const ok = await _syncRow(row);
-    if (ok) succeeded += 1;
-    else failed += 1;
+    const outcome = await _syncRow(row);
+    if (outcome === "ok") succeeded += 1;
+    else {
+      failed += 1;
+      if (outcome === "dead") deadLetters.push({ action: row.action, id: row.id });
+    }
   }
   const remaining = (await offlineQueue.listPending()).length;
-  return { attempted: pending.length, succeeded, failed, remaining };
+  return {
+    result: {
+      attempted: pending.length,
+      succeeded,
+      failed,
+      deadLettered: deadLetters.length,
+      remaining,
+    },
+    deadLetters,
+  };
 }
 
-async function _syncRow(row: QueuedClockEntry): Promise<boolean> {
+type RowOutcome = "ok" | "retry" | "dead";
+
+async function _syncRow(row: QueuedClockEntry): Promise<RowOutcome> {
   const r =
     row.action === "clock_out"
       ? await kioskApi.clockOut(
@@ -85,13 +116,13 @@ async function _syncRow(row: QueuedClockEntry): Promise<boolean> {
       // of the drain entirely so we don't burn attempts.
       throw new Error("network_still_down");
     }
-    await offlineQueue.recordFailure(row.id, `${r.status ?? 0}: ${r.error}`);
-    return false;
+    const nowDead = await offlineQueue.recordFailure(row.id, `${r.status ?? 0}: ${r.error}`);
+    return nowDead ? "dead" : "retry";
   }
   // Success — including the idempotency replay path (backend returns
   // the original TimeLog).
   await offlineQueue.markSynced(row.id);
-  return true;
+  return "ok";
 }
 
 export const syncWorker = {
@@ -103,14 +134,32 @@ export const syncWorker = {
     if (_inFlight) return _inFlight;
     _inFlight = (async () => {
       try {
-        const result = await _drainOnce();
-        await _notify(result);
+        const { result, deadLetters } = await _drainOnce();
+        if (result.attempted > 0 || deadLetters.length > 0) {
+          track("offline_sync_completed", {
+            domain: "kiosk",
+            attempted: result.attempted,
+            succeeded: result.succeeded,
+            failed: result.failed,
+            dead_lettered: result.deadLettered,
+            remaining: result.remaining,
+          });
+        }
+        const deadCount = await offlineQueue.countDead().catch(() => 0);
+        await _notify(result, deadLetters, deadCount);
         return result;
       } catch {
         // network_still_down thrown mid-drain — stop, report partial.
         const remaining = (await offlineQueue.listPending().catch(() => [])).length;
-        const result: SyncResult = { attempted: 0, succeeded: 0, failed: 0, remaining };
-        await _notify(result, "error");
+        const deadCount = await offlineQueue.countDead().catch(() => 0);
+        const result: SyncResult = {
+          attempted: 0,
+          succeeded: 0,
+          failed: 0,
+          deadLettered: 0,
+          remaining,
+        };
+        await _notify(result, [], deadCount, "error");
         return result;
       } finally {
         _inFlight = null;
@@ -160,9 +209,13 @@ export const syncWorker = {
 
 async function _notify(
   result: SyncResult,
+  deadLetters: DeadLetter[] = [],
+  deadCount?: number,
   forceStatus?: "ok" | "partial" | "error",
 ): Promise<void> {
   const pending = result.remaining;
+  const dead =
+    typeof deadCount === "number" ? deadCount : await offlineQueue.countDead().catch(() => 0);
   let lastResult: "ok" | "partial" | "error" | null;
   if (forceStatus) {
     lastResult = forceStatus;
@@ -177,7 +230,7 @@ async function _notify(
   }
   for (const l of _listeners) {
     try {
-      l({ pending, lastResult });
+      l({ pending, lastResult, deadLetters, deadCount: dead });
     } catch {
       /* don't crash siblings */
     }

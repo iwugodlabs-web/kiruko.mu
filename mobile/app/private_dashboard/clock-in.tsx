@@ -1,6 +1,7 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
 import { punchQueueStore, newIdempotencyKey } from '@/services/offline/punchQueue';
 import { punchSyncWorker } from '@/services/offline/syncWorker';
+import { startTrail, stopTrail, uploadPendingTrail } from '@/services/offline/breadcrumbs';
 import { canPunch } from '@/services/offline/canPunch';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
@@ -35,7 +36,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addDays, addWeeks, addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isAfter, isBefore, isSameDay, isSameMonth, isThisWeek, isToday, isWithinInterval, parseISO, startOfMonth, startOfWeek, subDays, subMonths } from 'date-fns';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -55,6 +56,7 @@ import { StandardButton } from '../design-system';
 // Extracted components
 import ClockInModeTabs from '../../components/calculator/ClockInModeTabs';
 import { resolveShowBreakAlert } from '@/components/clock_in/resolveShowBreakAlert';
+import { useResolvedAddress } from '@/services/geocode';
 
 type EventHistoryEntry = {
   id?: number;
@@ -108,6 +110,23 @@ const formatHoursToDisplay = (hours: number) => {
 };
 
 // Memoized History Item Component for Performance
+// Location row with display-time geocoding: offline `Coordinates:` strings
+// upgrade to street addresses once online (cached). Extracted so the hook
+// below doesn't run inside the events map (Rules of Hooks).
+const EventLocation = ({ location, onPress }: { location: string; onPress: (resolved: string) => void }) => {
+  const display = useResolvedAddress(location);
+  return (
+    <Pressable onPress={() => onPress(display)}>
+      <HStack alignItems="center" space="sm" minWidth={0} bg={Palette.gray50} p="$3" rounded="$lg">
+        <MaterialIcons name="location-on" size={16} color={Palette.gray500} />
+        <Text color={Palette.gray800} fontSize={Type.body} fontWeight="700" numberOfLines={1} ellipsizeMode="tail" flex={1}>
+          {display}
+        </Text>
+      </HStack>
+    </Pressable>
+  );
+};
+
 const HistoryItem = React.memo(({ group, onLocationPress, t }: { group: DailyHistoryGroup, onLocationPress: (location: string) => void, t: (key: string, options?: any) => string }) => {
   if (!group || !group.date) {
     return null;
@@ -286,16 +305,9 @@ const HistoryItem = React.memo(({ group, onLocationPress, t }: { group: DailyHis
                         </Text>
                       </HStack>
 
-                      {/* Location Display */}
+                      {/* Location Display (display-time geocoded — see EventLocation) */}
                       {event.location ? (
-                        <Pressable onPress={() => onLocationPress(event.location!)}>
-                          <HStack alignItems="center" space="sm" minWidth={0} bg={Palette.gray50} p="$3" rounded="$lg">
-                            <MaterialIcons name="location-on" size={16} color={Palette.gray500} />
-                            <Text color={Palette.gray800} fontSize={Type.body} fontWeight="700" numberOfLines={1} ellipsizeMode="tail" flex={1}>
-                              {event.location}
-                            </Text>
-                          </HStack>
-                        </Pressable>
+                        <EventLocation location={event.location} onPress={onLocationPress} />
                       ) : null}
                     </VStack>
 
@@ -416,6 +428,15 @@ export default function ClockInPage() {
   // Offline queue — count of clock actions waiting to reach the server. Fed by
   // the sync worker's drain events; drives the "waiting to sync" banner.
   const [queuedPunchCount, setQueuedPunchCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const onRetrySync = useCallback(() => {
+    setSyncing(true);
+    punchSyncWorker
+      .runOnce()
+      .then((r) => setQueuedPunchCount(r.remaining))
+      .catch(() => undefined)
+      .finally(() => setSyncing(false));
+  }, []);
 
   // Notifications and Overtime State
   const [activeOvertimeNotification, setActiveOvertimeNotification] = useState<Notification | null>(null);
@@ -554,17 +575,33 @@ export default function ClockInPage() {
     }
     setLocationAuthorized(true);
 
+    // Offline-safe positioning. A cold GPS fix without A-GPS data (which needs
+    // a data connection) can hang for minutes or never arrive — awaiting it
+    // unconditionally is what made clock-in "impossible" with the radios off.
+    // Offline we take the last-known fix or fail fast with a clear message;
+    // the backend already accepts stale/low-accuracy fixes into review flags.
+    const { isOnlineNow } = await import('@/services/offlinePolicy');
+    const online = await isOnlineNow();
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+      Promise.race([
+        p,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+      ]);
+
     // Speed optimization: last known first, then a fresh balanced fix. Both
     // native calls can throw or return null on Android (GPS off, Play Services
     // unavailable) — guard them and null-check the result so a location failure
     // surfaces as an alert instead of a `coords`-of-null hard crash.
     let location: Location.LocationObject | null = null;
     try {
-      location = await Location.getLastKnownPositionAsync();
-      if (!location) {
-        location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+      location = await withTimeout(Location.getLastKnownPositionAsync(), 5000);
+      if (!location && online) {
+        location = await withTimeout(
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          }),
+          10000,
+        );
       }
     } catch (posErr) {
       console.warn('Failed to get device position:', posErr);
@@ -598,14 +635,19 @@ export default function ClockInPage() {
 
     // Move geocoding to a secondary, non-blocking step if possible, or use a faster lookup
     let addressString = `Coordinates: ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`;
-    try {
-      // Faster address lookup
-      const address = await Location.reverseGeocodeAsync(coords);
-      if (address.length > 0) {
-        addressString = `${address[0].name || ''}, ${address[0].city || ''}, ${address[0].region || ''}, ${address[0].country || ''}`.replace(/^, |, $|, , /g, ', ').replace(/^, |, $/g, '');
+    // Reverse-geocoding is a network service — offline it hangs until its own
+    // internal timeout, stalling the tap for nothing. Skip it when offline;
+    // coordinates alone are sufficient for the punch payload.
+    if (online) {
+      try {
+        // Faster address lookup
+        const address = await withTimeout(Location.reverseGeocodeAsync(coords), 8000);
+        if (address && address.length > 0) {
+          addressString = `${address[0].name || ''}, ${address[0].city || ''}, ${address[0].region || ''}, ${address[0].country || ''}`.replace(/^, |, $|, , /g, ', ').replace(/^, |, $/g, '');
+        }
+      } catch (geocodeError) {
+        console.warn('Geocoding failed:', geocodeError);
       }
-    } catch (geocodeError) {
-      console.warn('Geocoding failed:', geocodeError);
     }
 
     return {
@@ -880,7 +922,28 @@ export default function ClockInPage() {
       const dateTo = format(new Date(), 'yyyy-MM-dd');
 
       const timeLogsResponse = await getUserTimeLogs(numericPrivateUserId, dateFrom, dateTo);
-      let timeLogs: any[] = Array.isArray(timeLogsResponse) ? timeLogsResponse : [];
+      // Offline (or any fetch failure) returns an error object, not an array.
+      // There is NO server truth in that case — returning early preserves the
+      // optimistic offline clock state. Falling through would read "no active
+      // log" from an empty list and wipe a queued clock-in below.
+      if (!Array.isArray(timeLogsResponse)) {
+        console.log('Time-log refresh failed (likely offline). Preserving local clock state.');
+        // Cold start with no signal: the weekly dashboard and timesheet derive
+        // from `history` state, which would otherwise stay empty. Serve the last
+        // persisted snapshot (written on every successful load) so hours/days
+        // remain visible offline. Earnings may read 0 without salary data.
+        try {
+          const cached = await AsyncStorage.getItem('history');
+          if (cached && (!isMountedRef || isMountedRef.current)) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) setHistory(parsed);
+          }
+        } catch {
+          /* best-effort — empty dashboard is acceptable, crash is not */
+        }
+        return;
+      }
+      let timeLogs: any[] = timeLogsResponse;
       let activeLog = timeLogs.find(log => log.start_time && !log.end_time);
 
       if (!activeLog) {
@@ -1011,26 +1074,45 @@ export default function ClockInPage() {
 
       const normalizedStartTime = activeLog ? (safeParseDate(activeLog.start_time)?.toISOString() ?? activeLog.start_time) : null;
 
+      // Queued punches not yet acknowledged by the server are invisible to the
+      // queries above. While any exist, "no active log on server" must NOT
+      // clear the optimistic local clock state — that wipe is what stranded
+      // users in a tap → queue → wipe → tap loop, stacking duplicate rows.
+      let hasPendingOffline = false;
+      try {
+        hasPendingOffline =
+          (await AsyncStorage.getItem('pendingClockInKey')) != null ||
+          (await punchQueueStore.count()) > 0;
+      } catch {
+        hasPendingOffline = false;
+      }
+
       if (!isMountedRef || isMountedRef.current) {
         setHistory(groupedHistory);
         await AsyncStorage.setItem('history', JSON.stringify(groupedHistory));
-        setIsClockedIn(!!activeLog);
-        setCurrentClockInTime(normalizedStartTime);
-        setActiveTimeLogId(activeLog ? activeLog.timelog_id : null);
-        if (!activeLog) {
-          // No open session — there can't be an open break either.
-          setIsBreaking(false);
-          AsyncStorage.setItem('isBreaking', 'false');
+        if (!hasPendingOffline) {
+          setIsClockedIn(!!activeLog);
+          setCurrentClockInTime(normalizedStartTime);
+          setActiveTimeLogId(activeLog ? activeLog.timelog_id : null);
+          if (!activeLog) {
+            // No open session — there can't be an open break either.
+            setIsBreaking(false);
+            AsyncStorage.setItem('isBreaking', 'false');
+          }
+        } else {
+          console.log('Preserving optimistic clock state: offline punches still pending.');
         }
       }
 
-      await AsyncStorage.setItem('isClockedIn', String(!!activeLog));
-      if (activeLog) {
-        if (normalizedStartTime) await AsyncStorage.setItem('currentClockInTime', normalizedStartTime);
-        if (activeLog.timelog_id) await AsyncStorage.setItem('activeTimeLogId', String(activeLog.timelog_id));
-      } else {
-        await AsyncStorage.removeItem('currentClockInTime');
-        await AsyncStorage.removeItem('activeTimeLogId');
+      if (!hasPendingOffline) {
+        await AsyncStorage.setItem('isClockedIn', String(!!activeLog));
+        if (activeLog) {
+          if (normalizedStartTime) await AsyncStorage.setItem('currentClockInTime', normalizedStartTime);
+          if (activeLog.timelog_id) await AsyncStorage.setItem('activeTimeLogId', String(activeLog.timelog_id));
+        } else {
+          await AsyncStorage.removeItem('currentClockInTime');
+          await AsyncStorage.removeItem('activeTimeLogId');
+        }
       }
     } catch (error) {
       console.error('Error loading time logs from database:', error);
@@ -1238,6 +1320,15 @@ export default function ClockInPage() {
         try {
           const privateUserId = user?.private_user_id || user?.private_user?.private_user_id;
           if (privateUserId && isMounted) {
+            // Cache-first: hydrate from the last known job id immediately so
+            // the clock button, labels, and punch payloads work on a cold
+            // offline start. The network fetch below overwrites on success.
+            try {
+              const cached = await AsyncStorage.getItem(jobIdCacheKey(privateUserId));
+              if (cached && !isNaN(Number(cached)) && isMounted) setJobId(Number(cached));
+            } catch {
+              /* best-effort */
+            }
             const numericPrivateUserId = Number(privateUserId);
             if (isNaN(numericPrivateUserId)) {
               console.error('Invalid private_user_id - not a number:', privateUserId);
@@ -1251,7 +1342,13 @@ export default function ClockInPage() {
                 AsyncStorage.setItem(jobIdCacheKey(numericPrivateUserId), String(jobResponse.job_id)).catch(() => {});
                 const threshold = (jobResponse as any).minimum_break_minutes;
                 if (threshold && threshold > 0) setMinBreakThresholdMinutes(threshold);
-              } else if (jobResponse && 'error' in jobResponse && jobResponse.status !== 404) {
+              } else if (jobResponse && 'error' in jobResponse && jobResponse.status === 404) {
+                // Explicit "no job" (not a network failure): the cached id is
+                // stale (assignment removed) — drop it so we don't punch
+                // against a dead job when offline.
+                AsyncStorage.removeItem(jobIdCacheKey(numericPrivateUserId)).catch(() => undefined);
+                if (isMounted) setJobId(null);
+              } else if (jobResponse && 'error' in jobResponse) {
                 console.error('Job API returned error:', jobResponse);
               }
             }
@@ -1402,7 +1499,16 @@ export default function ClockInPage() {
     minBreakThresholdMinutes,
   });
 
+  // Tap mutex — two rapid taps otherwise race past the duplicate guard in
+  // the async gap (both read empty keys) and enqueue twice.
+  const clockActionInFlight = useRef(false);
+
   const handleClockAction = async (action: 'clockin' | 'clockout') => {
+    if (clockActionInFlight.current) {
+      console.log('Clock action already in flight — ignoring double tap.');
+      return;
+    }
+    clockActionInFlight.current = true;
     try {
       const locationResult = await getCurrentLocation();
       const { geo_check, ...locationData } = locationResult;
@@ -1418,18 +1524,57 @@ export default function ClockInPage() {
       if (isClockInAction) {
         await loadTimeLogsFromDatabase();
         const lastActiveTimeLogId = await AsyncStorage.getItem('activeTimeLogId');
-        if (lastActiveTimeLogId) {
-          Alert.alert(
-            t('clockIn.alreadyClockedInTitle'),
-            t('clockIn.alreadyClockedInBody'),
-            [{ text: t('common.ok') }]
-          );
-          return;
+        // An offline clock-in stores pendingClockInKey, NOT activeTimeLogId
+        // (the server id doesn't exist yet). Guard on both, or every repeat
+        // tap enqueues another duplicate row with a fresh idempotency key.
+        const pendingClockInKey = await AsyncStorage.getItem('pendingClockInKey');
+        if (lastActiveTimeLogId || pendingClockInKey) {
+          // Self-heal a stale pending key: if its queue row is gone (synced,
+          // dead-lettered, or wiped), the key is a lie that would permanently
+          // block clock-in with "already clocked in" and no active session.
+          if (!lastActiveTimeLogId && pendingClockInKey) {
+            const row = await punchQueueStore.getById(pendingClockInKey).catch(() => null);
+            if (!row) {
+              console.log('Dropping stale pendingClockInKey with no queue row.');
+              await AsyncStorage.removeItem('pendingClockInKey');
+            } else {
+              Alert.alert(
+                t('clockIn.alreadyClockedInTitle'),
+                t('clockIn.alreadyClockedInBody'),
+                [{ text: t('common.ok') }]
+              );
+              clockActionInFlight.current = false;
+              return;
+            }
+          } else {
+            Alert.alert(
+              t('clockIn.alreadyClockedInTitle'),
+              t('clockIn.alreadyClockedInBody'),
+              [{ text: t('common.ok') }]
+            );
+            clockActionInFlight.current = false;
+            return;
+          }
         }
-        // Clock In
+        // Clock In — resolve job_id with offline fallback. When the
+        // network is off, getJobById never populated state, so fall back
+        // to the last cached job id instead of sending null (backend 4xx,
+        // which is NOT queued and would block offline clock-in entirely).
+        let effectiveJobId = jobId;
+        if (!effectiveJobId && numericPrivateUserId != null) {
+          const cached = await AsyncStorage.getItem(jobIdCacheKey(numericPrivateUserId));
+          if (cached && !isNaN(Number(cached))) effectiveJobId = Number(cached);
+        }
+        if (!effectiveJobId || !numericPrivateUserId) {
+          throw new Error(
+            !effectiveJobId
+              ? 'No job found. Connect once so we can load your job, then you can clock in offline.'
+              : 'Missing user identity. Please reconnect and retry.',
+          );
+        }
         const timeLogData = {
-          job_id: jobId!,
-          private_user_id: numericPrivateUserId!,
+          job_id: effectiveJobId,
+          private_user_id: numericPrivateUserId,
           day_of_week: dayOfWeek,
           start_time: nowISO,
           location: locationData,
@@ -1466,6 +1611,13 @@ export default function ClockInPage() {
         setCurrentClockInTime(nowISO);
         await AsyncStorage.setItem('currentClockInTime', nowISO);
         await AsyncStorage.setItem('isClockedIn', 'true');
+
+        // Begin the shift breadcrumb trail (forgotten clock-out locator).
+        // Runs for online and queued punches alike; a denial degrades to
+        // today's behavior. Seeded with this punch's fix.
+        startTrail({ latitude: locationData.latitude, longitude: locationData.longitude }).catch(
+          () => undefined,
+        );
 
         // Schedule-aware prompt. Use the same 30-min grace as the backend so
         // we don't nag for a few minutes early/late.
@@ -1550,13 +1702,18 @@ export default function ClockInPage() {
         await AsyncStorage.removeItem('breakStart');
         await AsyncStorage.removeItem('breakDurations');
         await AsyncStorage.removeItem('isBreaking');
+        // End the breadcrumb trail with a best-effort final upload so the
+        // freshest fix reaches the server even on a queued clock-out.
+        stopTrail(uploadPendingTrail).catch(() => undefined);
       }
 
       // Refresh data from database
       await loadTimeLogsFromDatabase();
 
       console.log(`Performed ${action} at ${nowISO}`);
+      clockActionInFlight.current = false;
     } catch (err: any) {
+      clockActionInFlight.current = false;
       console.error('Clock-in/out failed:', err);
       Alert.alert(t('clockIn.errorTitle'), t('clockIn.operationFailedBody', { message: err.message || 'Unknown error' }));
     }
@@ -1618,6 +1775,22 @@ export default function ClockInPage() {
       setIsLoading(false);
     }
   };
+
+  // One-tap clock-out from the reminder notification action (?action=clockout).
+  // Runs the normal toggle — including its confirm dialog, so a stray tap
+  // can't silently punch out — exactly once per mount. If not clocked in
+  // (stale reminder, already closed), there is nothing to do.
+  const notifAction = useLocalSearchParams<{ action?: string }>().action;
+  const notifActionHandled = useRef(false);
+  useEffect(() => {
+    if (notifAction === 'clockout' && !notifActionHandled.current && isClockedIn) {
+      notifActionHandled.current = true;
+      handleClockToggle().catch(() => undefined);
+    }
+    // handleClockToggle intentionally omitted: the handled-ref makes this
+    // run at most once; depending on the (unstable) callback would re-fire it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifAction, isClockedIn]);
 
   const handleBreakToggle = async () => {
     if (!isClockedIn) {
@@ -1941,6 +2114,11 @@ export default function ClockInPage() {
                 <Text style={{ flex: 1, fontSize: 13, color: Palette.gray700 }}>
                   {t('clockIn.syncPendingBanner', { count: queuedPunchCount })}
                 </Text>
+                <Pressable onPress={onRetrySync} disabled={syncing}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: Palette.gray700, textDecorationLine: 'underline' }}>
+                    {syncing ? '…' : t('common.retry', { defaultValue: 'Retry' })}
+                  </Text>
+                </Pressable>
               </View>
             )}
             {/* Page Header Banner */}

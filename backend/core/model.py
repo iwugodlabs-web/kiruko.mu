@@ -526,8 +526,10 @@ class IdempotencyKey(Base):
     """M6: idempotency cache. PK is (key, method, path) so the same client
     key may be reused across different endpoints without conflict.
 
-    Read/written exclusively by core/idempotency.py middleware. A 24h
-    retention cron (jobs/idempotency_cleanup.py — TODO) purges old rows.
+    Read/written exclusively by core/idempotency.py middleware. Entries older
+    than core/idempotency.py::IDEMPOTENCY_RETENTION_DAYS are purged by
+    `purge_old_entries`, which rides the advisory-locked cleanup tick in
+    main.py (no pg_cron in this project).
     """
     __tablename__ = "idempotency_keys"
 

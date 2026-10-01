@@ -1,6 +1,6 @@
 # Offline Clock-Out Queue & Review-by-Exception — Implementation Plan
 
-**Status:** Proposed
+**Status:** P1 shipped (mobile 1.0.2); full-offline follow-up proposed (§10)
 **Author:** Engineering
 **Scope:** `mobile/` (employee app) + `backend/` (time-log + review APIs)
 **Related:** M26 auto-close chain, M30 review dashboard, M31 kiosk offline queue, M6 idempotency middleware, Geofencing v3
@@ -288,3 +288,86 @@ human-touch guard prevents overwriting admin edits (§3.3), `needs_review` has a
 inventory + backfill (§4.2), random-sample audit is deterministic (§4.3), and `create_daily_time_log` is
 moved into scope (§7). Remaining work is execution-time validation: privacy/consent framing for location
 capture, and proving the supersede path against a real payroll-finalize run before enabling auto-approve.
+
+---
+
+## 10. Follow-up proposal — full offline (all shipped items ≥7/10)
+
+Status of the original P1: shipped in mobile 1.0.2 (employee `punch_queue` + `syncWorker` with snapshot
+drain and dead-letter reconciliation, kiosk parity, Retry UI, dead-letter banners, status-0 network
+contract, `Idempotency-Key` required on clock-out, 7-day `idempotency_keys` retention sweep on the
+cleanup tick). Session-reset hardening (AuthProvider: refresh-first, cached-user fallback, logout only
+on 401/403) is committed, pending TestFlight.
+
+Goal: every shipped offline behavior rates ≥7/10 on both robustness and forgotten clock-out location
+capture. Component scores below are for shipped *outcomes*; sub-7 components are acceptable only where
+the system-level outcome reaches 7+ (see break queue).
+
+### 10.1 Ship order
+
+1. **Auth reset fix → next TestFlight (9/10 offline).** No migration, strictly fewer logouts than live.
+2. **Foundation+ (8/10 offline).** `sync_state` table (key/value: per-domain `lastSyncedAt`,
+   `last_server_contact`) + offline policy module (explicit offline capability list) + **global**
+   stale-while-revalidate: every read screen serves cache with a "last synced Xm ago" strip, not just
+   the clock banner. Purely additive.
+3. **Offline bound + submit gating (7/10 offline).** Max offline duration 7 days, matching
+   `REFRESH_TOKEN_EXPIRY` (`user_service.py:29`): the cached-user fallback is honored only when a
+   `last_server_contact` stamp exists and is fresh; missing stamps default to **lenient** (stamp on
+   next contact) — never mass-logout on day one. Gating triggers on **attempt failure**, never on a
+   NetInfo pre-check (captive portals and some Android ROMs false-negative).
+4. **Break queue (7/10 offline).** Same outbox shape as punches, with start→end dependency chaining
+   (mirrors the clock-in→clock-out `dependsOn` relay). Payload bytes frozen once queued (409-safe).
+   Location value here is breadcrumbs (3/10 alone) — acceptable, departure capture is §10.6.
+5. **Drafts + consented auto-submit (7/10 offline).** Leave and expenses persist as local drafts
+   (no photo blobs in the queue); an "auto-submit when back online" toggle replays them through the
+   idempotent outbox with **pre-sync validation** (leave dates still future, quota plausibly intact —
+   else fall back to manual review). Leave never queues blind: server-validated dates synced late are
+   silently wrong.
+6. **Forgotten-close chain (7/10 offline, 8/10 location).** Replaces separate reminder/label ideas with
+   one escalation: clock-reminder push → no response → auto-close at schedule end using best-available
+   location (last break fix → clock-in fence), labeled `estimated`. Uses existing reminder + auto-close
+   machinery; the labeling pass is backend-only.
+7. **Shift breadcrumb trail (8/10 location, 7/10 offline) — BUILT.** Replaces the
+   geofence option below: while clocked in, the OS drops low-power fixes into a
+   local `breadcrumbs` table (migration `0004`, capped, cleared on clock-out;
+   background permission + in-app explainer + iOS blue-bar/Android notice).
+   The worker uploads the latest crumb against the open session
+   (`POST /job/time-log/{id}/breadcrumb`, deduped by `recorded_at`, no
+   idempotency key); the auto-close sweep attaches the freshest crumb (≤4h old)
+   as an *estimated* `clock_out` fix in the offline `Coordinates:` convention
+   so every client resolves it. Stale/absent trails stay absent; device fixes
+   are never overwritten. Chosen over geofencing: no per-site config, degrades
+   gracefully, same permission class.
+7b. **Geofence-exit auto clock-out — deferred.** Strictly dominated by the
+   trail for a phone-only workforce (no fixed exit to walk past); revisit only
+   for fixed-site clients alongside kiosk tap-out.
+
+### 10.2 Explicitly rejected / deferred
+
+- **Offline library adoption (PowerSync / Electric / WatermelonDB / RxDB): 2/10 — rejected.** Every
+  engine leaves the sync *protocol* to you, and the protocol (idempotent replay, ID relay,
+  dead-letters, review-by-exception) is the entire domain complexity here. Adopting one means a
+  data-layer rewrite, new native modules, and fresh migrations for live devices — the opposite of
+  the live-safety constraint. Optional later, reads-only: TanStack Query + persister for fetch
+  boilerplate and offline reads. The outbox stays hand-rolled regardless.
+- **Clearing queues on logout: deferred pending product call.** Rows currently survive logout
+  (sloppy but lossless); wiping destroys unsynced punches with pay impact. Keep-and-namespace per
+  user, or warn-and-confirm — not silent discard.
+
+---
+
+## 11. Live-safety rules (learned shipping §§1–9; binding on §10)
+
+1. **Migrations are append-only.** Never rewrite a shipped migration; keep drizzle journal ↔
+   `migrations.js` ↔ SQL files in lockstep (two incidents: missing `m0002` export, bogus `0003`).
+   Add a CI check asserting the three agree. Hand-written migrations (no snapshots) must never be
+   regenerated by `drizzle-kit generate` — it re-emits duplicate `CREATE TABLE`s.
+2. **Backfills default to lenient.** Any new enforcement keyed on a stamp/cache that existing
+   installs lack must treat "absent" as "not yet known," never as "violating."
+3. **Session changes must strictly reduce logouts** unless paired with user messaging and a
+   deliberate bound (§10.3's 7-day rule is the only sanctioned new logout path).
+4. **Gate on attempt failure, not on NetInfo.** Pre-checks false-negative; try the call, handle
+   network-class errors into queue/draft/message.
+5. **Freeze queued payload bytes.** Any client change to a queued body shape must version the queue
+   row — the idempotency layer 409s on key reuse with different bytes, which reads as permanent
+   failure after dead-lettering.

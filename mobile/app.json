@@ -2,7 +2,7 @@
   "expo": {
     "name": "Kiruko",
     "slug": "kiruko-app",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/kiruko-icon.png",
     "scheme": "kiruko",
@@ -18,7 +18,8 @@
           "NSAllowsLocalNetworking": true
         }
       },
-      "appleTeamId": "U29MDGMN4R"
+      "appleTeamId": "U29MDGMN4R",
+      "buildNumber": "20"
     },
     "android": {
       "adaptiveIcon": {
@@ -42,9 +43,16 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "app.kiruko.mu", "pathPrefix": "/claim" }
+            {
+              "scheme": "https",
+              "host": "app.kiruko.mu",
+              "pathPrefix": "/claim"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -100,7 +108,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Kiruko records your location when you clock in to confirm you're at your workplace."
+          "locationWhenInUsePermission": "Kiruko records your location when you clock in to confirm you're at your workplace.",
+          "locationAlwaysAndWhenInUsePermission": "Kiruko keeps recording low-power location breadcrumbs only while you are clocked in, so a forgotten clock-out can still close with your departure area. Tracking stops the moment you clock out.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

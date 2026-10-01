@@ -69,6 +69,19 @@ function PushNotificationRegistrar() {
   return null;
 }
 
+// Hands the PostHog instance to non-component code (sync workers) via the
+// services/analytics.ts holder. Without this, workers can't emit sync-health
+// metrics — and without those, a silently-eating queue is invisible.
+function AnalyticsBridge() {
+  const posthog = usePostHog();
+  useEffect(() => {
+    const { setAnalyticsClient } = require("@/services/analytics");
+    setAnalyticsClient(posthog ?? null);
+    return () => setAnalyticsClient(null);
+  }, [posthog]);
+  return null;
+}
+
 // Re-registers weekly clock reminders from the server-side Job on launch —
 // inside AuthProvider so it has auth access. Survives reinstall/clear.
 function ClockReminderResync() {
@@ -192,6 +205,7 @@ export default function RootLayout() {
                 <AuthProvider>
                   <IdleManager>
                     <ScreenTracker />
+                    <AnalyticsBridge />
                     <PushNotificationRegistrar />
                     <ClockReminderResync />
                     <Stack screenOptions={{

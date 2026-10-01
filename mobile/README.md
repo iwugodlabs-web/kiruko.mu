@@ -2,6 +2,34 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Release builds & TestFlight (read before queuing a build)
+
+Learned from three failed submissions — follow exactly:
+
+1. **`git status` must be clean-ish first.** EAS rewrites `app.json` during version
+   resolution, and stray local edits to `drizzle/` or `app.json` have broken
+   builds before. Know what every dirty file is.
+2. **Version must exceed the live train.** Check App Store Connect: if `x.y.z` is
+   READY_FOR_SALE, the new binary must be `> x.y.z`, or Apple rejects it
+   (ITMS-90062/90186/90478). Bump `expo.version` in `app.json`.
+3. **Build number is owned manually.** `autoIncrement` does not reliably bump
+   under `appVersionSource: local`, and reusing an uploaded
+   (version, build) tuple makes Apple fast-reject the submission. Always set
+   `ios.buildNumber` in `app.json` to max(uploaded) + 1 — verify with
+   `eas build:list --platform ios`.
+4. **Run the offline guardrails locally:** `node scripts/check-drizzle-manifest.js`
+   (journal ↔ manifest ↔ SQL files must agree) and
+   `npx expo export --platform ios` (catches bundler breakage before burning a
+   30-min EAS build).
+5. **Queue and submit:**
+   ```bash
+   eas build --platform ios --profile production --non-interactive --no-wait
+   # after FINISHED:
+   eas submit -p ios --profile production --latest --non-interactive
+   ```
+   Then Apple processing (~5–10 min) → TestFlight. A rejection email's
+   ITMS codes dictate the fix — paste them back into the dev thread.
+
 ## Get started
 
 1. Install dependencies

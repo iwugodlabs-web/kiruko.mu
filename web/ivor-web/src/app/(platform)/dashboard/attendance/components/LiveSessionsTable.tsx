@@ -2,6 +2,7 @@
 
 import { TimeLogRow } from "./types";
 import StatusBadge from "./StatusBadge";
+import SmartAddress from "./SmartAddress";
 import { MapPin, Clock } from "lucide-react";
 
 interface Props {
@@ -103,7 +104,7 @@ export default function LiveSessionsTable({ logs, loading, onRowClick }: Props) 
                       {locationStr ? (
                         <span className="flex items-center gap-1">
                           <MapPin size={12} className="shrink-0 text-gray-400" />
-                          <span className="truncate">{locationStr}</span>
+                          <span className="truncate">{locationStr ? <SmartAddress text={locationStr} /> : null}</span>
                         </span>
                       ) : "—"}
                     </td>

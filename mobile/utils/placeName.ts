@@ -54,10 +54,26 @@ export function realAddress(location: any): string | null {
 // ~110 m bucket so nearby clock-ins share one geocoder lookup.
 const keyFor = (c: Coords) => `${c.latitude.toFixed(3)},${c.longitude.toFixed(3)}`;
 
-/** Reverse-geocode a coordinate to a place name (cached). Null on failure. */
+/** Reverse-geocode a coordinate to a place name (cached). Null on failure.
+ * Backend Google endpoint first (consistent cross-platform addresses),
+ * on-device geocoder as fallback — mirrors services/geocode.ts. */
 export async function resolvePlaceName(coords: Coords): Promise<string | null> {
   const key = keyFor(coords);
   if (placeCache.has(key)) return placeCache.get(key)!;
+  try {
+    const { api } = await import("@/services/apiClient");
+    const resp = await Promise.race([
+      api.get("/geocode/reverse", { params: { lat: coords.latitude, lng: coords.longitude } }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]);
+    const name = (resp as { data?: { display_name?: string | null } } | null)?.data?.display_name;
+    if (name) {
+      placeCache.set(key, name);
+      return name;
+    }
+  } catch {
+    /* fall through to the device geocoder */
+  }
   try {
     const results = await Location.reverseGeocodeAsync(coords);
     if (results.length > 0) {

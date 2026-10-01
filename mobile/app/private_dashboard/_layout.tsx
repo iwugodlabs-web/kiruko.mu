@@ -74,6 +74,31 @@ export default function DashboardLayout() {
     return unsub;
   }, [ready, t]);
 
+  // Offline clock-out queue — register the drain worker once the authed
+  // private subtree is live so queued clock-outs sync on network/appstate.
+  React.useEffect(() => {
+    if (ready) punchSyncWorker.register();
+  }, [ready]);
+
+  // Guard #3 — a queued punch that exhausted its retries is dropped. The worker
+  // has already reverted the optimistic local state; alert the employee so they
+  // redo it rather than silently believing the punch went through (which would
+  // let the cron auto-close the still-open session with a synthetic end time).
+  React.useEffect(() => {
+    if (!ready) return;
+    const unsub = punchSyncWorker.onChange(({ deadLetters }) => {
+      if (!deadLetters || deadLetters.length === 0) return;
+      const hasClockOut = deadLetters.some((d) => d.action === 'clock_out');
+      Alert.alert(
+        t('clockIn.syncFailedTitle'),
+        hasClockOut
+          ? t('clockIn.syncFailedClockOutBody')
+          : t('clockIn.syncFailedClockInBody'),
+      );
+    });
+    return unsub;
+  }, [ready, t]);
+
   // Hold rendering until auth is resolved AND the user is allowed here, so no
   // protected content flashes before a pending redirect settles.
   if (!ready) {

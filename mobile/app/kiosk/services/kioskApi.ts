@@ -312,8 +312,14 @@ export const kioskApi = {
     const networkClass =
       r.status === undefined || r.status === 0 || (r.status >= 500 && r.status < 600);
     if (!networkClass) return r;
-    const queueId = await offlineQueue.enqueue("clock_in", payload, idempotencyKey);
-    return { queued: true, queueId };
+    try {
+      const queueId = await offlineQueue.enqueue("clock_in", payload, idempotencyKey);
+      return { queued: true, queueId };
+    } catch {
+      // SQLite itself failed — don't fake success. Surface a network-class
+      // error so the UI shows a retryable failure instead of "will sync".
+      return { error: "Could not save the clock-in offline. Please try again.", status: 0 };
+    }
   },
 
   /** M32 — clock-out with offline fallback. Mirrors clockInWithOfflineFallback. */
@@ -326,8 +332,12 @@ export const kioskApi = {
     const networkClass =
       r.status === undefined || r.status === 0 || (r.status >= 500 && r.status < 600);
     if (!networkClass) return r;
-    const queueId = await offlineQueue.enqueue("clock_out", payload, idempotencyKey);
-    return { queued: true, queueId };
+    try {
+      const queueId = await offlineQueue.enqueue("clock_out", payload, idempotencyKey);
+      return { queued: true, queueId };
+    } catch {
+      return { error: "Could not save the clock-out offline. Please try again.", status: 0 };
+    }
   },
 };
 

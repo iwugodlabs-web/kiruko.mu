@@ -21,6 +21,8 @@ import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, type AppStateStatus } from "react-native";
 import { postClockIn, postClockOut } from "../api";
+import { track } from "../analytics";
+import { uploadPendingTrail } from "./breadcrumbs";
 import { punchQueueStore, type QueuedAction, type QueuedPunch } from "./punchQueue";
 
 export interface SyncResult {
@@ -183,7 +185,20 @@ export const punchSyncWorker = {
     _inFlight = (async () => {
       try {
         const { result, deadLetters } = await _drainOnce();
+        if (result.attempted > 0 || deadLetters.length > 0) {
+          track("offline_sync_completed", {
+            domain: "punches",
+            attempted: result.attempted,
+            succeeded: result.succeeded,
+            failed: result.failed,
+            dead_lettered: result.deadLettered,
+            remaining: result.remaining,
+          });
+        }
         await _notify(result, deadLetters);
+        // Opportunistic trail upload: a fresh breadcrumb may now be mappable
+        // (a clock-in synced earlier in this drain resolved the session id).
+        await uploadPendingTrail().catch(() => undefined);
         return result;
       } catch {
         const remaining = (await punchQueueStore.listPending().catch(() => [])).length;

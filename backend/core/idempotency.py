@@ -44,6 +44,15 @@ logger = logging.getLogger("kontokaz.idempotency")
 # (or contain non-JSON bodies). Cap size at 256KB.
 MAX_CACHED_BODY_BYTES = 256 * 1024
 
+# Retention for cached entries. Must outlive plausible offline durations: a
+# phone/tablet can stay offline for days (same rural profile as the kiosk
+# queue), and a queued punch replayed after the purge would re-execute
+# instead of returning the cached response. Matches the kiosk
+# `_IDEMPOTENCY_TTL` (services/kiosk_service.py). Swept by
+# `purge_old_entries`, which rides the advisory-locked cleanup tick in
+# main.py (no pg_cron in this project).
+IDEMPOTENCY_RETENTION_DAYS = 7
+
 
 def compute_request_hash(body: bytes) -> str:
     """SHA-256 hex digest of the raw request body."""
@@ -267,6 +276,32 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             headers=dict(response.headers),
             media_type=response.media_type,
         )
+
+
+def purge_old_entries(db: Session, days: int = IDEMPOTENCY_RETENTION_DAYS) -> int:
+    """Delete idempotency cache entries older than `days`. Returns the number
+    of rows deleted. Cross-tenant system job; safe to run repeatedly (deletes
+    nothing once caught up). Without this the table grows unboundedly — every
+    keyed POST/PATCH/DELETE inserts a row and nothing else removes them."""
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        result = db.execute(
+            sql_text("DELETE FROM idempotency_keys WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        db.commit()
+        deleted = result.rowcount or 0
+        if deleted:
+            logger.info(
+                "idempotency sweep: removed %d rows older than %s", deleted, cutoff
+            )
+        return deleted
+    except Exception as e:
+        db.rollback()
+        logger.error("idempotency sweep failed: %s", e)
+        return 0
 
 
 def _extract_user_id(request: Request) -> Optional[int]:

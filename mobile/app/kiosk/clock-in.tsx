@@ -86,6 +86,8 @@ export default function KioskClockIn() {
   const [state, setState] = useState<State>({ name: "idle" });
   const [query, setQuery] = useState("");
   const [queuedCount, setQueuedCount] = useState(0);
+  const [deadCount, setDeadCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
   // Admin PIN gate (overlays any state). Guards exit + re-onboard.
   const [adminGateOpen, setAdminGateOpen] = useState(false);
   const [adminGateError, setAdminGateError] = useState<string | null>(null);
@@ -101,8 +103,25 @@ export default function KioskClockIn() {
   // network event has fired.
   useEffect(() => {
     offlineQueue.count().then(setQueuedCount).catch(() => undefined);
-    const unsub = syncWorker.onChange(({ pending }) => setQueuedCount(pending));
+    offlineQueue.countDead().then(setDeadCount).catch(() => undefined);
+    const unsub = syncWorker.onChange(({ pending, deadCount: dead }) => {
+      setQueuedCount(pending);
+      if (typeof dead === "number") setDeadCount(dead);
+    });
     return unsub;
+  }, []);
+
+  const onRetrySync = useCallback(() => {
+    setSyncing(true);
+    syncWorker
+      .runOnce()
+      .then(({ remaining }) => {
+        setQueuedCount(remaining);
+        return offlineQueue.countDead();
+      })
+      .then(setDeadCount)
+      .catch(() => undefined)
+      .finally(() => setSyncing(false));
   }, []);
 
   // Probe device biometrics once on mount so the admin gate can offer a
@@ -443,6 +462,19 @@ export default function KioskClockIn() {
             <View style={styles.queueBanner}>
               <Text style={styles.queueBannerText}>
                 {queuedCount} {queuedCount === 1 ? "entry" : "entries"} waiting to sync
+              </Text>
+              <Pressable onPress={onRetrySync} disabled={syncing} hitSlop={12}>
+                <Text style={[styles.queueBannerText, { textDecorationLine: "underline" }]}>
+                  {syncing ? "Syncing…" : "Retry now"}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+          {deadCount > 0 && (
+            <View style={[styles.queueBanner, { backgroundColor: "#FEF2F2", borderColor: "#FECACA" }]}>
+              <Text style={[styles.queueBannerText, { color: "#B91C1C" }]}>
+                {deadCount} {deadCount === 1 ? "entry" : "entries"} failed to sync — ask an admin to
+                re-enter {deadCount === 1 ? "it" : "them"} when online
               </Text>
             </View>
           )}
@@ -964,6 +996,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 12,
     alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   queueBannerText: {
     color: "#fed7aa",

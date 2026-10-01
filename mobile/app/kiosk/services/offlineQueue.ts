@@ -119,6 +119,20 @@ export const offlineQueue = {
     }
   },
 
+  /** Dead-lettered rows (exhausted retries) — surfaced so the operator knows
+   * punches need attention instead of silently vanishing from the banner. */
+  countDead: async (): Promise<number> => {
+    try {
+      const rows = await db()
+        .select({ id: kioskQueue.id })
+        .from(kioskQueue)
+        .where(eq(kioskQueue.deadLettered, 1));
+      return rows.length;
+    } catch {
+      return 0;
+    }
+  },
+
   /** Mark synced = delete the row. */
   markSynced: async (id: string): Promise<void> => {
     await db().delete(kioskQueue).where(eq(kioskQueue.id, id));
@@ -126,21 +140,25 @@ export const offlineQueue = {
 
   /**
    * Record a failed sync attempt. Increments attempts, stores the
-   * error, dead-letters when MAX_SYNC_ATTEMPTS is reached.
+   * error, dead-letters when MAX_SYNC_ATTEMPTS is reached. Returns true
+   * iff this failure tipped the row into the dead-lettered state, so the
+   * sync worker can surface it (mirrors punchQueueStore.recordFailure).
    */
-  recordFailure: async (id: string, error: string): Promise<void> => {
+  recordFailure: async (id: string, error: string): Promise<boolean> => {
     const row = await db().select().from(kioskQueue).where(eq(kioskQueue.id, id)).limit(1);
     const existing = row[0];
-    if (!existing) return;
+    if (!existing) return false;
     const nextAttempts = existing.attempts + 1;
+    const dead = nextAttempts >= MAX_SYNC_ATTEMPTS;
     await db()
       .update(kioskQueue)
       .set({
         attempts: nextAttempts,
         lastError: error,
-        deadLettered: nextAttempts >= MAX_SYNC_ATTEMPTS ? 1 : 0,
+        deadLettered: dead ? 1 : 0,
       })
       .where(eq(kioskQueue.id, id));
+    return dead;
   },
 
   /** Operator escape hatch — wipe everything (incl. dead-lettered). */

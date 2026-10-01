@@ -42,6 +42,11 @@ jest.mock("../punchQueue", () => ({
   },
   MAX_SYNC_ATTEMPTS: 3,
 }));
+jest.mock("../breadcrumbs", () => ({
+  __esModule: true,
+  uploadLatestBreadcrumb: jest.fn(() => Promise.resolve(false)),
+  uploadPendingTrail: jest.fn(() => Promise.resolve(0)),
+}));
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as api from "../../api";

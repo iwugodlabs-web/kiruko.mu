@@ -12,6 +12,7 @@
  */
 import { useState } from "react";
 import type { TimeLogReviewItem } from "@/services/payroll-api";
+import SmartAddress from "../attendance/components/SmartAddress";
 import {
   ACTIVITY_META,
   ACTIVITY_ORDER,
@@ -283,12 +284,12 @@ function GroupBlock({
                             <span className="min-w-0">
                               {inLoc && (
                                 <span className="block">
-                                  <span className="font-semibold text-zinc-600 dark:text-gray-300">In:</span> {inLoc}
+                                  <span className="font-semibold text-zinc-600 dark:text-gray-300">In:</span> <SmartAddress text={inLoc} />
                                 </span>
                               )}
                               {outLoc && (
                                 <span className="block">
-                                  <span className="font-semibold text-zinc-600 dark:text-gray-300">Out:</span> {outLoc}
+                                  <span className="font-semibold text-zinc-600 dark:text-gray-300">Out:</span> <SmartAddress text={outLoc} />
                                 </span>
                               )}
                               {inLoc && !outLoc && (

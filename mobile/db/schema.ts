@@ -37,6 +37,31 @@ export const kioskQueue = sqliteTable("kiosk_queue", {
 });
 
 /**
+ * Shift breadcrumb trail (forgotten clock-out locator). Low-power fixes
+ * recorded only while clocked in; cleared on clock-out. The worker uploads
+ * the latest crumb against the open session; the server auto-close attaches
+ * the freshest one as an *estimated* clock-out fix. See
+ * services/offline/breadcrumbs.ts.
+ */
+export const breadcrumbs = sqliteTable("breadcrumbs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  recordedAt: integer("recorded_at").notNull(),
+});
+
+/**
+ * Offline sync metadata (key-value). Powers "last synced" UI, the
+ * max-offline-duration bound (last_server_contact), and per-domain sync
+ * cursors. Plain key/value so new domains don't need schema changes.
+ */
+export const syncState = sqliteTable("sync_state", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull(), // Date.now()
+});
+
+/**
  * Employee offline punch queue (Feature 1). When the authed employee's clock-in
  * or clock-out request fails on a network-class error, the full request body is
  * pinned here and replayed by services/syncWorker.ts once the network returns.
