@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X, MapPin, Clock, Coffee, AlertTriangle, Timer, Tablet, Camera, ShieldAlert } from "lucide-react";
 import { TimeLogRow } from "./types";
 import StatusBadge from "./StatusBadge";
+import SmartAddress from "./SmartAddress";
 import { api } from "@/services/apiClient";
 
 interface Props {
@@ -259,7 +260,7 @@ export default function TimeLogDetailDrawer({ log, onClose }: Props) {
                     <MapPin size={16} className="text-red-500 shrink-0 mt-0.5" />
                     <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
                       <span className="block text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">Clock in</span>
-                      {locationLabel}
+                      <SmartAddress text={locationLabel} />
                     </div>
                   </div>
                 )}
@@ -268,7 +269,7 @@ export default function TimeLogDetailDrawer({ log, onClose }: Props) {
                     <MapPin size={16} className="text-green-600 shrink-0 mt-0.5" />
                     <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
                       <span className="block text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">Clock out</span>
-                      {clockOutLocationLabel}
+                      <SmartAddress text={clockOutLocationLabel} />
                     </div>
                   </div>
                 )}
