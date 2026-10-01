@@ -34,6 +34,7 @@ import {
   offlineQueue,
   type QueuedClockEntry,
 } from "./offlineQueue";
+import { track } from "../../../services/analytics";
 
 export interface SyncResult {
   attempted: number;
@@ -134,6 +135,16 @@ export const syncWorker = {
     _inFlight = (async () => {
       try {
         const { result, deadLetters } = await _drainOnce();
+        if (result.attempted > 0 || deadLetters.length > 0) {
+          track("offline_sync_completed", {
+            domain: "kiosk",
+            attempted: result.attempted,
+            succeeded: result.succeeded,
+            failed: result.failed,
+            dead_lettered: result.deadLettered,
+            remaining: result.remaining,
+          });
+        }
         const deadCount = await offlineQueue.countDead().catch(() => 0);
         await _notify(result, deadLetters, deadCount);
         return result;
