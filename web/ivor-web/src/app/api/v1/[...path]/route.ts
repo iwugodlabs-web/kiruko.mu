@@ -48,15 +48,22 @@ async function proxyRequest(
   try {
     const backendResponse = await fetch(targetUrl, requestInit);
 
-    // Build response headers, forwarding Set-Cookie properly
+    // Build response headers. Set-Cookie needs special handling: iterating with
+    // forEach/get FOLDS multiple Set-Cookie headers into one comma-joined value
+    // (a Node/undici behaviour), which corrupts them — the browser then drops
+    // refresh_token and strips access_token's Max-Age (making it session-only,
+    // so sessions silently stop persisting/refreshing). getSetCookie() returns
+    // each Set-Cookie as a proper separate string.
     const responseHeaders = new Headers();
     backendResponse.headers.forEach((value, key) => {
       const lower = key.toLowerCase();
-      // Skip hop-by-hop headers that should not be forwarded
-      if (['content-encoding', 'transfer-encoding'].includes(lower)) return;
-      // append (not set) to preserve multiple Set-Cookie headers
+      // Skip hop-by-hop headers, and Set-Cookie (handled separately below).
+      if (['content-encoding', 'transfer-encoding', 'set-cookie'].includes(lower)) return;
       responseHeaders.append(key, value);
     });
+    for (const cookie of backendResponse.headers.getSetCookie()) {
+      responseHeaders.append('set-cookie', cookie);
+    }
 
     // Per the Fetch spec, 204/205/304 (and 1xx) responses must have a null
     // body — passing even an empty ArrayBuffer makes the Response constructor

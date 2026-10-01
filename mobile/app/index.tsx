@@ -117,8 +117,8 @@ export default function Index() {
         // Real gate: private users with incomplete onboarding land on the
         // profile screen, NOT home. profile.tsx already has the multi-step
         // form; the layout bounce-back (see _layout.tsx) keeps them there.
-        console.log('🏠 ENTRY: Non-onboarded private user → profile completion.');
-        router.replace('/private_dashboard/profile');
+        console.log('🏠 ENTRY: Non-onboarded private user → setup flow.');
+        router.replace('/private_dashboard/setup' as any);
       }
     } else {
       // User is not authenticated.

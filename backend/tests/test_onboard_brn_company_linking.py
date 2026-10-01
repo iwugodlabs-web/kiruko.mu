@@ -154,3 +154,76 @@ def test_unmatched_or_missing_brn_stays_company_less(db: Session, _engine):
     assert pu.company_id is None
     assert job.company_id is None
     assert salary.company_id is None  # legitimately company-less — the original 500 fix
+
+
+# ---------------------------------------------------------------------------
+# GET /job/company-brn/{brn} — surfaces self-signup claimants for verification.
+# These are draft placeholder jobs linked only by employer_brn, which the
+# company roster (/users/company/{id}) excludes by design. Now authenticated
+# and company-scoped (previously it leaked pending employees' PII to anyone).
+# ---------------------------------------------------------------------------
+
+
+def _draft_claimant(db: Session, employer_brn: str) -> tuple[User, PrivateUser, Job]:
+    """A self-signup claimant: account exists, but company_id is unset and the
+    only link is a draft job carrying employer_brn (is_onboarding_draft=True)."""
+    db.execute(sql_text("SELECT set_config('app.company_id', '*', false)"))
+    sfx = uuid.uuid4().hex[:8]
+    u = User(user_type="private", email=f"claim-{sfx}@x.com", user_name=f"claim-{sfx}",
+             password_hash="x", user_verified=True)
+    db.add(u); db.flush()
+    pu = PrivateUser(user_id=u.user_id, first_name="Self", last_name="Signup",
+                     role="employee", company_id=None)
+    db.add(pu); db.flush()
+    job = Job(private_user_id=pu.private_user_id, job_title="", employer_brn=employer_brn,
+              work_days={}, is_onboarding_draft=True, verification_status="pending")
+    db.add(job); db.flush(); db.commit()
+    return u, pu, job
+
+
+def test_company_brn_claimant_visible_to_company_admin(db: Session, _engine):
+    owner, co = _company(db)
+    u, pu, job = _draft_claimant(db, co.brn)
+    client = _client(_engine, owner.user_id)
+    try:
+        resp = client.get(f"/api/v1/job/company-brn/{co.brn}")
+    finally:
+        _clear()
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert any(row["user_id"] == u.user_id for row in body), body
+
+
+def test_company_brn_case_insensitive_match(db: Session, _engine):
+    """A claimant who typed the BRN in a different case still surfaces."""
+    owner, co = _company(db)
+    u, pu, job = _draft_claimant(db, co.brn.lower())  # stored lower; company BRN is upper
+    client = _client(_engine, owner.user_id)
+    try:
+        resp = client.get(f"/api/v1/job/company-brn/{co.brn}")
+    finally:
+        _clear()
+    assert resp.status_code == 200, resp.text
+    assert any(row["user_id"] == u.user_id for row in resp.json())
+
+
+def test_company_brn_forbidden_for_other_company_admin(db: Session, _engine):
+    owner_a, co_a = _company(db)
+    owner_b, co_b = _company(db)
+    _draft_claimant(db, co_a.brn)
+    client = _client(_engine, owner_b.user_id)  # admin of a DIFFERENT company
+    try:
+        resp = client.get(f"/api/v1/job/company-brn/{co_a.brn}")
+    finally:
+        _clear()
+    assert resp.status_code == 403, resp.text
+
+
+def test_company_brn_unknown_returns_404(db: Session, _engine):
+    owner, co = _company(db)
+    client = _client(_engine, owner.user_id)
+    try:
+        resp = client.get(f"/api/v1/job/company-brn/NOPE_{uuid.uuid4().hex[:8]}")
+    finally:
+        _clear()
+    assert resp.status_code == 404, resp.text

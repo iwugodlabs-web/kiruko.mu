@@ -18,6 +18,7 @@ from schema.user_schema import (
 )
 from schema.job_schema import CreateSalary, OnboardJob, ShowJob, CreateJob, ShowSchedule, ApproveLeaveRequest
 from services.storage_service import get_storage_service
+from services import attachment_proxy
 from services.user_service import UserService
 from datetime import date
 from fastapi import UploadFile, File, Form
@@ -266,17 +267,26 @@ async def get_leaves_by_company_route(company_id: int, db: Session = Depends(con
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(leaves)})
 
 @router.put('/leave/{leave_id}', status_code=200, response_model=ShowLeave)
-async def update_leave_route(leave_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_leave_route(leave_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     leave = update_leave(leave_id, update_data, db)
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
+    create_audit_log(
+        db, current_user.user_id, "leave.update", "leave", leave_id,
+        {"changed": {k: jsonable_encoder(v) for k, v in (update_data or {}).items()}},
+    )
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(leave)})
 
 @router.delete('/leave/{leave_id}', status_code=204)
-async def delete_leave_route(leave_id: int, db: Session = Depends(config.get_db)):
+async def delete_leave_route(leave_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
+    existing = get_leave_by_id(leave_id, db)
     success = delete_leave(leave_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Leave request not found")
+    create_audit_log(
+        db, current_user.user_id, "leave.delete", "leave", leave_id,
+        {"private_user_id": getattr(existing, "private_user_id", None)},
+    )
     return _fastapi.Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.put('/leave/{leave_id}/approve', status_code=200, response_model=ShowLeave)
@@ -305,6 +315,15 @@ async def approve_or_reject_leave_route(leave_id: int, approval_data: ApproveLea
         leave = approve_or_reject_leave(leave_id, approval_data.action, approval_data.rejection_reason, approval_data.approver_comments, current_user.user_id, db)
         if not leave:
             raise HTTPException(status_code=404, detail="Leave request not found")
+        create_audit_log(
+            db, current_user.user_id, f"leave.{approval_data.action}", "leave", leave_id,
+            {
+                "company_id": company_id,
+                "private_user_id": getattr(pu, "private_user_id", None),
+                "status": getattr(leave, "status", None),
+                "rejection_reason": approval_data.rejection_reason,
+            },
+        )
         # Notify employee of status change
         try:
             from services.notification_service import NotificationService
@@ -816,11 +835,14 @@ async def delete_my_account(
 ):
     """Self-service account deletion (GDPR + App Store / Google Play requirement).
 
-    Soft-deletes and anonymizes the authenticated user: login is disabled and all
-    personal identifiers are scrubbed. Sensitive uploads (documents, receipt
-    images) and their stored files are removed; notifications and sessions are
-    purged. Employment, payroll and audit records the employer must retain by law
-    are KEPT but de-identified (they link only to an anonymized user record).
+    Soft-deletes and anonymizes the authenticated user: login is disabled and
+    contact identifiers (email, phone, username, push token) are scrubbed. The
+    person's name is intentionally RETAINED so retained employment/payroll rows
+    stay attributable and the deletion is recorded (with name + original email)
+    in the append-only audit log. Sensitive uploads (documents, receipt images)
+    and their stored files are removed; notifications and sessions are purged.
+    Employment, payroll and audit records the employer must retain by law are
+    KEPT.
 
     Blocked when the caller owns a company that still has other members — they
     must transfer ownership or offboard their team first, so no workforce is
@@ -890,9 +912,8 @@ async def delete_my_account(
             pass
 
         # 4) Anonymize the PrivateUser PII (employment record retained, de-identified).
+        #    Name is intentionally KEPT so the employment record stays attributable.
         if private is not None:
-            private.first_name = "Deleted"
-            private.last_name = "User"
             private.phone = None
             private.date_of_birth = None
             private.pass_port_number = None
@@ -907,8 +928,24 @@ async def delete_my_account(
         user.password_hash = "ACCOUNT_DELETED"
         user.expo_push_token = None
 
-        # 6) Audit (append-only INSERT; no PII in the payload).
-        create_audit_log(db, user.user_id, "account_deleted", "users", user.user_id, {"self_service": True}, commit=False)
+        # 6) Audit (append-only INSERT). Capture who deleted the account so it stays
+        #    attributable after the user row is anonymized.
+        deleted_name = " ".join(
+            p for p in [getattr(private, "first_name", None), getattr(private, "last_name", None)] if p
+        ).strip() if private is not None else None
+        create_audit_log(
+            db,
+            user.user_id,
+            "account_deleted",
+            "users",
+            user.user_id,
+            {
+                "self_service": True,
+                "name": deleted_name or None,
+                "email": original_email,
+            },
+            commit=False,
+        )
 
         db.commit()
     except SQLAlchemyError as e:
@@ -1239,6 +1276,18 @@ async def update_user_profile(
         user_row = db.query(User).filter(User.user_id == user_id).first()
         if user_row:
             setattr(user_row, 'verification_note', verification_note)
+
+    # 3d. Recompute the server-authoritative onboarding flag after any profile
+    # mutation. Progressive onboarding writes sections individually via PATCH
+    # (identity, ack-no-employer, repaired phone), so the flag must be
+    # re-evaluated here too — not only in POST /user/onboard — or a user who
+    # satisfies the rule via PATCH stays stuck behind the onboarding gate.
+    try:
+        from core.onboarding import refresh_user_onboard_state
+        db.flush()
+        refresh_user_onboard_state(target, db)
+    except Exception as ob_err:
+        logger.warning(f"refresh_user_onboard_state after PATCH failed (non-fatal): {ob_err}")
 
     db.commit()
     
@@ -1715,36 +1764,44 @@ async def onboard_job(job_info: OnboardJob, db: Session = Depends(config.get_db)
             if hasattr(private_user, key):
                 setattr(private_user, key, value)
 
-        # Upsert Job
+        # Upsert Job — skipped on the progressive-onboarding "no employer" path
+        # (no job_data). The ack flag travels in user_data above; the refresh
+        # below is what actually satisfies the onboarding gate in that case.
         existing_job = db.query(Job).filter(Job.private_user_id == private_user_id).first()
-        job_data_dict = job_info.job_data.model_dump(exclude_unset=True)
-
-        # Resolve employer_brn → company_id so the job is linkable via ID queries
-        if job_data_dict.get('employer_brn') and not job_data_dict.get('company_id'):
-            brn_lookup = job_data_dict['employer_brn'].strip().lower()
-            matched_company = db.query(Company).filter(
-                func.lower(Company.brn) == brn_lookup
-            ).first()
-            if matched_company:
-                job_data_dict['company_id'] = matched_company.company_id
-                # Also link the PrivateUser to the company if not already set
-                if not private_user.company_id:
-                    private_user.company_id = matched_company.company_id
-                    from services.employee_code_service import ensure_employee_code
-                    ensure_employee_code(db, private_user)
-
         job_obj = None
-        if existing_job:
-            # Company-locked self-edit: keep the existing job as-is (employment
-            # fields such as first_date_of_employment are frozen). Admins bypass.
-            if not enforce_company_lock:
-                for key, value in job_data_dict.items():
-                    if hasattr(existing_job, key):
-                        setattr(existing_job, key, value)
+        if job_info.job_data is not None:
+            job_data_dict = job_info.job_data.model_dump(exclude_unset=True)
+
+            # Resolve employer_brn → company_id so the job is linkable via ID queries
+            if job_data_dict.get('employer_brn') and not job_data_dict.get('company_id'):
+                brn_lookup = job_data_dict['employer_brn'].strip().lower()
+                matched_company = db.query(Company).filter(
+                    func.lower(Company.brn) == brn_lookup
+                ).first()
+                if matched_company:
+                    job_data_dict['company_id'] = matched_company.company_id
+                    # Also link the PrivateUser to the company if not already set
+                    if not private_user.company_id:
+                        private_user.company_id = matched_company.company_id
+                        from services.employee_code_service import ensure_employee_code
+                        ensure_employee_code(db, private_user)
+
+            if existing_job:
+                # Company-locked self-edit: keep the existing job as-is (employment
+                # fields such as first_date_of_employment are frozen). Admins bypass.
+                if not enforce_company_lock:
+                    for key, value in job_data_dict.items():
+                        if hasattr(existing_job, key):
+                            setattr(existing_job, key, value)
+                job_obj = existing_job
+            else:
+                job_pydantic = CreateJob(**job_data_dict)
+                job_obj = await create_job(job_pydantic, db)
+        elif existing_job:
+            # No job payload but a job already exists — leave it intact. This
+            # is how an already-employed user saves identity/compliance edits
+            # without resubmitting the job block.
             job_obj = existing_job
-        else:
-            job_pydantic = CreateJob(**job_data_dict)
-            job_obj = await create_job(job_pydantic, db)
 
         # Finishing onboarding promotes a self-signup placeholder to a real job:
         # clear the draft flag so it now counts toward the employee's completed
@@ -1753,11 +1810,13 @@ async def onboard_job(job_info: OnboardJob, db: Session = Depends(config.get_db)
         if job_obj is not None and getattr(job_obj, 'is_onboarding_draft', False):
             job_obj.is_onboarding_draft = False
 
-        db.flush()  # Ensure job_obj has an ID for new jobs
+        if job_obj is not None:
+            db.flush()  # Ensure job_obj has an ID for new jobs
 
         # Upsert Salary — skipped for a company-locked self-edit (salary is a
-        # frozen company field; admins bypass).
-        if hasattr(job_info, 'salary_data') and job_info.salary_data and not enforce_company_lock:
+        # frozen company field; admins bypass) and when there is no job to
+        # attach it to (progressive onboarding / no-employer path).
+        if job_obj is not None and job_info.salary_data is not None and not enforce_company_lock:
             salary_data_dict = job_info.salary_data.model_dump(exclude_unset=True)
             existing_salary = db.query(Salary).filter(Salary.job_id == job_obj.job_id).first()
 
@@ -2399,6 +2458,7 @@ def _parse_dispute_range(since: Optional[str], until: Optional[str]):
 @router.get('/disputes/company/{company_id}', status_code=200)
 async def get_company_disputes(
     company_id: int,
+    request: Request,
     channel: Optional[str] = Query("internal", description="internal | external | all"),
     dispute_status: Optional[str] = Query(None, alias="status"),
     since: Optional[str] = Query(None, description="ISO date/datetime, inclusive lower bound on created_at"),
@@ -2521,7 +2581,7 @@ async def get_company_disputes(
                     "expected_outcome": d.expected_outcome,
                     "occurrence_description": d.occurrence_description,
                     "date_of_occurrence": d.date_of_occurrence.isoformat() if d.date_of_occurrence else None,
-                    "attachment_url": d.attachment_url,
+                    "attachment_url": attachment_proxy.proxy_url(request, d.right_id, d.attachment_url),
                     "attachment_scan_result": getattr(d, "attachment_scan_result", None),
                     "assigned_to": d.assigned_to,
                     "internal_notes": d.internal_notes,
@@ -2559,6 +2619,7 @@ async def get_company_disputes(
 
 @router.get('/disputes/compliance', status_code=200)
 async def get_compliance_disputes(
+    request: Request,
     channel: Optional[str] = Query("all", description="internal | external | all"),
     dispute_status: Optional[str] = Query(None, alias="status"),
     only_aging: bool = Query(False, description="If true, restrict to reports past 5 working days"),
@@ -2681,7 +2742,7 @@ async def get_compliance_disputes(
                 "expected_outcome": d.expected_outcome,
                 "occurrence_description": d.occurrence_description,
                 "date_of_occurrence": d.date_of_occurrence.isoformat() if d.date_of_occurrence else None,
-                "attachment_url": d.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, d.right_id, d.attachment_url),
                 "assigned_to": d.assigned_to,
                 "internal_notes": d.internal_notes,
                 "resolution": d.resolution,
@@ -3191,7 +3252,7 @@ async def list_owner_messages(
                 # Owner thread mirrors the public portal — handler user_ids
                 # are not exposed (could de-anonymise the investigator).
                 "body": m.body,
-                "attachment_url": m.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, right_id, m.attachment_url, m.message_id),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in messages
@@ -3395,7 +3456,7 @@ async def list_dispute_messages(
                 "author_kind": m.author_kind,
                 "author_user_id": m.author_user_id,  # handler view: shows the colleague's user_id
                 "body": m.body,
-                "attachment_url": m.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, right_id, m.attachment_url, m.message_id),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in messages
@@ -4274,4 +4335,79 @@ async def serve_vault_file(
         io.BytesIO(data),
         media_type=media_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get('/concern-attachment/{right_id}/file/{filename}', status_code=200)
+async def serve_concern_attachment(
+    right_id: int,
+    filename: str,
+    request: Request,
+    token: str = Query(..., description="View token from the concern list / thread / portal response"),
+    db: Session = Depends(config.get_db),
+):
+    """Stream a concern evidence / thread-message attachment same-origin.
+
+    Concern attachments live on a private object store whose raw URLs 403 in
+    the browser (broken inline preview + dead "Open file"). The company list,
+    compliance list, handler/owner threads and the reporter portal all hand
+    out capability-scoped proxy URLs pointing here (see
+    services/attachment_proxy.py). This endpoint validates the signed token
+    and streams the bytes. `filename` is cosmetic (preserves the extension for
+    inline preview + download) — the object is resolved from the DB row, never
+    from client input.
+    """
+    from services.attachment_proxy import PURPOSE
+    from core.model import UserRight, ConcernMessage
+
+    payload = decode_token(token) if token else None
+    claims = (payload or {}).get("user") or {}
+    if (
+        not payload
+        or payload.get("refresh", False)
+        or claims.get("purpose") != PURPOSE
+        or claims.get("right_id") != right_id
+    ):
+        raise HTTPException(status_code=401, detail="Invalid or expired view token")
+
+    concern = db.query(UserRight).filter(UserRight.right_id == right_id).one_or_none()
+    if concern is None:
+        raise HTTPException(status_code=404, detail="Concern not found")
+
+    # Resolve the object strictly from the DB row the token points at — the
+    # attachment must genuinely belong to this concern (defence against a
+    # token being reused to fetch an unrelated object).
+    message_id = claims.get("message_id")
+    if message_id:
+        msg = (
+            db.query(ConcernMessage)
+            .filter(
+                ConcernMessage.message_id == message_id,
+                ConcernMessage.right_id == right_id,
+            )
+            .one_or_none()
+        )
+        source_url = msg.attachment_url if msg else None
+    else:
+        source_url = concern.attachment_url
+    if not source_url:
+        raise HTTPException(status_code=404, detail="No file attached to this concern")
+
+    data = get_storage_service().download_bytes(source_url)
+    if data is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve the stored file")
+
+    import mimetypes
+    media_type = (
+        mimetypes.guess_type(filename)[0]
+        or mimetypes.guess_type(source_url.split("?", 1)[0])[0]
+        or "application/octet-stream"
+    )
+    from fastapi.responses import StreamingResponse
+    import io
+    safe_name = (filename or f"attachment-{right_id}").replace('"', "")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
     )

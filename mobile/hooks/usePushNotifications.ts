@@ -59,11 +59,7 @@ export default function usePushNotifications() {
 
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => {
-      if (token) {
-        setExpoPushToken(token);
-        // Register token with backend
-        registerPushToken(token);
-      }
+      if (token) setExpoPushToken(token);
     });
 
     // Listen for incoming notifications while the app is active
@@ -94,6 +90,17 @@ export default function usePushNotifications() {
       responseListener.current?.remove();
     };
   }, []);
+
+  // Register the push token with the backend ONLY once authenticated. Doing it
+  // on mount fired before login, and the API client correctly blocked the
+  // protected /user/register-push-token call ("No authentication token
+  // available") — then surfaced it as a red error. Re-running on
+  // isAuthenticated also registers a token obtained while logged out.
+  useEffect(() => {
+    if (isAuthenticated && expoPushToken) {
+      registerPushToken(expoPushToken);
+    }
+  }, [isAuthenticated, expoPushToken]);
 
   // Replay a parked notification route once the user becomes authenticated.
   useEffect(() => {

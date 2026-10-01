@@ -103,7 +103,7 @@ export default function VerifyOtpLogin() {
             if (user.user_type === "company") {
                 router.replace("/company_dashboard/home");
             } else {
-                router.replace(user.onboard_complete ? "/private_dashboard/home" : "/private_dashboard/profile");
+                router.replace(user.onboard_complete ? "/private_dashboard/home" : "/private_dashboard/setup" as any);
             }
         }
     }, [phone, login, router]);

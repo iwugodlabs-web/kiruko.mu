@@ -16,6 +16,7 @@ Steps:
                            (GUARDED: supersede() rejects a duplicate
                            effective_from, so only seed when absent)
   5. MU overtime rule    — required by M2 payroll-run creation (self-skips)
+  6. TZ public holidays  — full 2026 Tanzania holiday list (idempotent)
 
 Usage:  cd /app && python3 scripts/seed_all.py
 """
@@ -90,6 +91,11 @@ def main() -> None:
     print("[seed_all] MU overtime rule ...")
     from scripts import seed_overtime_rules_mu
     seed_overtime_rules_mu.main()
+
+    # 6. TZ public holidays (idempotent — deletes + re-inserts the full list).
+    print("[seed_all] TZ public holidays ...")
+    from scripts import seed_tz_holidays
+    seed_tz_holidays.main()
 
     print("[seed_all] complete.")
 

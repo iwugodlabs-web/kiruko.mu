@@ -755,6 +755,20 @@ export const fetchCompanyUsers = async (companyId: number, status?: string): Pro
     }
 };
 
+// Self-signup claimants: employees who signed up and typed this company's BRN.
+// They live as draft placeholder jobs (linked only by employer_brn) and are
+// EXCLUDED from the company roster (fetchCompanyUsers) by design — this is the
+// only way to surface them for verification. Backend authorizes by BRN owner.
+export const fetchCompanyBrnClaimants = async (companyBrn: string): Promise<any[] | ApiError> => {
+    try {
+        const response = await api.get(`/job/company-brn/${encodeURIComponent(companyBrn)}`);
+        return Array.isArray(response.data) ? response.data : (response.data?.data ?? []);
+    } catch (error: any) {
+        console.error('Failed to fetch BRN claimants:', error.response?.data || error.message);
+        return { error: error.response?.data?.detail || error.response?.data?.message || error.message || 'Failed to fetch pending claimants', status: error.response?.status || 500 };
+    }
+};
+
 export const searchCompanyUsers = async (
     companyId: number,
     q: string,

@@ -7,7 +7,7 @@ raises into a request path.
 
 Key/host env (set in backend/.env):
   * ``PUBLIC_POSTHOG_API_KEY`` (fallback ``POSTHOG_API_KEY``)
-  * ``POSTHOG_HOST`` (default https://us.i.posthog.com)
+  * ``POSTHOG_HOST`` (default https://eu.i.posthog.com)
 
 Events emitted (see plan doc §6 / §4.4):
   * ``time_log.clock_out_superseded`` / ``time_log.clock_out_deferred``
@@ -23,7 +23,7 @@ from typing import Any, Optional
 logger = logging.getLogger("kontokaz.analytics")
 
 _API_KEY = os.environ.get("PUBLIC_POSTHOG_API_KEY") or os.environ.get("POSTHOG_API_KEY")
-_HOST = os.environ.get("POSTHOG_HOST", "https://us.i.posthog.com")
+_HOST = os.environ.get("POSTHOG_HOST", "https://eu.i.posthog.com")
 
 _ENABLED = bool(_API_KEY)
 _posthog = None

@@ -1,5 +1,6 @@
 from db_models.crud.job import (create_job, create_time_log, get_job_by_id, get_all_jobs, get_jobs_by_company, update_job, delete_job, get_all_time_logs, get_time_logs_by_user, get_time_logs_by_job, get_time_logs_by_company, get_job_history, update_job_simple, create_salary, update_salary, create_schedule, get_schedule, get_schedules_by_company, delete_schedule, update_schedule, update_my_schedule_status, verify_schedule_completion, update_time_log, create_break_log, update_break_log)
 from fastapi import APIRouter, Depends, status, HTTPException, Query, UploadFile, File, Request
+from fastapi.responses import JSONResponse
 import fastapi as _fastapi
 import logging
 import sys
@@ -11,6 +12,7 @@ from core import config
 from core.dependencies import get_current_user, require_company_read_access, require_company_scope, assert_company_access
 from core.idempotency import require_idempotency_key
 from core.model import Salary as SalaryORM, User
+from db_models.crud.audit import create_audit_log
 from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult
 from sqlalchemy.orm import Session
 from core.exceptions import EnrollmentException as onbording_exceptions
@@ -134,7 +136,12 @@ async def get_salary_by_job_id(job_id: int, current_user: User = Depends(get_cur
     try:
         salary = db.query(SalaryORM).filter(SalaryORM.job_id == job_id).first()
         if not salary:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salary not found for this job")
+            # "No salary yet" is a normal state for a new/placeholder job (e.g. a
+            # freshly signed-up employee), NOT an error. Returning 404 here spammed
+            # the server access log and the mobile client's response-error
+            # interceptor on every home/clock-in load. Return 200 with a null body
+            # instead; the client maps null → "no salary" exactly as it did the 404.
+            return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "success", "data": None})
         from core.model import Job as JobORM
         _job = db.query(JobORM).filter(JobORM.job_id == job_id).first()
         # A private user may always read the salary on their OWN job, even when the
@@ -165,7 +172,26 @@ async def update_salary_endpoint(salary_id: int, salary: dict = _fastapi.Body(..
     """Update an existing salary record. Scoped to the salary's company."""
     try:
         _assert_salary_access(salary_id, current_user, db)
+        before = db.query(SalaryORM).filter(SalaryORM.salary_id == salary_id).first()
+        before_snap = {
+            "salary": str(before.salary),
+            "allowance": str(before.allowance),
+            "revenue": str(getattr(before, "revenue", None)),
+        } if before else {}
         updated_salary = await update_salary(salary_id, salary, db)
+        create_audit_log(
+            db, current_user.user_id, "salary.update", "salary", salary_id,
+            {
+                "before": before_snap,
+                "after": {
+                    "salary": str(updated_salary.salary),
+                    "allowance": str(updated_salary.allowance),
+                    "revenue": str(getattr(updated_salary, "revenue", None)),
+                },
+                "private_user_id": getattr(updated_salary, "private_user_id", None),
+            },
+            commit=False,
+        )
         db.commit()
         db.refresh(updated_salary)
     except HTTPException:
@@ -2083,21 +2109,58 @@ async def delete_schedule_endpoint(schedule_id: int, current_user: User = Depend
 # --- Employee Verification Endpoints ---
 
 @router.get('/company-brn/{company_brn}', status_code=200, response_model=List[PendingEmployee])
-def get_jobs_by_company_brn(company_brn: str, db: Session = Depends(config.get_db)):
-    """Get all job profiles for employees who claim to work for a company (by BRN)"""
+def get_jobs_by_company_brn(
+    company_brn: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(config.get_db),
+):
+    """Get all job profiles for employees who claim to work for a company (by BRN).
+
+    Surfaces self-signup claimants (draft placeholder jobs linked only by
+    employer_brn) so the employer can verify them — they are excluded from the
+    company roster (`/users/company/{id}`) by design.
+
+    Auth: the caller must be able to read the company that owns this BRN
+    (company member/admin, or a platform read-operator). Previously this was
+    UNAUTHENTICATED and leaked pending employees' PII (passport number, DOB,
+    phone, salary) to anyone who knew or guessed a BRN.
+
+    The company/BRN match is case-insensitive and whitespace-trimmed, anchored
+    to the company's canonical BRN, so a claimant who typed the BRN in a
+    different case still surfaces (mirrors get_users_by_company).
+    """
+    from sqlalchemy import func
+    from core.model import Company
+    from core.dependencies import assert_company_access
+
+    # Resolve + authorize BEFORE the try below — that block's bare `except
+    # Exception` would otherwise convert a 403/404 into a 500.
+    normalized = (company_brn or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No company found for this BRN")
+    company = (
+        db.query(Company)
+        .filter(func.lower(func.trim(Company.brn)) == normalized.lower())
+        .first()
+    )
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No company found for this BRN")
+    assert_company_access(current_user, company.company_id, db)
+    canonical_brn = (company.brn or normalized).strip()
+
     try:
         from core.model import Job, PrivateUser, User
         from schema.job_schema import PendingEmployee
 
         # Join Job with PrivateUser and User to get complete employee information
         logger.info(f"Searching for jobs with employer_brn: '{company_brn}'")
-        
+
         jobs = db.query(Job).join(
             PrivateUser, Job.private_user_id == PrivateUser.private_user_id
         ).join(
             User, PrivateUser.user_id == User.user_id
         ).filter(
-            Job.employer_brn == company_brn
+            func.lower(func.trim(Job.employer_brn)) == canonical_brn.lower()
         ).all()
         
         logger.info(f"Found {len(jobs)} jobs with complete user data for company BRN: {company_brn}")

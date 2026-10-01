@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 from core import config
 from core.concern_states import ActorKind, ConcernStatus, StateTransitionError, validate_transition
 from core.security import create_access_token, decode_token
-from services import concern_audit, concern_pin, concern_portal_security, hcaptcha
+from services import attachment_proxy, concern_audit, concern_pin, concern_portal_security, hcaptcha
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ async def get_case(
         "expected_outcome": case.expected_outcome,
         "occurrence_description": case.occurrence_description,
         "date_of_occurrence": case.date_of_occurrence.isoformat() if case.date_of_occurrence else None,
-        "attachment_url": case.attachment_url,
+        "attachment_url": attachment_proxy.proxy_url(request, case.right_id, case.attachment_url),
         "attachment_scan_result": case.attachment_scan_result,
         "resolution": case.resolution,  # employee may see the resolution text
         "created_at": case.created_at.isoformat() if case.created_at else None,
@@ -285,7 +285,7 @@ async def get_case(
                 # Reporter sees the handler's posts — but never the handler's
                 # personal user_id (could de-anonymise an internal investigator).
                 "body": m.body,
-                "attachment_url": m.attachment_url,
+                "attachment_url": attachment_proxy.proxy_url(request, case.right_id, m.attachment_url, m.message_id),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in messages

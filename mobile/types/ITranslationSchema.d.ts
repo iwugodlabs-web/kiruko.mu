@@ -43,6 +43,14 @@ interface ITranslationSchema {
 		unknown: string;
 		invalid: string;
 		notAvailable: string;
+		done: string;
+		dayMon: string;
+		dayTue: string;
+		dayWed: string;
+		dayThu: string;
+		dayFri: string;
+		daySat: string;
+		daySun: string;
 	};
 
 	transfersScreen: {
@@ -497,6 +505,7 @@ interface ITranslationSchema {
 		couldNotLoad: string;
 		sharingNotAvailable: string;
 		couldNotOpenPdf: string;
+		notFinalized: string;
 		brnLabel: string;
 		payPeriodLabel: string;
 		homeSiteLabel: string;
@@ -553,6 +562,61 @@ interface ITranslationSchema {
 		noCompanyBody: string;
 	};
 
+	setup: {
+		title: string;
+		subtitle: string;
+		whereDoYouWork: string;
+		whereHint: string;
+		brnPlaceholder: string;
+		employerName: string;
+		jobTitle: string;
+		schedule: string;
+		scheduleHint: string;
+		start: string;
+		end: string;
+		addSalary: string;
+		addSalaryHint: string;
+		cta: string;
+		pickDay: string;
+		noUser: string;
+		saveFailed: string;
+		unexpected: string;
+		later: string;
+		notWorking: string;
+		summary: string;
+	},
+	profileHub: {
+		title: string;
+		you: string;
+		employee: string;
+		independent: string;
+		allSet: string;
+		finishSetup: string;
+		finish: string;
+		optionalHeading: string;
+		locked: string;
+		complete: string;
+		optional: string;
+		incomplete: string;
+		workTitle: string;
+		workSub: string;
+		workDone: string;
+		workTodo: string;
+		payTitle: string;
+		paySub: string;
+		payDone: string;
+		payTodo: string;
+		identityTitle: string;
+		identitySub: string;
+		identityDone: string;
+		identityTodo: string;
+		complianceTitle: string;
+		complianceSub: string;
+		complianceTodo: string;
+		complianceDone: string;
+		needEmployerForPay: string;
+		needEmployerForCompliance: string;
+	},
 	profile: {
 		lockedBanner: string;
 		lockedDescription: string;
@@ -584,6 +648,10 @@ interface ITranslationSchema {
 		labelEmploymentStartDate: string;
 		labelEmployerName: string;
 		labelEmployerBrn: string;
+		brnSearchPlaceholder: string;
+		brnCompanyFound: string;
+		changeCountryAnyway: string;
+		countryFromPhone: string;
 		labelJobTitle: string;
 		labelEmployerEmail: string;
 		labelEmployerPhone: string;
@@ -616,6 +684,20 @@ interface ITranslationSchema {
 		placeholderHoursMonth: string;
 		placeholderDaysMonth: string;
 		placeholderBreakMins: string;
+		save: string;
+		saveFailed: string;
+		searching: string;
+		dobRequired: string;
+		passportRequired: string;
+		salaryRequired: string;
+		jobRequired: string;
+		autoClockHint: string;
+		labelDormitory: string;
+		labelDecentHousing: string;
+		labelYourPhone: string;
+		genderMale: string;
+		genderFemale: string;
+		genderOther: string;
 	};
 
 	settings: {
@@ -938,6 +1020,7 @@ interface ITranslationSchema {
 		calculating: string;
 		setupRequired: string;
 		configureSalary: string;
+		tipEmployer: string;
 		noPayBasisConfigured: string;
 		noClockinsThisPeriod: string;
 		fromSessionsSingular: string;
@@ -979,6 +1062,13 @@ interface ITranslationSchema {
 		completeProfile: string;
 		profilePercent: string;
 		converting: string;
+		tipPayslip: string;
+		tipIdentity: string;
+		tipCompliance: string;
+		finishSetupTitle: string;
+		finishSetupBody: string;
+		getMostTitle: string;
+		getMostBody: string;
 	};
 
 	savingsGoal: {
@@ -1466,6 +1556,7 @@ interface ITranslationSchema {
 		register: string;
 		alreadyHaveAccount: string;
 		logIn: string;
+		useDifferentEmail: string;
 		passwordStrength: string;
 		strengthWeak: string;
 		strengthMedium: string;

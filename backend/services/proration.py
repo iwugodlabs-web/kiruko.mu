@@ -181,6 +181,41 @@ def compute_proration_factor(
     return factor.quantize(Decimal("0.00000001"))
 
 
+def paid_hours_for_timelog(
+    hours_worked,
+    start_time,
+    work_start_time,
+    work_end_time,
+    company_timezone: Optional[str] = None,
+) -> Decimal:
+    """Paid hours for ONE time-log row: its stored ``hours_worked`` minus the
+    early-minutes clamp to the job's scheduled shift start
+    (``KioskService.effective_paid_start`` — a clock-in before the shift start
+    doesn't pay for the early minutes).
+
+    Returned UNQUANTIZED on purpose: callers summing many rows should add these
+    and quantize the total ONCE, so per-row rounding never accumulates into
+    drift. Returns ``Decimal('0')`` for a row with no stored hours.
+
+    Shared by ``sum_hours_worked_in_period`` (payroll's own hourly aggregate)
+    and the per-payslip timesheet endpoint, so the two never disagree on what a
+    row pays.
+    """
+    if hours_worked is None:
+        return Decimal("0")
+    from services.kiosk_service import KioskService
+
+    hrs_dec = Decimal(hours_worked)
+    if start_time is not None:
+        effective_start = KioskService.effective_paid_start(
+            work_start_time, work_end_time, company_timezone, start_time,
+        )
+        if effective_start > start_time:
+            early_seconds = (effective_start - start_time).total_seconds()
+            hrs_dec = max(Decimal("0.00"), hrs_dec - Decimal(early_seconds) / Decimal(3600))
+    return hrs_dec
+
+
 def sum_hours_worked_in_period(
     db: Session,
     *,
@@ -216,7 +251,6 @@ def sum_hours_worked_in_period(
     from core.model import Job, TimeLog
     from datetime import datetime, time, timezone
     from sqlalchemy import or_
-    from services.kiosk_service import KioskService
 
     # Start of period (00:00) to end of period inclusive (23:59:59). time_logs
     # columns are TIMESTAMPTZ, so bound with explicit UTC — a naive bound would
@@ -246,17 +280,11 @@ def sum_hours_worked_in_period(
         q = q.filter(TimeLog.admin_approved.is_(True))
 
     rows = q.all()
-    total = Decimal("0.00")
+    total = Decimal("0")
     for hrs, row_start, work_start_time, work_end_time in rows:
-        if hrs is None:
-            continue
-        hrs_dec = Decimal(hrs)
-        if row_start is not None:
-            effective_start = KioskService.effective_paid_start(
-                work_start_time, work_end_time, company_timezone, row_start,
-            )
-            if effective_start > row_start:
-                early_seconds = (effective_start - row_start).total_seconds()
-                hrs_dec = max(Decimal("0.00"), hrs_dec - Decimal(early_seconds) / Decimal(3600))
-        total += hrs_dec
+        # Sum UNQUANTIZED per-row values and quantize the total once (below) —
+        # quantizing each row first would accumulate rounding drift.
+        total += paid_hours_for_timelog(
+            hrs, row_start, work_start_time, work_end_time, company_timezone
+        )
     return total.quantize(Decimal("0.01"))

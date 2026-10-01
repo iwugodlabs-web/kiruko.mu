@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case, or_
 from core.model import Company, Country, Job, PrivateUser, Salary
 
 
@@ -42,8 +42,53 @@ def get_company_by_id(company_id: int, db: Session) -> Company:
 
 
 def get_company_by_brn(brn: str, db: Session) -> Company:
-    """Return company by BRN (trims whitespace before lookup)"""
-    return db.query(Company).filter(Company.brn == brn.strip()).first()
+    """Return company by BRN, case-insensitively (trims whitespace first).
+
+    BRNs are typed by hand during signup and stored in mixed case (e.g.
+    "Demo001"), so matching must be case-insensitive: "demo001", "Demo001" and
+    "DEMO001" all resolve to the same company. Stored values are also trimmed
+    so legacy rows with trailing spaces still match.
+    """
+    if brn is None:
+        return None
+    normalized = brn.strip()
+    if not normalized:
+        return None
+    return (
+        db.query(Company)
+        .filter(func.lower(func.trim(Company.brn)) == normalized.lower())
+        .first()
+    )
+
+
+def search_companies(q: str, db: Session, limit: int = 8) -> List[Company]:
+    """Autocomplete search over BRN + company name (case-insensitive substring).
+
+    Powers the employee onboarding "find your employer" field. Requires a
+    3-char minimum (returns [] otherwise) and caps results so it's a lookup
+    helper, not a bulk directory export. Ranks exact-BRN first, then
+    starts-with (BRN then name), then contains — so a precise BRN wins over an
+    incidental name substring.
+    """
+    if not q or len(q.strip()) < 3:
+        return []
+    term = q.strip()
+    like = f"%{term}%"
+    starts = f"{term}%"
+    rank = case(
+        (func.lower(func.trim(Company.brn)) == term.lower(), 0),
+        (func.lower(Company.brn).like(starts.lower()), 1),
+        (func.lower(Company.company_name).like(starts.lower()), 2),
+        else_=3,
+    )
+    return (
+        db.query(Company)
+        .filter(Company.status != 'deleted')
+        .filter(or_(Company.brn.ilike(like), Company.company_name.ilike(like)))
+        .order_by(rank, Company.company_name.asc())
+        .limit(max(1, min(limit, 20)))
+        .all()
+    )
 
 
 def get_company_stats(company_id: int, db: Session) -> dict:
@@ -504,8 +549,17 @@ def revoke_invite(invite_id: int, db: Session):
 
 
 def get_audit_logs(db: Session, limit: int = 50, offset: int = 0, action: str | None = None, target_type: str | None = None):
-    """Return paginated audit logs, optionally filtered by action or target_type."""
-    from core.model import AuditLog
+    """Return paginated audit logs, optionally filtered by action or target_type.
+
+    Each row's numeric `actor_user_id` is resolved to a human-readable
+    `actor_name` / `actor_email` (one batched lookup per page) so the admin
+    Audit Logs view can show WHO acted without every audit row having to
+    duplicate that PII. Rows with no actor (system automations, kiosk, or
+    anonymous filings) resolve to None. `account_deleted` still carries its
+    own name/email in `meta` because that user gets anonymized and the live
+    lookup would no longer recover it.
+    """
+    from core.model import AuditLog, User, PrivateUser
     q = db.query(AuditLog).order_by(AuditLog.created_at.desc())
     if action:
         q = q.filter(AuditLog.action == action)
@@ -513,18 +567,35 @@ def get_audit_logs(db: Session, limit: int = 50, offset: int = 0, action: str | 
         q = q.filter(AuditLog.target_type == target_type)
     total = q.count()
     logs = q.limit(limit).offset(offset).all()
-    results = [
-        {
+
+    # Batch-resolve actor identities for this page.
+    actor_ids = {l.actor_user_id for l in logs if l.actor_user_id is not None}
+    actor_map: dict = {}
+    if actor_ids:
+        rows = (
+            db.query(User.user_id, User.email, PrivateUser.first_name, PrivateUser.last_name)
+            .outerjoin(PrivateUser, PrivateUser.user_id == User.user_id)
+            .filter(User.user_id.in_(actor_ids))
+            .all()
+        )
+        for uid, email, first_name, last_name in rows:
+            name = " ".join(p for p in [first_name, last_name] if p).strip() or None
+            actor_map[uid] = {"name": name, "email": email}
+
+    results = []
+    for l in logs:
+        actor = actor_map.get(l.actor_user_id) or {}
+        results.append({
             'id': l.id,
             'actor_user_id': l.actor_user_id,
+            'actor_name': actor.get('name'),
+            'actor_email': actor.get('email'),
             'action': l.action,
             'target_type': l.target_type,
             'target_id': l.target_id,
             'meta': getattr(l, 'meta', None),
             'created_at': l.created_at.isoformat() if getattr(l, 'created_at', None) else None,
-        }
-        for l in logs
-    ]
+        })
     return {'total': total, 'data': results}
 
 

@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import axios from 'axios';
 import React, { useEffect, useState, useRef } from 'react';
 import { AppState } from 'react-native';
 import { checkAuthToken } from '../../services/api';
@@ -28,44 +27,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (error) {
             console.error('Error checking token expiration:', error);
             return true; // If we can't decode, assume it's expired
-        }
-    };
-
-    // Silent access-token refresh. Returns the new token, or null when it
-    // can't be obtained (offline, or the refresh token itself is dead).
-    // Unlike apiClient's interceptor copy, this NEVER wipes stored tokens
-    // on failure — a failed refresh is "unknown", not "logged out".
-    const trySilentRefresh = async (): Promise<string | null> => {
-        try {
-            const refreshToken = await AsyncStorage.getItem('refreshToken');
-            if (!refreshToken) return null;
-            // Bare axios (not `api`): bypasses the auth-guard interceptor so
-            // a missing/expired access token can't block the refresh itself.
-            const response = await axios.post(
-                `${api.defaults.baseURL}/user/refresh-token`,
-                { refresh_token: refreshToken },
-            );
-            if (response.data?.status === 'success' && response.data?.access_token) {
-                const newToken = response.data.access_token as string;
-                await AsyncStorage.setItem('authToken', newToken);
-                api.defaults.headers.Authorization = `Bearer ${newToken}`;
-                console.log('🔄 AuthProvider: Silent refresh succeeded.');
-                return newToken;
-            }
-            return null;
-        } catch {
-            return null;
-        }
-    };
-
-    // Best-effort connectivity probe. Used to tell "server rejected us"
-    // apart from "we can't reach the server" before destroying a session.
-    const isOffline = async (): Promise<boolean> => {
-        try {
-            const state = await NetInfo.fetch();
-            return !state.isConnected || state.isInternetReachable === false;
-        } catch {
-            return false;
         }
     };
 
@@ -146,10 +107,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const checkAuth = async (opts?: { silent?: boolean }): Promise<boolean> => {
         console.log('🔍 AuthProvider: Starting authentication check...');
         console.log('🔍 Current API headers:', JSON.stringify(api.defaults.headers, null, 2));
+
+        // Offline short-circuit. A connectivity loss (airplane mode, tunnel)
+        // must NEVER flip isLoading — that unmounts the active navigator and
+        // resets the user to the home tab, which is what made offline clock-in
+        // unusable — nor log the user out on a client-side token-expiry check.
+        // Trust the cached session until the server is reachable again.
+        try {
+            const net = await NetInfo.fetch();
+            const offline = net.isConnected === false || net.isInternetReachable === false;
+            if (offline) {
+                const stored = await AsyncStorage.getItem('user');
+                if (stored) {
+                    try {
+                        setUserIfChanged(JSON.parse(stored));
+                        setIsLoading(false);
+                        console.log('📴 AuthProvider: Offline — restored cached session.');
+                        return true;
+                    } catch {
+                        /* fall through to unauthenticated */
+                    }
+                }
+                setIsLoading(false);
+                return false;
+            }
+        } catch {
+            // NetInfo unavailable — continue with the online path.
+        }
+
         if (!opts?.silent) setIsLoading(true);
 
         try {
-            let token = await AsyncStorage.getItem('authToken');
+            const token = await AsyncStorage.getItem('authToken');
             console.log('🔑 Token from storage:', token ? `${token.substring(0, 30)}...` : 'null');
 
             // 1. If no token, user is not authenticated.
@@ -163,34 +152,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return false; // No need to call logout, nothing to clear
             }
 
-            // Client-side check for token expiration before hitting the server.
-            // An expired access token is NOT proof the session is dead — the
-            // refresh token usually outlives it. The old code logged out here
-            // unconditionally, so opening the app offline with an expired
-            // access token wiped the whole session (and all offline clock
-            // state with it). Now: refresh when possible, ride the cached
-            // user when offline, and only log out on explicit server denial.
+            // Client-side expiry is only a heads-up — we do NOT log out on it.
+            // If we did, an expired access token would sign the user out the
+            // moment they lost connectivity, breaking offline clock-in. Let the
+            // server be the authority: online an expired token 401s below and
+            // logs out; offline we fall through to the cached-session fallback.
             if (isTokenExpired(token)) {
-                console.log('⏰ AuthProvider: Access token expired client-side. Attempting silent refresh first.');
-                const refreshed = await trySilentRefresh();
-                if (refreshed) {
-                    token = refreshed;
-                } else if (await isOffline()) {
-                    console.log('🌐 AuthProvider: Refresh unreachable (offline). Falling back to cached user.');
-                    if (await useStoredUserFallback('expired-access-token-offline')) return true;
-                    // No usable cache either — stay logged out, but don't
-                    // wipe: the tokens may still be valid server-side.
-                    delete api.defaults.headers.Authorization;
-                    lastUserKeyRef.current = '';
-                    setUser(undefined);
-                    if (!opts?.silent) setIsLoading(false);
-                    return false;
-                } else {
-                    console.log('🚫 AuthProvider: Online, but refresh failed — session is truly dead. Logging out.');
-                    delete api.defaults.headers.Authorization;
-                    await logout();
-                    return false;
-                }
+                console.log('⏰ AuthProvider: Token appears expired client-side; deferring to server validation.');
             }
 
             // Set the authorization header for API requests

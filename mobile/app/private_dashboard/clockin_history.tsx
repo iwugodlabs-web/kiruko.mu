@@ -11,13 +11,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import useAuth from '../hooks/useAuth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { Box } from '@gluestack-ui/themed';
 import { payroll } from '@/services/payroll-api';
 import SmartAddress from '@/components/SmartAddress';
 import { useResolvedAddress } from '@/services/geocode';
+import { downloadAndSharePdf } from '@/services/payslip-download';
 
 // Clock-out line with display-time geocoding (hook can't run in the log map).
 const OutAddressLine = ({ address, format }: { address: string; format: (resolved: string) => string }) => {
@@ -305,52 +304,35 @@ const ClockInHistory: React.FC = () => {
   // M4: download a watermarked estimated payslip computed from these
   // clock-ins. Server-clamped to current month, ignored-by-finalized.
   const handleDownloadEstimate = React.useCallback(async () => {
-    try {
-      const url = payroll.estimatedPayslipPdfUrl();
-      const token = await AsyncStorage.getItem('authToken');
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const localUri = `${FileSystem.cacheDirectory}estimated_payslip_${ts}.pdf`;
-      const result = await FileSystem.downloadAsync(url, localUri, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (result.status === 409) {
-        let code: string | undefined;
-        try {
-          const body = await FileSystem.readAsStringAsync(result.uri);
-          code = JSON.parse(body)?.detail?.code;
-        } catch {}
-        if (code === 'NO_CLOCKINS_FOR_PERIOD') {
-          Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.noClockinsForEstimate'));
-          return;
-        }
-        if (code === 'NO_PAY_BASIS_CONFIGURED') {
-          Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.noPayBasis'));
-          return;
-        }
+    const res = await downloadAndSharePdf({
+      url: payroll.estimatedPayslipPdfUrl(),
+      filenamePrefix: 'estimated_payslip',
+      dialogTitle: t('payslip.estimateDialogTitle'),
+    });
+    if (res.status === 'shared') return;
+    switch (res.code) {
+      case 'NO_CLOCKINS_FOR_PERIOD':
+        Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.noClockinsForEstimate'));
+        break;
+      case 'NO_PAY_BASIS_CONFIGURED':
+        Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.noPayBasis'));
+        break;
+      case 'OFFICIAL_PAYSLIP_EXISTS':
         Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.officialExists'));
-        return;
-      }
-      if (result.status === 503) {
-        Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.estimatedNotAvailable'));
-        return;
-      }
-      if (result.status !== 200) {
-        Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.couldNotOpenPdf'));
-        return;
-      }
-      const ok = await Sharing.isAvailableAsync();
-      if (!ok) {
+        break;
+      case 'SHARING_UNAVAILABLE':
         Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.sharingNotAvailable'));
-        return;
-      }
-      await Sharing.shareAsync(result.uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: t('payslip.estimateDialogTitle'),
-        UTI: 'com.adobe.pdf',
-      });
-    } catch (err) {
-      console.warn('estimated payslip: download failed', err);
-      Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.couldNotOpenPdf'));
+        break;
+      case 'HTTP_ERROR':
+        if (res.httpStatus === 503) {
+          Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.estimatedNotAvailable'));
+        } else {
+          Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.couldNotOpenPdf'));
+        }
+        break;
+      default:
+        Alert.alert(t('payslip.estimateDialogTitle'), t('payslip.couldNotOpenPdf'));
+        break;
     }
   }, [t]);
 

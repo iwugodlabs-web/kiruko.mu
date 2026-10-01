@@ -66,6 +66,7 @@ from schema.salary_structure_schema import (
     SalaryStructureUsage,
 )
 from services import salary_resolver
+from db_models.crud.audit import create_audit_log
 
 
 router = APIRouter(tags=["Salary Structures"])
@@ -224,6 +225,12 @@ def create_component(
 
     comp = SalaryComponent(company_id=company_id, **payload.model_dump())
     db.add(comp)
+    db.flush()
+    create_audit_log(
+        db, current_user.user_id, "salary_component.create", "salary_component", comp.id,
+        {"company_id": company_id, "code": comp.code, "kind": comp.kind, "is_basic": comp.is_basic},
+        commit=False,
+    )
     db.commit()
     db.refresh(comp)
     return comp
@@ -259,8 +266,14 @@ def patch_component(
     )
     if comp is None:
         raise HTTPException(status_code=404, detail=f"Component {component_id} not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    changed = payload.model_dump(exclude_unset=True)
+    for key, value in changed.items():
         setattr(comp, key, value)
+    create_audit_log(
+        db, current_user.user_id, "salary_component.update", "salary_component", component_id,
+        {"company_id": company_id, "changed": changed},
+        commit=False,
+    )
     db.commit()
     db.refresh(comp)
     return comp
@@ -551,6 +564,11 @@ def create_structure(
                 order_index=line.order_index,
             )
         )
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.create", "salary_structure", s.id,
+        {"company_id": company_id, "name": s.name, "is_default": s.is_default, "line_count": len(payload.lines)},
+        commit=False,
+    )
     db.commit()
     db.refresh(s)
     return _structure_to_read(s)
@@ -633,6 +651,11 @@ def patch_structure(
     for key, value in update.items():
         setattr(s, key, value)
 
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.update", "salary_structure", structure_id,
+        {"company_id": company_id, "changed": update},
+        commit=False,
+    )
     db.commit()
     db.refresh(s)
     s = (
@@ -738,6 +761,11 @@ def archive_structure(
     s.default_for_department_id = None
     s.default_for_role = None
     s.default_for_sector_grade_id = None
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.archive", "salary_structure", structure_id,
+        {"company_id": company_id, "name": s.name},
+        commit=False,
+    )
     db.commit()
     return None
 
@@ -775,6 +803,11 @@ def restore_structure(
         return _structure_to_read(s)
 
     s.archived_at = None
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.restore", "salary_structure", structure_id,
+        {"company_id": company_id, "name": s.name},
+        commit=False,
+    )
     db.commit()
     db.refresh(s)
     s = (
@@ -830,6 +863,12 @@ def add_structure_line(
         order_index=payload.order_index,
     )
     db.add(line)
+    db.flush()
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.line_add", "salary_structure_line", line.id,
+        {"company_id": company_id, "structure_id": structure_id, "component_id": line.component_id, "amount": str(line.amount)},
+        commit=False,
+    )
     db.commit()
     db.refresh(line)
     line = (
@@ -895,6 +934,11 @@ def patch_structure_line(
     for key, value in update.items():
         setattr(line, key, value)
 
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.line_update", "salary_structure_line", line_id,
+        {"company_id": company_id, "structure_id": structure_id, "changed": {k: str(v) for k, v in update.items()}},
+        commit=False,
+    )
     db.commit()
     db.refresh(line)
     line = (
@@ -938,6 +982,11 @@ def delete_structure_line(
     if line is None:
         raise HTTPException(status_code=404, detail=f"Line {line_id} not found")
 
+    create_audit_log(
+        db, current_user.user_id, "salary_structure.line_delete", "salary_structure_line", line_id,
+        {"company_id": company_id, "structure_id": structure_id, "component_id": line.component_id},
+        commit=False,
+    )
     db.delete(line)
     db.commit()
     return None
@@ -1162,6 +1211,18 @@ def create_assignment(
     from core.profile_lock import auto_lock_on_admin_company_edit
     auto_lock_on_admin_company_edit(target, current_user, db)
 
+    create_audit_log(
+        db, current_user.user_id, "salary_assignment.create", "salary_assignment", new.id,
+        {
+            "company_id": target.company_id,
+            "private_user_id": private_user_id,
+            "structure_id": payload.structure_id,
+            "currency": payload.currency,
+            "effective_from": payload.effective_from,
+            "override_count": len(payload.overrides or []),
+        },
+        commit=False,
+    )
     db.commit()
     db.refresh(new)
     new = (

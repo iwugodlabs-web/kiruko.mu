@@ -86,7 +86,8 @@ const ProfileValidator = ({ user, isAuthenticated, authLoading, children }: Prof
       if (error === 'AUTH_REQUIRED' || error === 'USER_NOT_FOUND') {
         router.replace('/login');
       } else {
-        router.push('/private_dashboard/profile');
+        // Redesign v2 — incomplete users go to the single-screen Setup flow.
+        router.push('/private_dashboard/setup' as any);
       }
     };
 

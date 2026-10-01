@@ -130,17 +130,55 @@ _FROM_OR_JOIN_RE = re.compile(
 )
 
 
+# Column filters that scope a query to a single tenant. `company_id` is the
+# canonical one; each of the others resolves to exactly one company, so a
+# filter on any of them isolates the query just as well:
+#   employer_brn     — a company's business registration number (jobs.employer_brn)
+#   private_user_id  — one employee (belongs to exactly one company)
+#   job_id           — one job → one employee → one company
+#   department_id    — one department → one company
+# Recognising these stops the advisory guard from flagging the many legitimate
+# reads that isolate by employee / job / department / BRN rather than a literal
+# company_id (auth & context resolution, salary preview, the company leave
+# list, etc.). The strict guarantee remains M5b's Postgres RLS, not this scan.
+TENANT_SCOPE_COLUMNS: tuple[str, ...] = (
+    "company_id",
+    "employer_brn",
+    "private_user_id",
+    "job_id",
+    "department_id",
+)
+_TENANT_SCOPE_RE = re.compile(r"\b(?:" + "|".join(TENANT_SCOPE_COLUMNS) + r")\b")
+
+
+def _has_pk_id_filter(sql: str, tables: set[str]) -> bool:
+    """True when the SQL references a referenced table's own ``id`` primary key
+    in table-qualified form (e.g. ``payroll_runs.id``). Pinning a table to a
+    single PK row pins it to a single tenant, so it counts as scoped — this
+    covers DIRECT tables whose PK is ``id`` (payroll_runs, salary_structures,
+    …) rather than a ``*_id`` column already in TENANT_SCOPE_COLUMNS.
+
+    Matches the *qualified* form only. A bare ``id`` (as in the SELECT list, or
+    ``WHERE id = 1`` in a hand-written query) must NOT count, or every query
+    would pass and the guard would be neutered.
+    """
+    return any(re.search(r"\b" + re.escape(tbl) + r"\.id\b", sql) for tbl in tables)
+
+
 def _scan(sql: str) -> tuple[set[str], set[str]]:
     """Inspect a rendered SQL string. Returns:
         (multi_tenant_tables_referenced, multi_tenant_tables_considered_filtered)
 
     Heuristic for "considered filtered":
-        If any multi-tenant table is in FROM/JOIN AND the word `company_id`
-        appears anywhere in the SQL, treat all referenced multi-tenant tables
-        as filtered. This is intentionally coarse so it tolerates aliases
-        (`j.company_id`) and joins that transitively isolate via one table.
+        If any multi-tenant table is in FROM/JOIN AND the SQL carries a
+        recognised tenant-scope signal — a TENANT_SCOPE_COLUMNS filter
+        (company_id or an FK that isolates to one company) OR a qualified
+        primary-key filter on a referenced table (`<table>.id`) — treat all
+        referenced multi-tenant tables as filtered. Intentionally coarse so it
+        tolerates aliases (`j.company_id`) and joins that transitively isolate
+        via one table.
 
-    The trade-off: a query that references `company_id` in a non-WHERE
+    The trade-off: a query that references a scope column in a non-WHERE
     context (e.g. SELECT clause) gets a free pass. False positives are
     worse than false negatives for an opt-in, advisory layer — M5b's RLS
     is the strict guarantee.
@@ -156,8 +194,10 @@ def _scan(sql: str) -> tuple[set[str], set[str]]:
     if not referenced:
         return set(), set()
 
-    has_company_id = bool(re.search(r'\bcompany_id\b', text_lower))
-    return (referenced, referenced if has_company_id else set())
+    scoped = bool(_TENANT_SCOPE_RE.search(text_lower)) or _has_pk_id_filter(
+        text_lower, referenced
+    )
+    return (referenced, referenced if scoped else set())
 
 
 def _evaluate(stmt) -> Optional[str]:
@@ -178,7 +218,9 @@ def _evaluate(stmt) -> Optional[str]:
         return None
     return (
         f"tenant_guard: query touches multi-tenant tables {sorted(referenced)} "
-        f"without any company_id filter (tenant={get_current_tenant()})"
+        f"without a recognized tenant-scope filter "
+        f"(company_id / employer_brn / private_user_id / job_id / department_id / <table>.id) "
+        f"(tenant={get_current_tenant()})"
     )
 
 

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Palette } from '@/app/constants/theme';
 import { useToken } from '@gluestack-style/react';
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useRouter, usePathname } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import {
   Calculator,
@@ -17,13 +17,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import useAuth from '../hooks/useAuth';
 import { useRequireAuth } from '@/components/AuthGuard';
-import { punchSyncWorker } from '@/services/punchSyncWorker';
+import { punchSyncWorker } from '@/services/offline/syncWorker';
 
 export default function DashboardLayout() {
   const primary = useToken('colors', 'primary500');
   const inactive = useToken('colors', 'textDark700');
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuth();
   const { t } = useTranslation();
 
@@ -39,9 +40,39 @@ export default function DashboardLayout() {
   // is itself part of this layout so the bounce settles after one cycle.
   React.useEffect(() => {
     if (user && user.user_type === 'private' && user.onboard_complete === false) {
-      router.replace('/private_dashboard/profile');
+      // Redesign v2 — the mandatory gate is the single-screen Setup flow, not
+      // the old multi-step profile wall. Guard against re-replacing when we're
+      // already there (the bounce settles after one cycle).
+      if (!pathname?.includes('/private_dashboard/setup')) {
+        router.replace('/private_dashboard/setup' as any);
+      }
     }
-  }, [user, router]);
+  }, [user, router, pathname]);
+
+  // Offline clock-out queue — register the drain worker once the authed
+  // private subtree is live so queued clock-outs sync on network/appstate.
+  React.useEffect(() => {
+    if (ready) punchSyncWorker.register();
+  }, [ready]);
+
+  // Guard #3 — a queued punch that exhausted its retries is dropped. The worker
+  // has already reverted the optimistic local state; alert the employee so they
+  // redo it rather than silently believing the punch went through (which would
+  // let the cron auto-close the still-open session with a synthetic end time).
+  React.useEffect(() => {
+    if (!ready) return;
+    const unsub = punchSyncWorker.onChange(({ deadLetters }) => {
+      if (!deadLetters || deadLetters.length === 0) return;
+      const hasClockOut = deadLetters.some((d) => d.action === 'clock_out');
+      Alert.alert(
+        t('clockIn.syncFailedTitle'),
+        hasClockOut
+          ? t('clockIn.syncFailedClockOutBody')
+          : t('clockIn.syncFailedClockInBody'),
+      );
+    });
+    return unsub;
+  }, [ready, t]);
 
   // Offline clock-out queue — register the drain worker once the authed
   // private subtree is live so queued clock-outs sync on network/appstate.
@@ -263,9 +294,11 @@ export default function DashboardLayout() {
       <Tabs.Screen
         name="profile"
         options={{
+          // Progressive-onboarding hub + sections — focused sub-flow, no tab bar.
           href: null,
           title: 'Profile',
           headerShown: false,
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
         }}
       />
@@ -327,6 +360,18 @@ export default function DashboardLayout() {
           href: null,
           title: 'Ad preferences',
           headerShown: false,
+          tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="setup"
+        options={{
+          // Progressive-onboarding gate — full-screen, no tab bar.
+          href: null,
+          title: 'Setup',
+          headerShown: false,
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
         }}
       />

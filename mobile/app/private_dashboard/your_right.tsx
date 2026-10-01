@@ -15,7 +15,7 @@ import { Alert, TouchableOpacity as RNTouchableOpacity, ScrollView, StyleSheet, 
 import Animated, { FadeInUp, FadeIn, FadeOut, SlideInRight, SlideOutLeft, useSharedValue, useAnimatedStyle, withTiming } from '@/app/utils/animated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { z } from 'zod';
-import { submitUserRightReport, getUsersByCompany, getCompanyManagers } from '../../services/api';
+import { submitUserRightReport, getUsersByCompany, getCompanyManagers, getJobById } from '../../services/api';
 import useAuth from '../hooks/useAuth';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { useTranslation } from 'react-i18next';
@@ -98,12 +98,26 @@ const KnowYourRight = () => {
       }
       const userInfo = await getUserDetail(user?.user_id);
       setUserDetails(userInfo);
+      // Redesign v2 — load the job so submit can HARD-gate on employment +
+      // compliance data (a workplace report is meaningless without them).
+      const pid = (user as any)?.private_user?.private_user_id ?? (user as any)?.private_user_id;
+      if (pid) {
+        try {
+          const job: any = await getJobById(Number(pid));
+          if (job && !('error' in job)) setProfileJob(job);
+        } catch {
+          // Non-fatal — the gate will simply ask for employment details.
+        }
+      }
       setIsLoading(false);
     };
     loadUserDetails();
   }, [user]);
   const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [userDetails, setUserDetails] = useState<any>(null);
+  // Redesign v2 compliance gate — null when clear, otherwise what's missing.
+  const [complianceGate, setComplianceGate] = useState<null | 'employer' | 'compliance'>(null);
+  const [profileJob, setProfileJob] = useState<any>(null);
   // M4 — company users for the named_parties picker
   const [companyUsers, setCompanyUsers] = useState<Person[]>([]);
   // Managers / HR / admins (from the company role page) the worker can route the report to.
@@ -218,6 +232,24 @@ const KnowYourRight = () => {
     const privateUserId = user?.private_user_id ? Number(user.private_user_id) : 0;
     if (privateUserId <= 0) {
       Alert.alert('Error', 'User ID is missing. Please log in again or contact support.');
+      return;
+    }
+
+    // Redesign v2 — HARD compliance gate. A workplace report can't be filed
+    // without an employer, and the compliance section (contract/permit/
+    // deductions/housing/passport) must be reviewed first. The draft stays
+    // intact because this screen remains mounted while the user visits the
+    // relevant profile section and returns.
+    const hasEmployer = Boolean(profileJob?.job_title);
+    const complianceReviewed = Boolean(profileJob?.work_permit_type);
+    if (!hasEmployer) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setComplianceGate('employer');
+      return;
+    }
+    if (!complianceReviewed) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setComplianceGate('compliance');
       return;
     }
 
@@ -1157,6 +1189,63 @@ const KnowYourRight = () => {
             </Box>
           </Pressable>
         </Pressable>
+        </View>
+      ) : null}
+
+      {/* Redesign v2 — hard compliance gate. Blocks submission (not entry)
+          and preserves the drafted report; the user completes the relevant
+          profile section and returns here. */}
+      {complianceGate ? (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1100, elevation: 1100 }}>
+          <Pressable
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 }}
+            onPress={() => setComplianceGate(null)}
+          >
+            <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 380 }}>
+              <Box bg={Palette.white} borderRadius={20} p="$5">
+                <HStack space="sm" alignItems="center" mb="$3">
+                  <Box bg={Palette.warningTint} p="$2" rounded="$full">
+                    <MaterialIcons name="gavel" size={20} color={Palette.gold} />
+                  </Box>
+                  <Text flex={1} fontSize={Type.title} fontWeight="800" color={Palette.ink}>
+                    {complianceGate === 'employer'
+                      ? t('yourRightsForm.gateEmployerTitle', { defaultValue: 'Add your employer first' })
+                      : t('yourRightsForm.gateComplianceTitle', { defaultValue: 'A few employment details needed' })}
+                  </Text>
+                </HStack>
+                <Text fontSize={Type.body} color={Palette.gray600} mb="$5">
+                  {complianceGate === 'employer'
+                    ? t('yourRightsForm.gateEmployerBody', { defaultValue: 'A workplace report needs your employer and job details. Your draft is saved — add them, then come back and submit.' })
+                    : t('yourRightsForm.gateComplianceBody', { defaultValue: 'To file a report we need your contract, permit, deduction and housing details. Your draft is saved — complete them, then come back and submit.' })}
+                </Text>
+                <VStack space="sm">
+                  <Button
+                    bg={Palette.gold}
+                    rounded="$xl"
+                    h="$12"
+                    onPress={() => {
+                      const route = complianceGate === 'employer'
+                        ? '/private_dashboard/profile/workschedule'
+                        : '/private_dashboard/profile/compliance';
+                      setComplianceGate(null);
+                      router.push(route as any);
+                    }}
+                  >
+                    <ButtonText color={Palette.white} fontWeight="700">
+                      {complianceGate === 'employer'
+                        ? t('yourRightsForm.gateAddEmployer', { defaultValue: 'Add employer & job' })
+                        : t('yourRightsForm.gateAddDetails', { defaultValue: 'Add details' })}
+                    </ButtonText>
+                  </Button>
+                  <Button variant="outline" borderColor={Palette.gray200} rounded="$xl" h="$12" onPress={() => setComplianceGate(null)}>
+                    <ButtonText color={Palette.gray600} fontWeight="700">
+                      {t('common.cancel', { defaultValue: 'Cancel' })}
+                    </ButtonText>
+                  </Button>
+                </VStack>
+              </Box>
+            </Pressable>
+          </Pressable>
         </View>
       ) : null}
     </SafeAreaView>

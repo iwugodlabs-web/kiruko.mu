@@ -59,6 +59,12 @@ export default function HolidayRatesSection() {
   const { user } = useAuth();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const companyId = (user as any)?.company?.company_id as number | undefined;
+  // Import must respect the COMPANY's configured country, and NEVER guess one —
+  // defaulting to a country would import the wrong calendar (e.g. MU holidays
+  // into a TZ company). If the company has no country set, the import is blocked
+  // until they set it. Mirrors GeofencingSettings' `company?.country_code`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const countryCode = ((user as any)?.company?.country_code as string | undefined)?.toUpperCase();
 
   const [holidays, setHolidays] = useState<HolidayRate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,15 +146,20 @@ export default function HolidayRatesSection() {
 
   const [importing, setImporting] = useState(false);
 
-  async function importMauritius() {
+  async function importCountryHolidays() {
     if (!companyId) return;
+    if (!countryCode) {
+      toast.error("Set your company's country in Settings before importing public holidays.");
+      return;
+    }
     setImporting(true);
 
     let toImport: Omit<HolidayRate, "id">[] = [];
 
-    // 1. Try Nager.Date public API — accurate dates for lunar/religious holidays
+    // 1. Try Nager.Date public API for the COMPANY's country — accurate dates
+    //    for lunar/religious holidays that move year to year.
     try {
-      const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${selectedYear}/MU`);
+      const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${selectedYear}/${countryCode}`);
       if (res.ok) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data: any[] = await res.json();
@@ -164,48 +175,38 @@ export default function HolidayRatesSection() {
       // Network error — will fall back below
     }
 
-    // 2. Fall back to local list if API returned nothing
+    // 2. Fall back to the local list ONLY for MU (the only country with a bundled
+    //    fallback). For any other country, never inject MU holidays — that would
+    //    silently import the wrong country's calendar. Surface an error instead.
     if (toImport.length === 0) {
-      toImport = getMuFallbackHolidays(selectedYear);
-      toast.info("Using offline holiday list — verify lunar holiday dates manually.");
-    }
-
-    // 3. Skip holidays already in the list (by name)
-    const existingNames = new Set(holidays.map((h) => h.name.toLowerCase()));
-    const newEntries = toImport.filter((h) => !existingNames.has(h.name.toLowerCase()));
-
-    if (newEntries.length === 0) {
-      toast.info(`All ${selectedYear} holidays are already configured.`);
-      setImporting(false);
-      return;
-    }
-
-    // 4. Save each to backend; only keep rows the backend actually persisted.
-    // A POST failure must NOT fabricate a local row — that hides the error and
-    // leaves an un-persisted holiday that silently disappears on refresh.
-    const saved: HolidayRate[] = [];
-    let failed = 0;
-    for (const entry of newEntries) {
-      try {
-        const res = await api.post(`/company/${companyId}/holiday-rates`, entry);
-        saved.push(res.data);
-      } catch {
-        failed++;
+      if (countryCode === "MU") {
+        toImport = getMuFallbackHolidays(selectedYear);
+        toast.info("Using offline holiday list — verify lunar holiday dates manually.");
+      } else {
+        toast.error(`Couldn't fetch ${countryCode} public holidays for ${selectedYear}. Check your connection and try again, or add them manually.`);
+        setImporting(false);
+        return;
       }
     }
 
-    if (saved.length > 0) {
-      setHolidays((prev) => [...prev, ...saved]);
-    }
-
-    if (failed > 0) {
-      toast.error(
-        saved.length > 0
-          ? `${saved.length} imported, but ${failed} failed to save. Please try again.`
-          : `Failed to import holidays for ${selectedYear}. Please try again.`
-      );
-    } else {
-      toast.success(`${saved.length} holiday${saved.length !== 1 ? "s" : ""} imported for ${selectedYear}.`);
+    // 3. Replace-on-import: one atomic call replaces this company's holidays for
+    // its country + the selected year. The backend deletes the year's existing
+    // rows (including any legacy/other-country ones) before inserting, so the
+    // calendar can never end up mixed across countries.
+    try {
+      const res = await api.post(`/company/${companyId}/holiday-rates/import`, {
+        year: selectedYear,
+        holidays: toImport,
+      });
+      const imported: HolidayRate[] = Array.isArray(res.data) ? res.data : [];
+      // Rebuild local state: drop this year's rows, add the freshly imported set.
+      setHolidays((prev) => [
+        ...prev.filter((h) => !h.date.startsWith(`${selectedYear}-`)),
+        ...imported,
+      ]);
+      toast.success(`${imported.length} ${countryCode} holiday${imported.length !== 1 ? "s" : ""} imported for ${selectedYear}.`);
+    } catch {
+      toast.error(`Failed to import holidays for ${selectedYear}. Please try again.`);
     }
     setImporting(false);
   }
@@ -258,12 +259,12 @@ export default function HolidayRatesSection() {
             <RefreshCw size={14} className={spinning ? "animate-spin" : ""} />
           </button>
           <button
-            onClick={importMauritius}
-            disabled={importing}
+            onClick={importCountryHolidays}
+            disabled={importing || !countryCode}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 rounded-xl transition-colors disabled:opacity-50"
           >
             <RefreshCw size={13} className={importing ? "animate-spin" : ""} />
-            Import MU {selectedYear}
+            {countryCode ? `Import ${countryCode} ${selectedYear}` : "Set country to import"}
           </button>
           <button
             onClick={openCreate}
@@ -334,12 +335,12 @@ export default function HolidayRatesSection() {
           <p className="text-xs mt-1">Add public holidays to apply special pay rates automatically.</p>
           <div className="flex gap-2 mt-4">
             <button
-              onClick={importMauritius}
-              disabled={importing}
+              onClick={importCountryHolidays}
+              disabled={importing || !countryCode}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={11} className={importing ? "animate-spin" : ""} />
-              Import MU {selectedYear}
+              {countryCode ? `Import ${countryCode} ${selectedYear}` : "Set country to import"}
             </button>
             <button
               onClick={openCreate}
@@ -429,7 +430,7 @@ export default function HolidayRatesSection() {
       )}
 
       <p className="text-xs text-gray-400 dark:text-gray-500">
-        Mauritius Employment Rights Act requires a minimum of 2× pay for public holiday work.
+        {countryCode === "MU" && "Mauritius Employment Rights Act requires a minimum of 2× pay for public holiday work. "}
         Toggle years above to view or plan holidays for previous and future years.
       </p>
 

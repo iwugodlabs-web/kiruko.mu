@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status, HTTPException
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from core import config
 from db_models.crud import company as company_crud
 from core.dependencies import get_current_user, assert_company_access
@@ -56,6 +56,34 @@ async def list_invites_route(limit: int = 50, offset: int = 0, email: str | None
         raise HTTPException(status_code=403, detail='Only platform administrators can list invites')
     res = company_crud.get_all_invites(db, limit=limit, offset=offset, email=email, role=role, company_id=company_id)
     return {'status': 'success', 'data': res['data'], 'total': res['total']}
+
+
+# Like `/invites`, this literal route must be declared before `/{company_id}`
+# so "search" isn't coerced to an int path param (→ 422).
+@router.get('/search', status_code=200)
+async def search_companies_route(
+    q: str,
+    limit: int = 8,
+    db: Session = Depends(config.get_db),
+    current_user = Depends(get_current_user),
+):
+    """Employer autocomplete for onboarding — matches BRN or company name
+    (case-insensitive). Auth-gated and capped (3-char minimum, ≤20 results) so
+    it stays a "find your employer" helper, not a directory export. Returns
+    only identifiers (name + BRN); contact details are fetched per-selection via
+    /company/lookup/{brn}.
+    """
+    try:
+        companies = company_crud.search_companies(q, db, limit=limit)
+        return {
+            'status': 'success',
+            'data': [
+                {'company_id': c.company_id, 'company_name': c.company_name, 'brn': c.brn}
+                for c in companies
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get('/{company_id}', status_code=200)
@@ -118,7 +146,7 @@ async def get_company_stats(
 
 
 # ---------------------- Admin CRUD for companies ----------------------
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from fastapi import BackgroundTasks
 from services.email_service import send_invite_email
 
@@ -246,7 +274,7 @@ async def create_company(payload: CompanyCreate, db: Session = Depends(config.ge
 
 
 class InviteCompanyUser(BaseModel):
-    email: str = Field(..., min_length=3)
+    email: EmailStr
     role: str = Field('employee')  # allowed: owner/admin/manager/employee
 
 class TransferOwnershipPayload(BaseModel):
@@ -337,6 +365,7 @@ async def invite_company_user(company_id: int, payload: InviteCompanyUser, backg
                 send_account_claim_email, payload.email, None, token, company.company_name)
         except Exception:
             pass
+        company_crud.log_audit(company_id, 'invite_created', current_user.user_id, f'user:{new_user.user_id}', db, metadata={'email': payload.email, 'role': 'employee', 'claim': True})
         return {'company_id': company_id, 'email': payload.email, 'role': 'employee', 'claim': True, 'user_id': new_user.user_id}
 
     invite = company_crud.invite_company_user(company_id, payload.email, payload.role, current_user.user_id, db)
@@ -347,7 +376,9 @@ async def invite_company_user(company_id: int, payload: InviteCompanyUser, backg
     except Exception:
         pass
 
-    return {'company_id': company_id, 'email': payload.email, 'role': payload.role, 'invite_id': invite.get('invite_id') if isinstance(invite, dict) else getattr(invite, 'invite_id', None)}
+    invite_id_val = invite.get('invite_id') if isinstance(invite, dict) else getattr(invite, 'invite_id', None)
+    company_crud.log_audit(company_id, 'invite_created', current_user.user_id, f'invite:{invite_id_val}', db, metadata={'email': payload.email, 'role': payload.role})
+    return {'company_id': company_id, 'email': payload.email, 'role': payload.role, 'invite_id': invite_id_val}
 
 
 # GET /invites is now declared above /{company_id} (see top of this file) to
@@ -358,9 +389,12 @@ async def revoke_invite_route(invite_id: int, db: Session = Depends(config.get_d
     """Revoke an invite (platform administrators only)."""
     if not getattr(current_user, 'is_superuser', False) and not ((getattr(current_user, 'roles', None) or []) and 'platform_admin' in current_user.roles):
         raise HTTPException(status_code=403, detail='Only platform administrators can revoke invites')
+    from core.model import CompanyInvite
+    inv = db.query(CompanyInvite).filter(CompanyInvite.invite_id == invite_id).first()
     ok = company_crud.revoke_invite(invite_id, db)
     if not ok:
         raise HTTPException(status_code=404, detail='Invite not found')
+    company_crud.log_audit(getattr(inv, 'company_id', None), 'invite_revoked', current_user.user_id, f'invite:{invite_id}', db, metadata={'email': getattr(inv, 'email', None), 'role': getattr(inv, 'role', None)})
     return None
 
 
@@ -412,8 +446,9 @@ async def transfer_company_ownership(company_id: int, payload: TransferOwnership
     if target_user.private_user.company_id != company_id:
         raise HTTPException(status_code=400, detail='New owner must belong to the company')
 
+    prev_owner_user_id = company.user_id
     updated_company = company_crud.transfer_company_ownership(company_id, payload.new_owner_user_id, current_user.user_id, db)
-    # TODO: add audit entry/logging here
+    company_crud.log_audit(company_id, 'company.ownership_transferred', current_user.user_id, f'company:{company_id}', db, metadata={'prev_owner_user_id': prev_owner_user_id, 'new_owner_user_id': payload.new_owner_user_id})
     return {'company_id': company_id, 'new_owner_user_id': payload.new_owner_user_id}
 
 
@@ -520,6 +555,12 @@ class HolidayRateUpdate(BaseModel):
     multiplier: float | None = None
     note: str | None = None
 
+class HolidayRateImport(BaseModel):
+    """Replace-on-import payload: the full set of holidays for one year, which
+    replaces the company's existing rows for its country + that year."""
+    year: int
+    holidays: List[HolidayRateCreate]
+
 
 def _require_company_member(company_id: int, current_user, db):
     """Raise 403 if current_user is not an admin/owner/superuser of this company."""
@@ -573,6 +614,7 @@ def _serialize_rate(r) -> dict:
     return {
         'id': r.id,
         'company_id': r.company_id,
+        'country_code': getattr(r, 'country_code', None),
         'name': r.name,
         'date': r.date,
         'recurrent': r.recurrent,
@@ -583,17 +625,30 @@ def _serialize_rate(r) -> dict:
     }
 
 
+def _company_country(company_id: int, db) -> Optional[str]:
+    """The company's configured country_code (always set; defaults 'MU')."""
+    row = db.query(Company.country_code).filter(Company.company_id == company_id).first()
+    return (row[0] if row else None)
+
+
 @router.get('/{company_id}/holiday-rates', status_code=200)
 async def list_company_holiday_rates(
     company_id: int,
     db: Session = Depends(config.get_db),
     current_user=Depends(get_current_user),
 ):
-    """List all holiday pay rates for a company."""
+    """List holiday pay rates for a company, scoped to its configured country so
+    a stale/other-country calendar never shows. Legacy rows with a NULL
+    country_code (pre-migration) are included so nothing silently disappears."""
     from core.model import CompanyHolidayRate
     _require_company_member(company_id, current_user, db)
+    country = _company_country(company_id, db)
     rates = db.query(CompanyHolidayRate).filter(
-        CompanyHolidayRate.company_id == company_id
+        CompanyHolidayRate.company_id == company_id,
+        or_(
+            CompanyHolidayRate.country_code == country,
+            CompanyHolidayRate.country_code.is_(None),
+        ),
     ).order_by(CompanyHolidayRate.date).all()
     return [_serialize_rate(r) for r in rates]
 
@@ -611,6 +666,7 @@ async def create_company_holiday_rate(
     _assert_holiday_multiplier_above_floor(company_id, payload.multiplier, db)
     rate = CompanyHolidayRate(
         company_id=company_id,
+        country_code=_company_country(company_id, db),
         name=payload.name.strip(),
         date=payload.date,
         recurrent=payload.recurrent,
@@ -630,6 +686,63 @@ async def create_company_holiday_rate(
         metadata={'date': str(rate.date), 'multiplier': str(rate.multiplier), 'name': rate.name},
     )
     return _serialize_rate(rate)
+
+
+@router.post('/{company_id}/holiday-rates/import', status_code=200)
+async def import_company_holiday_rates(
+    company_id: int,
+    payload: HolidayRateImport,
+    db: Session = Depends(config.get_db),
+    current_user=Depends(get_current_user),
+):
+    """Replace-on-import for a country calendar. Deletes the company's existing
+    holidays for its country + the given year, then inserts the supplied set —
+    atomically. This both prevents cross-country mixing and cleans up any
+    pre-existing mixed rows for that year (they're removed before re-insert)."""
+    from core.model import CompanyHolidayRate
+    _require_company_member(company_id, current_user, db)
+    country = _company_country(company_id, db)
+    year_prefix = f"{payload.year}-"
+
+    for h in payload.holidays:
+        _assert_holiday_multiplier_above_floor(company_id, h.multiplier, db)
+
+    # Delete this company's rows for that year — both the current-country rows and
+    # any legacy/other-country rows dated in that year, so re-import fully cleans
+    # a previously-mixed calendar for the year.
+    deleted = db.query(CompanyHolidayRate).filter(
+        CompanyHolidayRate.company_id == company_id,
+        CompanyHolidayRate.date.like(f"{year_prefix}%"),
+    ).delete(synchronize_session=False)
+
+    created = []
+    for h in payload.holidays:
+        rate = CompanyHolidayRate(
+            company_id=company_id,
+            country_code=country,
+            name=h.name.strip(),
+            date=h.date,
+            recurrent=h.recurrent,
+            multiplier=h.multiplier,
+            note=h.note,
+        )
+        db.add(rate)
+        created.append(rate)
+    try:
+        db.commit()
+        for r in created:
+            db.refresh(r)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f'Failed to import holiday rates: {e}')
+
+    company_crud.log_audit(
+        company_id, 'holiday_rates_imported', current_user.user_id,
+        f'company:{company_id}', db,
+        metadata={'country_code': country, 'year': payload.year,
+                  'deleted': deleted, 'inserted': len(created)},
+    )
+    return [_serialize_rate(r) for r in created]
 
 
 @router.put('/{company_id}/holiday-rates/{rate_id}', status_code=200)

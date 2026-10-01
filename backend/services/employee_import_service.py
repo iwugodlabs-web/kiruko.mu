@@ -71,6 +71,17 @@ def _s(v: Any) -> str:
     return ("" if v is None else str(v)).strip()
 
 
+def _norm_email(v: Any) -> str:
+    """Normalize a raw email cell: strip whitespace, lowercase, and drop stray
+    trailing list separators (`,`, `;`). A spreadsheet cell often picks up a
+    trailing comma when a roster is pasted from a comma-separated list
+    (e.g. `pml.clarac@gmail.com,`), which the lenient EMAIL_RE below would
+    otherwise accept — producing a user row with an undeliverable address that
+    Brevo then 400s on."""
+    e = _s(v).lower()
+    return e.rstrip(",;").strip()
+
+
 # ── Parse ───────────────────────────────────────────────────────────────────
 def parse(file_bytes: bytes, filename: str) -> List[Dict[str, str]]:
     """Parse a CSV or XLSX upload into normalized row dicts (header→value).
@@ -132,7 +143,7 @@ def validate(db: Session, company_id: int, rows: List[Dict[str, str]]) -> Dict[s
         rownum = i + 2  # +1 for 0-index, +1 for header row → spreadsheet row number
         row_errors: List[Tuple[str, str]] = []
 
-        email = _s(r.get("email")).lower()
+        email = _norm_email(r.get("email"))
         if not email:
             row_errors.append(("email", "missing"))
         elif not EMAIL_RE.match(email):
@@ -252,7 +263,7 @@ def commit(db: Session, company_id: int, rows: List[Dict[str, str]], actor_user_
         r = item["data"]
         rownum = item["row"]
         try:
-            email = _s(r.get("email")).lower()
+            email = _norm_email(r.get("email"))
             # Idempotency guard (race-safe within this txn).
             if db.query(User).filter(User.email == email).first() is not None:
                 continue
