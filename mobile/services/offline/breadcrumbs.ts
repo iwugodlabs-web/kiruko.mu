@@ -198,31 +198,51 @@ export async function startTrail(seed?: { latitude: number; longitude: number })
 
 /**
  * Upload the latest crumb against the open server session, if it is newer
- * than the last upload. Called after sync drains and on clock-out. No
- * idempotency key by design — the server dedups appends by recorded_at.
- * Returns true when a crumb was uploaded.
+ * than the last upload. No idempotency key by design — the server dedups
+ * appends by recorded_at. Returns true when a crumb was uploaded.
  */
 export async function uploadLatestBreadcrumb(): Promise<boolean> {
+  return (await uploadPendingTrail(1)) > 0;
+}
+
+/**
+ * Full-trail replay for dead-zone shifts: upload every crumb newer than the
+ * last upload cursor (oldest first), capped per call so a multi-hour offline
+ * stretch doesn't stall the drain. The cursor advances only past successful
+ * POSTs, so a mid-batch failure resumes — never restarts — next time.
+ * Returns the number of crumbs uploaded.
+ */
+export async function uploadPendingTrail(maxBatch = 100): Promise<number> {
+  let uploaded = 0;
   try {
     const [[, timelogId], [, uploadedAt]] = await AsyncStorage.multiGet([
       "activeTimeLogId",
       "trailUploadedAt",
     ]);
-    if (!timelogId) return false;
-    const crumb = await latestBreadcrumb();
-    if (!crumb) return false;
-    if (uploadedAt && crumb.recordedAt <= Number(uploadedAt)) return false;
-    await api.post(`/job/time-log/${timelogId}/breadcrumb`, {
-      latitude: crumb.latitude,
-      longitude: crumb.longitude,
-      recorded_at: new Date(crumb.recordedAt).toISOString(),
-    });
-    await AsyncStorage.setItem("trailUploadedAt", String(crumb.recordedAt)).catch(
-      () => undefined,
-    );
-    return true;
+    if (!timelogId) return 0;
+    await ensureTable();
+    const since = uploadedAt ? Number(uploadedAt) : 0;
+    const rows = (await sqlite().getAllAsync(
+      "SELECT latitude, longitude, recorded_at AS recordedAt FROM breadcrumbs WHERE recorded_at > ? ORDER BY recorded_at ASC LIMIT ?;",
+      [since, maxBatch],
+    )) as Pick<Breadcrumb, "latitude" | "longitude" | "recordedAt">[];
+    for (const crumb of rows) {
+      await api.post(`/job/time-log/${timelogId}/breadcrumb`, {
+        latitude: crumb.latitude,
+        longitude: crumb.longitude,
+        recorded_at: new Date(crumb.recordedAt).toISOString(),
+      });
+      uploaded += 1;
+      // Advance the cursor per crumb (not just at the end): a mid-batch
+      // failure keeps partial progress, and the next run resumes after the
+      // last acknowledged crumb instead of restarting the batch.
+      await AsyncStorage.setItem("trailUploadedAt", String(crumb.recordedAt)).catch(
+        () => undefined,
+      );
+    }
+    return uploaded;
   } catch {
-    return false;
+    return uploaded;
   }
 }
 

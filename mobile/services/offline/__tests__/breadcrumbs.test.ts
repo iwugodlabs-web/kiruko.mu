@@ -2,14 +2,44 @@
  * Breadcrumb deportment: stationary drift is dropped, real movement is kept,
  * garbage coordinates never record (a bad fix in the trail is worse than none).
  */
+const mockStore = new Map<string, string | null>();
 jest.mock("@react-native-async-storage/async-storage", () => ({
   __esModule: true,
   default: {
-    getItem: jest.fn(() => Promise.resolve(null)),
-    setItem: jest.fn(() => Promise.resolve()),
-    removeItem: jest.fn(() => Promise.resolve()),
-    multiGet: jest.fn(() => Promise.resolve([])),
+    getItem: jest.fn((k: string) => Promise.resolve(mockStore.get(k) ?? null)),
+    setItem: jest.fn((k: string, v: string) => {
+      mockStore.set(k, v);
+      return Promise.resolve();
+    }),
+    removeItem: jest.fn((k: string) => {
+      mockStore.delete(k);
+      return Promise.resolve();
+    }),
+    multiGet: jest.fn((ks: string[]) =>
+      Promise.resolve(ks.map((k) => [k, mockStore.get(k) ?? null])),
+    ),
   },
+}));
+type Crumb = { latitude: number; longitude: number; recordedAt: number };
+const mockRows: Crumb[] = [];
+jest.mock("expo-sqlite", () => ({
+  openDatabaseSync: jest.fn(() => ({
+    execAsync: jest.fn(() => Promise.resolve()),
+    getAllAsync: jest.fn((sql: string, params: any[] = []) => {
+      if (/DESC/i.test(sql)) {
+        const sorted = [...mockRows].sort((a, b) => b.recordedAt - a.recordedAt);
+        return Promise.resolve(sorted.slice(0, 1));
+      }
+      const [since, limit] = params;
+      return Promise.resolve(
+        mockRows
+          .filter((r) => r.recordedAt > since)
+          .sort((a, b) => a.recordedAt - b.recordedAt)
+          .slice(0, limit),
+      );
+    }),
+    runAsync: jest.fn(() => Promise.resolve()),
+  })),
 }));
 jest.mock("expo-task-manager", () => ({
   defineTask: jest.fn(),
@@ -27,7 +57,59 @@ jest.mock("../../apiClient", () => ({
   __esModule: true,
   api: { post: jest.fn() },
 }));
-import { shouldRecord } from "../breadcrumbs";
+import { api } from "../../apiClient";
+import { shouldRecord, uploadPendingTrail } from "../breadcrumbs";
+
+const mockPost = api.post as unknown as jest.Mock;
+
+beforeEach(() => {
+  mockStore.clear();
+  mockRows.length = 0;
+  mockPost.mockReset().mockResolvedValue({});
+});
+
+describe("uploadPendingTrail", () => {
+  it("uploads everything pending and advances the cursor", async () => {
+    mockStore.set("activeTimeLogId", "42");
+    mockRows.push(
+      { latitude: -20.1, longitude: 57.5, recordedAt: 1000 },
+      { latitude: -20.2, longitude: 57.5, recordedAt: 2000 },
+    );
+    expect(await uploadPendingTrail()).toBe(2);
+    expect(mockPost).toHaveBeenCalledTimes(2);
+    expect(mockPost).toHaveBeenNthCalledWith(
+      1,
+      "/job/time-log/42/breadcrumb",
+      expect.objectContaining({ latitude: -20.1 }),
+    );
+    expect(mockStore.get("trailUploadedAt")).toBe("2000");
+  });
+
+  it("does nothing without an open session", async () => {
+    mockRows.push({ latitude: -20.1, longitude: 57.5, recordedAt: 1000 });
+    expect(await uploadPendingTrail()).toBe(0);
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("resumes after a mid-batch failure without re-uploading", async () => {
+    mockStore.set("activeTimeLogId", "42");
+    mockRows.push(
+      { latitude: -20.1, longitude: 57.5, recordedAt: 1000 },
+      { latitude: -20.2, longitude: 57.5, recordedAt: 2000 },
+      { latitude: -20.3, longitude: 57.5, recordedAt: 3000 },
+    );
+    mockPost
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("flaky"))
+      .mockResolvedValue({});
+    expect(await uploadPendingTrail()).toBe(1);
+    expect(mockStore.get("trailUploadedAt")).toBe("1000");
+    // Next run resumes after the cursor — the failed crumb retries, the
+    // uploaded one does not.
+    expect(await uploadPendingTrail()).toBe(2);
+    expect(mockPost).toHaveBeenCalledTimes(4);
+  });
+});
 
 describe("shouldRecord", () => {
   it("records the first fix", () => {
