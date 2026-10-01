@@ -1416,7 +1416,16 @@ export default function ClockInPage() {
     minBreakThresholdMinutes,
   });
 
+  // Tap mutex — two rapid taps otherwise race past the duplicate guard in
+  // the async gap (both read empty keys) and enqueue twice.
+  const clockActionInFlight = useRef(false);
+
   const handleClockAction = async (action: 'clockin' | 'clockout') => {
+    if (clockActionInFlight.current) {
+      console.log('Clock action already in flight — ignoring double tap.');
+      return;
+    }
+    clockActionInFlight.current = true;
     try {
       const locationResult = await getCurrentLocation();
       const { geo_check, ...locationData } = locationResult;
@@ -1437,12 +1446,32 @@ export default function ClockInPage() {
         // tap enqueues another duplicate row with a fresh idempotency key.
         const pendingClockInKey = await AsyncStorage.getItem('pendingClockInKey');
         if (lastActiveTimeLogId || pendingClockInKey) {
-          Alert.alert(
-            t('clockIn.alreadyClockedInTitle'),
-            t('clockIn.alreadyClockedInBody'),
-            [{ text: t('common.ok') }]
-          );
-          return;
+          // Self-heal a stale pending key: if its queue row is gone (synced,
+          // dead-lettered, or wiped), the key is a lie that would permanently
+          // block clock-in with "already clocked in" and no active session.
+          if (!lastActiveTimeLogId && pendingClockInKey) {
+            const row = await punchQueueStore.getById(pendingClockInKey).catch(() => null);
+            if (!row) {
+              console.log('Dropping stale pendingClockInKey with no queue row.');
+              await AsyncStorage.removeItem('pendingClockInKey');
+            } else {
+              Alert.alert(
+                t('clockIn.alreadyClockedInTitle'),
+                t('clockIn.alreadyClockedInBody'),
+                [{ text: t('common.ok') }]
+              );
+              clockActionInFlight.current = false;
+              return;
+            }
+          } else {
+            Alert.alert(
+              t('clockIn.alreadyClockedInTitle'),
+              t('clockIn.alreadyClockedInBody'),
+              [{ text: t('common.ok') }]
+            );
+            clockActionInFlight.current = false;
+            return;
+          }
         }
         // Clock In — resolve job_id with offline fallback. When the
         // network is off, getJobById never populated state, so fall back
@@ -1589,7 +1618,9 @@ export default function ClockInPage() {
       await loadTimeLogsFromDatabase();
 
       console.log(`Performed ${action} at ${nowISO}`);
+      clockActionInFlight.current = false;
     } catch (err: any) {
+      clockActionInFlight.current = false;
       console.error('Clock-in/out failed:', err);
       Alert.alert(t('clockIn.errorTitle'), t('clockIn.operationFailedBody', { message: err.message || 'Unknown error' }));
     }
