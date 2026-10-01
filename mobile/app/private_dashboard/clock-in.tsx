@@ -865,7 +865,15 @@ export default function ClockInPage() {
       const dateTo = format(new Date(), 'yyyy-MM-dd');
 
       const timeLogsResponse = await getUserTimeLogs(numericPrivateUserId, dateFrom, dateTo);
-      let timeLogs: any[] = Array.isArray(timeLogsResponse) ? timeLogsResponse : [];
+      // Offline (or any fetch failure) returns an error object, not an array.
+      // There is NO server truth in that case — returning early preserves the
+      // optimistic offline clock state. Falling through would read "no active
+      // log" from an empty list and wipe a queued clock-in below.
+      if (!Array.isArray(timeLogsResponse)) {
+        console.log('Time-log refresh failed (likely offline). Preserving local clock state.');
+        return;
+      }
+      let timeLogs: any[] = timeLogsResponse;
       let activeLog = timeLogs.find(log => log.start_time && !log.end_time);
 
       if (!activeLog) {
@@ -996,26 +1004,45 @@ export default function ClockInPage() {
 
       const normalizedStartTime = activeLog ? (safeParseDate(activeLog.start_time)?.toISOString() ?? activeLog.start_time) : null;
 
+      // Queued punches not yet acknowledged by the server are invisible to the
+      // queries above. While any exist, "no active log on server" must NOT
+      // clear the optimistic local clock state — that wipe is what stranded
+      // users in a tap → queue → wipe → tap loop, stacking duplicate rows.
+      let hasPendingOffline = false;
+      try {
+        hasPendingOffline =
+          (await AsyncStorage.getItem('pendingClockInKey')) != null ||
+          (await punchQueueStore.count()) > 0;
+      } catch {
+        hasPendingOffline = false;
+      }
+
       if (!isMountedRef || isMountedRef.current) {
         setHistory(groupedHistory);
         await AsyncStorage.setItem('history', JSON.stringify(groupedHistory));
-        setIsClockedIn(!!activeLog);
-        setCurrentClockInTime(normalizedStartTime);
-        setActiveTimeLogId(activeLog ? activeLog.timelog_id : null);
-        if (!activeLog) {
-          // No open session — there can't be an open break either.
-          setIsBreaking(false);
-          AsyncStorage.setItem('isBreaking', 'false');
+        if (!hasPendingOffline) {
+          setIsClockedIn(!!activeLog);
+          setCurrentClockInTime(normalizedStartTime);
+          setActiveTimeLogId(activeLog ? activeLog.timelog_id : null);
+          if (!activeLog) {
+            // No open session — there can't be an open break either.
+            setIsBreaking(false);
+            AsyncStorage.setItem('isBreaking', 'false');
+          }
+        } else {
+          console.log('Preserving optimistic clock state: offline punches still pending.');
         }
       }
 
-      await AsyncStorage.setItem('isClockedIn', String(!!activeLog));
-      if (activeLog) {
-        if (normalizedStartTime) await AsyncStorage.setItem('currentClockInTime', normalizedStartTime);
-        if (activeLog.timelog_id) await AsyncStorage.setItem('activeTimeLogId', String(activeLog.timelog_id));
-      } else {
-        await AsyncStorage.removeItem('currentClockInTime');
-        await AsyncStorage.removeItem('activeTimeLogId');
+      if (!hasPendingOffline) {
+        await AsyncStorage.setItem('isClockedIn', String(!!activeLog));
+        if (activeLog) {
+          if (normalizedStartTime) await AsyncStorage.setItem('currentClockInTime', normalizedStartTime);
+          if (activeLog.timelog_id) await AsyncStorage.setItem('activeTimeLogId', String(activeLog.timelog_id));
+        } else {
+          await AsyncStorage.removeItem('currentClockInTime');
+          await AsyncStorage.removeItem('activeTimeLogId');
+        }
       }
     } catch (error) {
       console.error('Error loading time logs from database:', error);
@@ -1405,7 +1432,11 @@ export default function ClockInPage() {
       if (isClockInAction) {
         await loadTimeLogsFromDatabase();
         const lastActiveTimeLogId = await AsyncStorage.getItem('activeTimeLogId');
-        if (lastActiveTimeLogId) {
+        // An offline clock-in stores pendingClockInKey, NOT activeTimeLogId
+        // (the server id doesn't exist yet). Guard on both, or every repeat
+        // tap enqueues another duplicate row with a fresh idempotency key.
+        const pendingClockInKey = await AsyncStorage.getItem('pendingClockInKey');
+        if (lastActiveTimeLogId || pendingClockInKey) {
           Alert.alert(
             t('clockIn.alreadyClockedInTitle'),
             t('clockIn.alreadyClockedInBody'),
