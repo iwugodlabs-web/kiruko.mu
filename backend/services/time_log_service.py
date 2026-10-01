@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from core.model import Company, TimeLog, Job, PrivateUser, Salary, User
 from services.notification_service import NotificationService
 from db_models.crud.audit import create_audit_log
-from typing import List, Optional
+from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,13 @@ _SYSTEM_DEFAULT_MAX_SHIFT_HOURS = 12.0
 # (which keeps the session running) or clock out themselves; the max-shift cap is
 # the harder backstop.
 _SCHEDULE_AUTOCLOSE_GRACE_MINUTES = 15
+
+# Shift-trail breadcrumbs: max entries kept per session, and max age of the
+# freshest crumb (at close time) for it to serve as the estimated clock-out
+# fix. Older than this, the trail is not departure evidence — leave the
+# clock-out fix absent (honest) rather than stamp a stale guess.
+_TRAIL_CAP = 100
+_TRAIL_FRESH_MAX_SECONDS = 4 * 3600
 
 
 def _to_utc(dt: datetime) -> datetime:
@@ -74,6 +81,85 @@ class TimeLogService:
         return system_default_hours
 
     @staticmethod
+    def append_breadcrumb(
+        db: Session, tl: TimeLog, latitude: float, longitude: float, recorded_at: datetime
+    ) -> dict:
+        """Append one shift-trail fix to an OPEN session's ``location.trail``.
+
+        Deduped by ``recorded_at`` (retries safe, no idempotency key needed),
+        capped at ``_TRAIL_CAP`` (oldest dropped). Raises 400 if the session is
+        already closed — the trail only serves open sessions; callers should
+        stop uploading then. Commits."""
+        from fastapi import HTTPException, status as _status
+
+        if tl.end_time is not None:
+            raise HTTPException(
+                status_code=_status.HTTP_400_BAD_REQUEST,
+                detail="Session already closed; trail no longer accepted.",
+            )
+        recorded_utc = _to_utc(recorded_at)
+        location = dict(tl.location or {})
+        trail = list(location.get("trail") or [])
+        if not any(t.get("recorded_at") == recorded_utc.isoformat() for t in trail if isinstance(t, dict)):
+            trail.append(
+                {
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "recorded_at": recorded_utc.isoformat(),
+                }
+            )
+            trail.sort(key=lambda t: t.get("recorded_at", ""))
+            location["trail"] = trail[-_TRAIL_CAP:]
+            tl.location = location
+            # Reassign the JSONB attr so SQLAlchemy detects the mutation.
+            from sqlalchemy.orm.attributes import flag_modified
+
+            flag_modified(tl, "location")
+            db.commit()
+            db.refresh(tl)
+        return {"timelog_id": tl.timelog_id, "trail_points": len(location.get("trail") or [])}
+
+    @staticmethod
+    def _trail_clock_out_fix(location: Any, close_at: datetime) -> Optional[dict]:
+        """Best-available departure fix from the shift trail, or None.
+
+        Returns an *estimated* clock_out fix (same ``Coordinates:`` address
+        convention as offline mobile punches, so every client resolves it)
+        only when the freshest crumb is within ``_TRAIL_FRESH_MAX_SECONDS`` of
+        the close. Older/absent trails yield None — an honest absence beats a
+        stale guess stamped as departure."""
+        if not isinstance(location, dict):
+            return None
+        trail = location.get("trail") or []
+        if not isinstance(trail, list) or not trail:
+            return None
+        freshest = max(
+            (t for t in trail if isinstance(t, dict) and t.get("recorded_at")),
+            key=lambda t: t.get("recorded_at", ""),
+            default=None,
+        )
+        if freshest is None:
+            return None
+        try:
+            recorded = datetime.fromisoformat(str(freshest["recorded_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        age_s = (_to_utc(close_at) - _to_utc(recorded)).total_seconds()
+        if age_s < 0 or age_s > _TRAIL_FRESH_MAX_SECONDS:
+            return None
+        lat, lng = freshest.get("latitude"), freshest.get("longitude")
+        if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+            return None
+        return {
+            "address": f"Coordinates: {lat:.4f}, {lng:.4f}",
+            "latitude": lat,
+            "longitude": lng,
+            "estimated": True,
+            "trail_age_min": round(age_s / 60),
+            "basis": "breadcrumb",
+        }
+
+    @staticmethod
     def _finalize_active_log(active_log: TimeLog, close_at: datetime, auto_closed: bool = False):
         if not active_log.start_time:
             return
@@ -86,6 +172,25 @@ class TimeLogService:
         active_log.end_time = close_at
         active_log.hours_worked = round(max((active_log.end_time - start_utc).total_seconds() / 3600, 0), 2)
         if auto_closed:
+            # Forgotten clock-out: attach the freshest shift-trail crumb as an
+            # *estimated* clock-out fix when one is fresh. Never invents a fix
+            # (stale/absent trail → absent clock_out, as before) and never
+            # overwrites a device-recorded one.
+            try:
+                loc = dict(active_log.location or {})
+                if "clock_out" not in loc:
+                    fix = TimeLogService._trail_clock_out_fix(loc, close_at)
+                    if fix is not None:
+                        loc["clock_out"] = fix
+                        active_log.location = loc
+                        from sqlalchemy.orm.attributes import flag_modified
+
+                        flag_modified(active_log, "location")
+            except Exception:
+                logger.exception(
+                    "trail clock-out attach failed for timelog %s",
+                    getattr(active_log, "timelog_id", None),
+                )
             # M27 — distinguish a cron-closed runaway from a real clock-out
             # so admins (and the dispute flow) can tell them apart.
             active_log.auto_closed = True

@@ -22,6 +22,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, type AppStateStatus } from "react-native";
 import { postClockIn, postClockOut } from "../api";
 import { track } from "../analytics";
+import { uploadLatestBreadcrumb } from "./breadcrumbs";
 import { punchQueueStore, type QueuedAction, type QueuedPunch } from "./punchQueue";
 
 export interface SyncResult {
@@ -195,6 +196,9 @@ export const punchSyncWorker = {
           });
         }
         await _notify(result, deadLetters);
+        // Opportunistic trail upload: a fresh breadcrumb may now be mappable
+        // (a clock-in synced earlier in this drain resolved the session id).
+        await uploadLatestBreadcrumb().catch(() => undefined);
         return result;
       } catch {
         const remaining = (await punchQueueStore.listPending().catch(() => [])).length;

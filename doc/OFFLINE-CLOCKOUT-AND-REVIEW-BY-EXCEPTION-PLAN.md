@@ -327,11 +327,20 @@ the system-level outcome reaches 7+ (see break queue).
    one escalation: clock-reminder push → no response → auto-close at schedule end using best-available
    location (last break fix → clock-in fence), labeled `estimated`. Uses existing reminder + auto-close
    machinery; the labeling pass is backend-only.
-7. **Geofence-exit auto clock-out (8/10 location, 6/10 offline).** Register the workplace fence at
-   clock-in (`expo-location` geofencing + TaskManager); on exit, write a clock-out through the
-   existing punch queue with the exit fix — offline-native by construction. **Last:** requires
-   background-location permission, purpose-string + in-app disclosure, and App Review scrutiny.
-   Sequence after build 61 soaks.
+7. **Shift breadcrumb trail (8/10 location, 7/10 offline) — BUILT.** Replaces the
+   geofence option below: while clocked in, the OS drops low-power fixes into a
+   local `breadcrumbs` table (migration `0004`, capped, cleared on clock-out;
+   background permission + in-app explainer + iOS blue-bar/Android notice).
+   The worker uploads the latest crumb against the open session
+   (`POST /job/time-log/{id}/breadcrumb`, deduped by `recorded_at`, no
+   idempotency key); the auto-close sweep attaches the freshest crumb (≤4h old)
+   as an *estimated* `clock_out` fix in the offline `Coordinates:` convention
+   so every client resolves it. Stale/absent trails stay absent; device fixes
+   are never overwritten. Chosen over geofencing: no per-site config, degrades
+   gracefully, same permission class.
+7b. **Geofence-exit auto clock-out — deferred.** Strictly dominated by the
+   trail for a phone-only workforce (no fixed exit to walk past); revisit only
+   for fixed-site clients alongside kiosk tap-out.
 
 ### 10.2 Explicitly rejected / deferred
 

@@ -204,6 +204,19 @@ class ClockOutPayload(BaseModel):
     geo_check: Optional[Dict[str, Any]] = None
 
 
+class BreadcrumbPayload(BaseModel):
+    """Body for POST /time-log/{id}/breadcrumb (shift trail upload).
+
+    One low-power fix recorded while clocked in. Appended to
+    ``location.trail`` (capped); deduped by ``recorded_at`` so retries are
+    safe WITHOUT an Idempotency-Key (appends are naturally idempotent).
+    Rejected once the session is closed — the trail only serves open ones."""
+
+    latitude: float
+    longitude: float
+    recorded_at: datetime
+
+
 class ClockOutResult(BaseModel):
     """Result of a (possibly queued) clock-out via POST /time-log/{id}/clock-out.
 

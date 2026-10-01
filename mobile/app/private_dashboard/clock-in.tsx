@@ -1,6 +1,7 @@
 import { createLeaveRequest, endBreak, getJobById, getLeaveQuotas, getSalaryByJobId, getUserDetail, getUserLeaveRequests, getUserTimeLogs, postClockIn, startBreak, TimeLog, updateTimeLog, getUserNotifications, markNotificationAsRead, markTimeLogAsOvertime, Notification, LeaveQuota, isPermissionDeniedError } from '@/services/api';
 import { punchQueueStore, newIdempotencyKey } from '@/services/offline/punchQueue';
 import { punchSyncWorker } from '@/services/offline/syncWorker';
+import { startTrail, stopTrail, uploadLatestBreadcrumb } from '@/services/offline/breadcrumbs';
 import { canPunch } from '@/services/offline/canPunch';
 import { salaryStructures, type ResolvedSalary } from '@/services/payroll-api';
 import { Palette, Type } from '@/app/constants/theme';
@@ -1611,6 +1612,13 @@ export default function ClockInPage() {
         await AsyncStorage.setItem('currentClockInTime', nowISO);
         await AsyncStorage.setItem('isClockedIn', 'true');
 
+        // Begin the shift breadcrumb trail (forgotten clock-out locator).
+        // Runs for online and queued punches alike; a denial degrades to
+        // today's behavior. Seeded with this punch's fix.
+        startTrail({ latitude: locationData.latitude, longitude: locationData.longitude }).catch(
+          () => undefined,
+        );
+
         // Schedule-aware prompt. Use the same 30-min grace as the backend so
         // we don't nag for a few minutes early/late.
         const GRACE = 30;
@@ -1694,6 +1702,9 @@ export default function ClockInPage() {
         await AsyncStorage.removeItem('breakStart');
         await AsyncStorage.removeItem('breakDurations');
         await AsyncStorage.removeItem('isBreaking');
+        // End the breadcrumb trail with a best-effort final upload so the
+        // freshest fix reaches the server even on a queued clock-out.
+        stopTrail(uploadLatestBreadcrumb).catch(() => undefined);
       }
 
       // Refresh data from database

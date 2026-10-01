@@ -13,7 +13,7 @@ from core.dependencies import get_current_user, require_company_read_access, req
 from core.idempotency import require_idempotency_key
 from core.model import Salary as SalaryORM, User
 from db_models.crud.audit import create_audit_log
-from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult
+from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult, BreadcrumbPayload
 from sqlalchemy.orm import Session
 from core.exceptions import EnrollmentException as onbording_exceptions
 from pydantic import BaseModel as PydanticBaseModel
@@ -1569,6 +1569,35 @@ async def clock_out_endpoint(
     except Exception as e:
         logger.error(f"Error in clock-out reconciliation for time log {time_log_id}: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to clock out. Please try again.")
+
+@router.post('/time-log/{time_log_id}/breadcrumb', status_code=200)
+async def breadcrumb_endpoint(
+    time_log_id: int,
+    payload: BreadcrumbPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(config.get_db),
+):
+    """Shift-trail upload (forgotten clock-out locator).
+
+    Appends one low-power fix to the OPEN session's ``location.trail``
+    (capped, deduped by ``recorded_at``). Tenant-scoped like the clock-out
+    replay. Deliberately NO Idempotency-Key requirement: appends are
+    naturally idempotent via the recorded_at dedup, and this endpoint fires
+    every couple of minutes per active shift — keying it would just grow
+    the idempotency table for nothing. The auto-close sweep attaches the
+    freshest crumb as an *estimated* clock-out fix (see
+    TimeLogService._finalize_active_log)."""
+    from services.time_log_service import TimeLogService
+    tl = _assert_timelog_access(time_log_id, current_user, db)
+    try:
+        return TimeLogService.append_breadcrumb(
+            db, tl, payload.latitude, payload.longitude, payload.recorded_at
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error recording breadcrumb for time log {time_log_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to record breadcrumb.")
 
 @router.post('/time-log/{timelog_id}/start-break', status_code=201, response_model=ShowBreakLog)
 async def start_break_endpoint(timelog_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
