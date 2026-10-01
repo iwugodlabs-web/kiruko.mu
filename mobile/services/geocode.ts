@@ -15,6 +15,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { useEffect, useState } from "react";
+import { api } from "./apiClient";
 import { isOnlineNow } from "./offlinePolicy";
 
 const CACHE_KEY = "geocodeCache";
@@ -71,6 +72,26 @@ export async function resolveAddressText(text: string): Promise<string> {
   const key = cacheKey(coords.latitude, coords.longitude);
   if (cache[key]) return cache[key];
   if (!(await isOnlineNow())) return text;
+  // Primary: backend Google reverse-geocode — consistent addresses across
+  // iOS/Android (device geocoders vary by region data) with quota control
+  // server-side. Requires the endpoint + GOOGLE_MAPS_API_KEY deployed;
+  // anything missing degrades to the on-device lookup below.
+  try {
+    const resp = await Promise.race([
+      api.get("/geocode/reverse", {
+        params: { lat: coords.latitude, lng: coords.longitude },
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]);
+    const name = (resp as { data?: { display_name?: string | null } } | null)?.data
+      ?.display_name;
+    if (name) {
+      storeCached(key, name, cache);
+      return name;
+    }
+  } catch {
+    /* fall through to the device geocoder */
+  }
   try {
     const result = await Promise.race([
       Location.reverseGeocodeAsync({
@@ -82,11 +103,7 @@ export async function resolveAddressText(text: string): Promise<string> {
     if (result && result.length > 0) {
       const formatted = formatAddress(result[0]);
       if (formatted) {
-        cache[key] = formatted;
-        const keys = Object.keys(cache);
-        if (keys.length > CACHE_CAP) delete cache[keys[0]];
-        _cache = cache;
-        AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cache)).catch(() => undefined);
+        storeCached(key, formatted, cache);
         return formatted;
       }
     }
@@ -94,6 +111,14 @@ export async function resolveAddressText(text: string): Promise<string> {
     /* fall through to raw coordinates */
   }
   return text;
+}
+
+function storeCached(key: string, value: string, cache: Record<string, string>): void {
+  cache[key] = value;
+  const keys = Object.keys(cache);
+  if (keys.length > CACHE_CAP) delete cache[keys[0]];
+  _cache = cache;
+  AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cache)).catch(() => undefined);
 }
 
 /** Hook version: returns the fallback immediately, upgrades when resolved. */
