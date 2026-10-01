@@ -16,6 +16,18 @@ import * as Sharing from 'expo-sharing';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { Box } from '@gluestack-ui/themed';
 import { payroll } from '@/services/payroll-api';
+import SmartAddress from '@/components/SmartAddress';
+import { useResolvedAddress } from '@/services/geocode';
+
+// Clock-out line with display-time geocoding (hook can't run in the log map).
+const OutAddressLine = ({ address, format }: { address: string; format: (resolved: string) => string }) => {
+  const resolved = useResolvedAddress(address);
+  return (
+    <Text style={[styles.detailText, { flex: 1 }]}>
+      {format(resolved)}
+    </Text>
+  );
+};
 
 const ClockInHistory: React.FC = () => {
   const { t } = useTranslation();
@@ -635,17 +647,19 @@ const ClockInHistory: React.FC = () => {
                         {(log.location?.clock_in?.address || log.location?.address) && (
                           <View style={[styles.detailRow, { alignItems: 'flex-start' }]}>
                             <MaterialIcons name="location-on" size={16} color={Palette.gray500} style={{ marginTop: 2 }} />
-                            <Text style={[styles.detailText, { flex: 1 }]}>
-                              {log.location?.clock_in?.address || log.location?.address}
-                            </Text>
+                            <SmartAddress
+                              text={log.location?.clock_in?.address || log.location?.address || ''}
+                              style={[styles.detailText, { flex: 1 }]}
+                            />
                           </View>
                         )}
                         {log.location?.clock_out?.address && log.location?.clock_out?.address !== (log.location?.clock_in?.address || log.location?.address) && (
                           <View style={[styles.detailRow, { alignItems: 'flex-start' }]}>
                             <MaterialIcons name="location-off" size={16} color={Palette.gray400} style={{ marginTop: 2 }} />
-                            <Text style={[styles.detailText, { flex: 1 }]}>
-                              {t('clockIn.outAddressPrefix', { address: log.location?.clock_out?.address })}
-                            </Text>
+                            <OutAddressLine
+                              address={log.location.clock_out.address}
+                              format={(resolved) => t('clockIn.outAddressPrefix', { address: resolved })}
+                            />
                           </View>
                         )}
                       </View>
