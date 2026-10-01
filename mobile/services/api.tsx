@@ -16,6 +16,9 @@ export const submitUserRightReport = async (
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            // File uploads escape the client's default 15s timeout — photos on
+            // slow connections legitimately take longer.
+            timeout: 90000,
         });
         return response.data;
     } catch (error: any) {
@@ -270,6 +273,8 @@ export const scanReceipt = async (imageUri: string): Promise<ScannedReceipt | Ap
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            // Receipt photo + server-side OCR: needs headroom past the 15s default.
+            timeout: 90000,
         });
         return response.data;
     } catch (error: any) {
@@ -2280,6 +2285,7 @@ export const uploadTaskProof = async (
         formData.append('file', { uri: imageUri, name: filename, type } as any);
         const response = await api.post(`/job/schedule/${scheduleId}/proof`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 90000,
         });
         return response.data;
     } catch (error: any) {
@@ -3005,6 +3011,7 @@ export const uploadVaultDocument = async (params: {
         }
         const response = await api.post('/user/vault/upload', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 90000,
         });
         return response.data;
     } catch (e: any) {
