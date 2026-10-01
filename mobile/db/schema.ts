@@ -37,6 +37,17 @@ export const kioskQueue = sqliteTable("kiosk_queue", {
 });
 
 /**
+ * Offline sync metadata (key-value). Powers "last synced" UI, the
+ * max-offline-duration bound (last_server_contact), and per-domain sync
+ * cursors. Plain key/value so new domains don't need schema changes.
+ */
+export const syncState = sqliteTable("sync_state", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull(), // Date.now()
+});
+
+/**
  * Employee offline punch queue (Feature 1). When the authed employee's clock-in
  * or clock-out request fails on a network-class error, the full request body is
  * pinned here and replayed by services/syncWorker.ts once the network returns.
