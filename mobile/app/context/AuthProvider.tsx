@@ -69,6 +69,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    // Stable-identity setUser: every silent checkAuth that adopts a user object
+    // creates a NEW object identity, which re-fires every `[user]`-dependent
+    // effect in the app (the clock screen's full data cascade). When nothing
+    // meaningful changed, keep the previous reference so React bails out and
+    // the screen doesn't visibly "reload" on every foreground + reconnect.
+    const authUserKey = (u: IUser | undefined): string => {
+        if (!u) return '';
+        const roles = [...(u.company_roles ?? [])].sort().join(',');
+        return [
+            u.user_id, u.user_type, u.onboard_complete, u.private_user_id ?? '',
+            u.user_name ?? '', u.email ?? '', u.verification_note ?? '',
+            u.is_company_admin ?? false, roles, u.company?.company_id ?? '',
+            u.isAuthenticated ?? false,
+        ].join('|');
+    };
+    // Mirror of the last-applied identity key. login()/changeUser()/logout()
+    // write through it too, so the comparison below never goes stale.
+    const lastUserKeyRef = useRef<string>('');
+    const setUserIfChanged = (next: IUser): boolean => {
+        const key = authUserKey(next);
+        if (key !== '' && key === lastUserKeyRef.current) return false;
+        lastUserKeyRef.current = key;
+        setUser(next);
+        return true;
+    };
+
     // Shared offline fallback: adopt the last-known-good cached user so the
     // app (including the offline punch queue) keeps working with no signal.
     // Returns true when a usable cached user was adopted. Never logs out.
@@ -87,7 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             );
             if (isValidUser) {
                 console.log('👍 AuthProvider: Using valid stored user data for offline mode.');
-                setUser(storedUser);
+                setUserIfChanged(storedUser);
                 return true;
             }
             console.log('⚠️ AuthProvider: Stored user data is invalid for user type:', storedUser.user_type);
@@ -129,6 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // 1. If no token, user is not authenticated.
             if (!token) {
                 console.log('🤷 AuthProvider: No token found. User is not authenticated.');
+                lastUserKeyRef.current = '';
                 setUser(undefined);
                 // Clear any existing authorization header
                 delete api.defaults.headers.Authorization;
@@ -154,6 +181,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     // No usable cache either — stay logged out, but don't
                     // wipe: the tokens may still be valid server-side.
                     delete api.defaults.headers.Authorization;
+                    lastUserKeyRef.current = '';
                     setUser(undefined);
                     if (!opts?.silent) setIsLoading(false);
                     return false;
@@ -219,11 +247,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     company_rbac_enabled: serverData.company_rbac_enabled ?? false,
                 };
 
-                // Update local state and storage
+                // Update local state and storage. Identity-stable: a no-op refresh
+                // keeps the previous reference so `[user]` effects don't refire.
                 console.log('🔄 AuthProvider: Updating user state and storage with fresh data.');
                 await AsyncStorage.setItem('user', JSON.stringify(freshUser));
                 await AsyncStorage.setItem('userType', freshUser.user_type);
-                setUser(freshUser);
+                setUserIfChanged(freshUser);
 
                 // Tie analytics events to this user so we can build funnels
                 // (install -> signup -> onboarding -> retention) per person.
@@ -319,6 +348,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 token: token
             };
 
+            lastUserKeyRef.current = authUserKey(authenticatedUser);
             setUser(authenticatedUser);
             setIsLoading(false);
 
@@ -368,6 +398,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.log('🔐 AuthProvider: All API headers cleared');
 
             // Reset user state completely
+            lastUserKeyRef.current = '';
             setUser(undefined);
             setIsLoading(false);
 
@@ -389,6 +420,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if ('common' in api.defaults.headers) {
                 delete (api.defaults.headers as any).common;
             }
+            lastUserKeyRef.current = '';
             setUser(undefined);
             setIsLoading(false);
 
@@ -402,6 +434,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Change user function
     const changeUser = (newUser: IUser): void => {
         console.log('🔄 AuthProvider: Changing user data');
+        lastUserKeyRef.current = authUserKey(newUser);
         setUser(newUser);
         // Update stored user data
         AsyncStorage.setItem('user', JSON.stringify(newUser));

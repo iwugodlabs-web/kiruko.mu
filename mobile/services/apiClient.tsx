@@ -27,8 +27,13 @@ if (!__DEV__ && isDevLikeUrl) {
   );
 }
 // Create shared API client instance.
+// NOTE: `timeout` is load-bearing for offline behavior. Without it, requests
+// issued as the radios drop hang until OS-level TCP timeout (minutes on iOS),
+// leaving screens in loading states and — worse — never producing the failure
+// the offline queue needs to enqueue. 15s matches the kiosk client.
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 15000,
   headers: {
     "Content-Type": "application/json",
   },

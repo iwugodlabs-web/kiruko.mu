@@ -551,17 +551,33 @@ export default function ClockInPage() {
     }
     setLocationAuthorized(true);
 
+    // Offline-safe positioning. A cold GPS fix without A-GPS data (which needs
+    // a data connection) can hang for minutes or never arrive — awaiting it
+    // unconditionally is what made clock-in "impossible" with the radios off.
+    // Offline we take the last-known fix or fail fast with a clear message;
+    // the backend already accepts stale/low-accuracy fixes into review flags.
+    const { isOnlineNow } = await import('@/services/offlinePolicy');
+    const online = await isOnlineNow();
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+      Promise.race([
+        p,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+      ]);
+
     // Speed optimization: last known first, then a fresh balanced fix. Both
     // native calls can throw or return null on Android (GPS off, Play Services
     // unavailable) — guard them and null-check the result so a location failure
     // surfaces as an alert instead of a `coords`-of-null hard crash.
     let location: Location.LocationObject | null = null;
     try {
-      location = await Location.getLastKnownPositionAsync();
-      if (!location) {
-        location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+      location = await withTimeout(Location.getLastKnownPositionAsync(), 5000);
+      if (!location && online) {
+        location = await withTimeout(
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          }),
+          10000,
+        );
       }
     } catch (posErr) {
       console.warn('Failed to get device position:', posErr);
@@ -595,14 +611,19 @@ export default function ClockInPage() {
 
     // Move geocoding to a secondary, non-blocking step if possible, or use a faster lookup
     let addressString = `Coordinates: ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`;
-    try {
-      // Faster address lookup
-      const address = await Location.reverseGeocodeAsync(coords);
-      if (address.length > 0) {
-        addressString = `${address[0].name || ''}, ${address[0].city || ''}, ${address[0].region || ''}, ${address[0].country || ''}`.replace(/^, |, $|, , /g, ', ').replace(/^, |, $/g, '');
+    // Reverse-geocoding is a network service — offline it hangs until its own
+    // internal timeout, stalling the tap for nothing. Skip it when offline;
+    // coordinates alone are sufficient for the punch payload.
+    if (online) {
+      try {
+        // Faster address lookup
+        const address = await withTimeout(Location.reverseGeocodeAsync(coords), 8000);
+        if (address && address.length > 0) {
+          addressString = `${address[0].name || ''}, ${address[0].city || ''}, ${address[0].region || ''}, ${address[0].country || ''}`.replace(/^, |, $|, , /g, ', ').replace(/^, |, $/g, '');
+        }
+      } catch (geocodeError) {
+        console.warn('Geocoding failed:', geocodeError);
       }
-    } catch (geocodeError) {
-      console.warn('Geocoding failed:', geocodeError);
     }
 
     return {
