@@ -45,4 +45,4 @@ jobs:
 
       - name: Unit tests (offline sync workers)
         working-directory: mobile
-        run: npx jest app/private_dashboard/services/__tests__ --silent
+        run: npx jest services/offline/__tests__ --silent
