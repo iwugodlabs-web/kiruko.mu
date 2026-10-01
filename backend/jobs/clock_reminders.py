@@ -158,6 +158,10 @@ def run(db: Session) -> int:
                 "\U0001f3c1 Time to clock out",
                 "Your work day is ending — don't forget to clock out!",
                 {"type": "clock_reminder", "kind": "clock_out"},
+                # One-tap clock-out: the app registers a matching action
+                # category; the action deep-links with ?action=clockout and
+                # the clock screen runs its normal (confirm-guarded) toggle.
+                category_id="clock-out",
             ):
                 _sent_keys.add(out_key)
                 sent += 1

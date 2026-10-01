@@ -24,15 +24,29 @@ function routeFor(data: any): string | null {
 // Route a tapped notification to the right screen — but never into protected
 // space while logged out. If unauthenticated, park the route and send the user
 // to login; it is replayed after a successful sign-in (see the effect below).
-function handleNotificationNavigation(data: any, isAuthenticated: boolean) {
+//
+// One-tap clock-out: the clock-out reminder carries an action button
+// (category registered below). Tapping the ACTION (not the body) deep-links
+// with ?action=clockout and the clock screen runs its normal
+// confirm-guarded toggle. Authentication required on the action itself so a
+// pocket tap against a locked phone can't punch anyone out.
+function handleNotificationNavigation(
+  data: any,
+  isAuthenticated: boolean,
+  actionIdentifier?: string,
+) {
   const target = routeFor(data);
   if (!target) return;
+  const withAction =
+    actionIdentifier === 'CLOCK_OUT' && data?.kind === 'clock_out'
+      ? `${target}?action=clockout`
+      : target;
   if (!isAuthenticated) {
-    pendingRoute = target;
+    pendingRoute = withAction;
     router.replace('/login');
     return;
   }
-  router.push(target as any);
+  router.push(withAction as any);
 }
 
 // Set up the notification handler
@@ -67,12 +81,23 @@ export default function usePushNotifications() {
       setNotification(notification);
     });
 
+    // Action category for one-tap clock-out (backend sends categoryId on the
+    // clock-out reminder). Registered once; harmless if push is denied.
+    Notifications.setNotificationCategoryAsync('clock-out', [
+      {
+        identifier: 'CLOCK_OUT',
+        buttonTitle: 'Clock out',
+        options: { opensAppToForeground: true, isAuthenticationRequired: true },
+      },
+    ]).catch(() => undefined);
+
     // If the app was launched by tapping a notification, route once on mount
     Notifications.getLastNotificationResponseAsync().then(response => {
       if (response) {
         handleNotificationNavigation(
           response.notification.request.content.data,
           isAuthenticatedRef.current,
+          response.actionIdentifier,
         );
       }
     });
@@ -82,6 +107,7 @@ export default function usePushNotifications() {
       handleNotificationNavigation(
         response.notification.request.content.data,
         isAuthenticatedRef.current,
+        response.actionIdentifier,
       );
     });
 

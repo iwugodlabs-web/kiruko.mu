@@ -11,11 +11,14 @@ logger = logging.getLogger(__name__)
 
 class NotificationService:
     @staticmethod
-    def send_expo_push(token: str, title: str, body: str, data: Optional[Dict[str, Any]] = None):
-        """Sends a push notification via Expo Push API"""
+    def send_expo_push(token: str, title: str, body: str, data: Optional[Dict[str, Any]] = None,
+                       category_id: Optional[str] = None):
+        """Sends a push notification via Expo Push API. ``category_id`` maps to
+        a client-registered action category (e.g. one-tap clock-out); omitted
+        for all existing callers (backward compatible)."""
         if not token:
             return False
-            
+
         url = "https://exp.host/--/api/v2/push/send"
         payload = {
             "to": token,
@@ -26,6 +29,8 @@ class NotificationService:
             "priority": "high",
             "channelId": "default"
         }
+        if category_id:
+            payload["categoryId"] = category_id
         
         try:
             response = requests.post(url, json=payload, timeout=5)

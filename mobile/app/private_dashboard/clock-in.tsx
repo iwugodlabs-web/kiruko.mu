@@ -36,7 +36,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addDays, addWeeks, addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isAfter, isBefore, isSameDay, isSameMonth, isThisWeek, isToday, isWithinInterval, parseISO, startOfMonth, startOfWeek, subDays, subMonths } from 'date-fns';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1775,6 +1775,22 @@ export default function ClockInPage() {
       setIsLoading(false);
     }
   };
+
+  // One-tap clock-out from the reminder notification action (?action=clockout).
+  // Runs the normal toggle — including its confirm dialog, so a stray tap
+  // can't silently punch out — exactly once per mount. If not clocked in
+  // (stale reminder, already closed), there is nothing to do.
+  const notifAction = useLocalSearchParams<{ action?: string }>().action;
+  const notifActionHandled = useRef(false);
+  useEffect(() => {
+    if (notifAction === 'clockout' && !notifActionHandled.current && isClockedIn) {
+      notifActionHandled.current = true;
+      handleClockToggle().catch(() => undefined);
+    }
+    // handleClockToggle intentionally omitted: the handled-ref makes this
+    // run at most once; depending on the (unstable) callback would re-fire it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifAction, isClockedIn]);
 
   const handleBreakToggle = async () => {
     if (!isClockedIn) {
