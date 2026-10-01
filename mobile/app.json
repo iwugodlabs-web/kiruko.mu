@@ -18,7 +18,8 @@
           "NSAllowsLocalNetworking": true
         }
       },
-      "appleTeamId": "U29MDGMN4R"
+      "appleTeamId": "U29MDGMN4R",
+      "buildNumber": "3"
     },
     "android": {
       "adaptiveIcon": {
@@ -42,9 +43,16 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "app.kiruko.mu", "pathPrefix": "/claim" }
+            {
+              "scheme": "https",
+              "host": "app.kiruko.mu",
+              "pathPrefix": "/claim"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
