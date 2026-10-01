@@ -865,6 +865,36 @@ const Dashboard = () => {
           setSalaryData(data.salary);
         }
 
+        // Offline cold start: the resilient fetcher returns partial/empty data
+        // without throwing, leaving a blank dashboard. Persist the last-good
+        // snapshot and serve it when the network yields nothing, mirroring the
+        // clock screen's cached-history fallback. Financials + pay estimate
+        // stay best-effort (engine-computed, not safely cacheable).
+        const snapshot: Record<string, unknown> = {};
+        if (data.timeLogs && Array.isArray(data.timeLogs)) snapshot.timeLogs = data.timeLogs;
+        if (data.job) snapshot.job = data.job;
+        if (data.schedules && Array.isArray(data.schedules)) snapshot.schedules = data.schedules;
+        if (data.salary) snapshot.salary = data.salary;
+        if (Object.keys(snapshot).length > 0) {
+          AsyncStorage.setItem('homeDashboard', JSON.stringify(snapshot)).catch(() => undefined);
+        } else if (isMounted.current) {
+          try {
+            const cached = await AsyncStorage.getItem('homeDashboard');
+            if (cached) {
+              const parsed = JSON.parse(cached) as {
+                timeLogs?: any[]; job?: any; schedules?: any[]; salary?: any;
+              };
+              if (Array.isArray(parsed.timeLogs)) setTimeLogs(parsed.timeLogs);
+              if (parsed.job) setJobData(parsed.job);
+              if (Array.isArray(parsed.schedules)) setAssignedTasksData(parsed.schedules);
+              if (parsed.salary) setSalaryData(parsed.salary);
+              console.log('📥 Dashboard: Served last-good snapshot while offline.');
+            }
+          } catch {
+            /* best-effort — blank dashboard is acceptable, crash is not */
+          }
+        }
+
         // Authoritative pay estimate from the payroll engine (same figure
         // the web employer profile shows) — best-effort, non-blocking.
         await refreshPayslipEstimate();
