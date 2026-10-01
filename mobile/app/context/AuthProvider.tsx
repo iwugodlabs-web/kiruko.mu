@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { AppState } from 'react-native';
 import { checkAuthToken } from '../../services/api';
 import { api } from '../../services/apiClient';
+import { track } from '../../services/analytics';
 import AuthContext, { type IUser } from './AuthContext';
 
 import { useRouter } from 'expo-router';
@@ -243,6 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // but instead fall through to the offline fallback logic.
                 if (tokenValidation.status === 401 || tokenValidation.status === 403) {
                     console.log('🚫 AuthProvider: Token is unauthorized/forbidden. Logging out.');
+                    track('auth_logout', { trigger: 'server_denial', status: tokenValidation.status });
                     delete api.defaults.headers.Authorization;
                     await logout();
                     return false;
@@ -259,6 +261,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // If we're here, either there was a network error and no valid local data, or something else went wrong.
             console.log('❌ AuthProvider: Offline fallback failed. User is not authenticated.');
+            try {
+                const storedRaw = await AsyncStorage.getItem('user');
+                const parsed = storedRaw ? JSON.parse(storedRaw) : null;
+                track('auth_logout', {
+                    trigger: 'fallback_failed',
+                    has_token: !!(await AsyncStorage.getItem('authToken')),
+                    has_stored_user: !!storedRaw,
+                    stored_user_type: parsed?.user_type ?? null,
+                    has_private_id: !!parsed?.private_user_id,
+                });
+            } catch {
+                /* telemetry only */
+            }
             // Clear the authorization header
             delete api.defaults.headers.Authorization;
             await logout();
