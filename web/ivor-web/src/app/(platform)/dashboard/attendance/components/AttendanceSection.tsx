@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/services/apiClient";
@@ -12,9 +12,10 @@ import LiveSessionsTable from "./LiveSessionsTable";
 import TimeLogTable from "./TimeLogTable";
 import TimeLogDetailDrawer from "./TimeLogDetailDrawer";
 import AttendanceExportButton from "./AttendanceExportButton";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 import DashboardHeader from "@/components/ui/DashboardHeader";
 import FilterSelect from "@/components/ui/FilterSelect";
+import { searchDirectory } from "@/utils/employeeSearch";
 
 const LIMIT = 50;
 // Backend caps a single page at 200 rows.
@@ -61,10 +62,35 @@ export default function AttendanceSection() {
   // Extra filters (department / employee / source).
   const [deptId, setDeptId] = useState<string>("");
   const [employeeId, setEmployeeId] = useState<string>("");
+  // Free-text employee search (name, code, or id). Applying a suggestion sets
+  // the server-side employeeId filter (pagination-safe); plain text narrows
+  // the Live tab client-side. Cleared together with the other filters.
+  const [empQuery, setEmpQuery] = useState<string>("");
+  const [empFocused, setEmpFocused] = useState<boolean>(false);
+  function applyEmployee(id: string, label: string) {
+    setEmployeeId(id);
+    setEmpQuery(label);
+    setOffset(0);
+    setEmpFocused(false);
+  }
+  function clearEmployee() {
+    setEmployeeId("");
+    setEmpQuery("");
+    setOffset(0);
+  }
   const [source, setSource] = useState<string>("");
   const [otFilter, setOtFilter] = useState<string>("");
   const [departments, setDepartments] = useState<ShowDepartment[]>([]);
   const [employees, setEmployees] = useState<VerifiedEmployee[]>([]);
+  const empOptions = useMemo(
+    () => employees.filter((e) => e.private_user_id),
+    [employees],
+  );
+  const empSuggestions = useMemo(
+    () => (empQuery.trim() ? searchDirectory(empOptions, empQuery).slice(0, 6) : []),
+    [empOptions, empQuery],
+  );
+  const showSuggestions = empFocused && empQuery.trim().length > 0;
 
   // Populate the department + employee dropdowns once.
   useEffect(() => {
@@ -236,10 +262,57 @@ export default function AttendanceSection() {
       {/* Filters: date range + department / employee / source */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 px-4 py-3 flex flex-wrap items-center gap-3">
         <AttendanceDateFilter value={dateRange} onChange={setDateRange} />
+        <div className="relative">
+          <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
+          <input
+            type="search"
+            value={empQuery}
+            onChange={(e) => {
+              setEmpQuery(e.target.value);
+              if (e.target.value === "") setEmployeeId("");
+            }}
+            onFocus={() => setEmpFocused(true)}
+            onBlur={() => setTimeout(() => setEmpFocused(false), 120)}
+            placeholder="Employee, code, or ID…"
+            aria-label="Search by employee name, code, or ID"
+            className="rounded-md border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white pl-8 pr-7 py-1.5 text-sm w-56 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+          />
+          {empQuery && (
+            <button
+              type="button"
+              onClick={clearEmployee}
+              aria-label="Clear employee search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {showSuggestions && (
+            <div className="absolute z-20 mt-1 w-64 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden">
+              {empSuggestions.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                  No employee matches “{empQuery.trim()}”.
+                </div>
+              ) : (
+                empSuggestions.map((e) => (
+                  <button
+                    key={String(e.private_user_id)}
+                    type="button"
+                    onMouseDown={(ev) => ev.preventDefault()}
+                    onClick={() => applyEmployee(String(e.private_user_id), e.name ?? "")}
+                    className="block w-full text-left px-3 py-2 text-sm text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    {e.name}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2 ml-auto">
           {([
             { value: deptId, set: setDeptId, all: "All departments", opts: departments.map((d) => ({ v: String(d.department_id), l: d.name })) },
-            { value: employeeId, set: setEmployeeId, all: "All employees", opts: employees.filter((e) => e.private_user_id).map((e) => ({ v: String(e.private_user_id), l: e.name })) },
+            { value: employeeId, set: (v: string) => { setEmployeeId(v); setEmpQuery(""); }, all: "All employees", opts: employees.filter((e) => e.private_user_id).map((e) => ({ v: String(e.private_user_id), l: e.name })) },
             { value: source, set: setSource, all: "All sources", opts: [{ v: "kiosk", l: "Kiosk" }, { v: "mobile", l: "Mobile" }, { v: "web", l: "Web" }, { v: "admin", l: "Admin" }] },
             { value: otFilter, set: setOtFilter, all: "All entries", opts: [{ v: "any", l: "Overtime (any)" }, { v: "pending", l: "OT pending approval" }, { v: "approved", l: "OT approved" }, { v: "auto", l: "Auto-detected OT" }] },
           ]).map((f, i) => (
@@ -252,9 +325,9 @@ export default function AttendanceSection() {
               selectClassName="max-w-[160px]"
             />
           ))}
-          {(deptId || employeeId || source || otFilter) && (
+          {(deptId || employeeId || source || otFilter || empQuery) && (
             <button
-              onClick={() => { setDeptId(""); setEmployeeId(""); setSource(""); setOtFilter(""); setOffset(0); }}
+              onClick={() => { setDeptId(""); setEmployeeId(""); setEmpQuery(""); setSource(""); setOtFilter(""); setOffset(0); }}
               className="text-xs font-medium text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 px-2 py-1.5"
             >
               Clear
@@ -319,6 +392,8 @@ export default function AttendanceSection() {
               logs={activeLogs}
               loading={summaryLoading}
               onRowClick={setSelectedLog}
+              employeeId={employeeId}
+              query={empQuery}
             />
           ) : (
             <TimeLogTable

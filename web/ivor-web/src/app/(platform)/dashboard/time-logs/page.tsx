@@ -10,6 +10,7 @@ import {
   type TimeLogStatus,
 } from "@/services/payroll-api";
 import { toast } from "sonner";
+import { matchesEmployeeQuery } from "@/utils/employeeSearch";
 import DashboardHeader from "@/components/ui/DashboardHeader";
 import GroupedTimeLogs from "./GroupedTimeLogs";
 import { EditTimeLogButton } from "./EditTimeLogModal";
@@ -30,6 +31,7 @@ import {
   ShieldQuestion,
   Timer,
   LogOut,
+  Search,
 } from "lucide-react";
 import RoleGuard from "../../components/RoleGuard";
 
@@ -334,10 +336,18 @@ export default function TimeLogsPage() {
     return t;
   }, [logs]);
 
+  // Employee search — name, code, or id. Narrowed client-side alongside the
+  // other filters so it works on the already-fetched month instantly.
+  const [employeeQuery, setEmployeeQuery] = useState("");
+
   // Rows actually rendered, after the client-side auto-closed narrowing.
   const visible = useMemo(
-    () => (autoClosedOnly ? logs.filter((l) => l.auto_closed) : logs),
-    [logs, autoClosedOnly],
+    () =>
+      logs.filter(
+        (l) =>
+          (!autoClosedOnly || l.auto_closed) && matchesEmployeeQuery(l, employeeQuery),
+      ),
+    [logs, autoClosedOnly, employeeQuery],
   );
   const autoClosedCount = useMemo(() => logs.filter((l) => l.auto_closed).length, [logs]);
 
@@ -617,6 +627,18 @@ export default function TimeLogsPage() {
             Auto-closed ({autoClosedCount})
           </button>
         )}
+        {/* Employee search — name, code, or id. */}
+        <div className="relative">
+          <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-gray-500 pointer-events-none" />
+          <input
+            type="search"
+            value={employeeQuery}
+            onChange={(e) => setEmployeeQuery(e.target.value)}
+            placeholder="Employee, code, or ID…"
+            aria-label="Search by employee name, code, or ID"
+            className="rounded-md border border-zinc-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white pl-8 pr-3 py-1.5 text-sm w-56 placeholder:text-zinc-400 dark:placeholder:text-gray-500"
+          />
+        </div>
         {/* #20 — grouped vs flat view toggle. */}
         <div className="ml-auto inline-flex items-center rounded-md border border-zinc-200 dark:border-gray-700 overflow-hidden text-sm">
           <button
