@@ -61,7 +61,7 @@ export default function AttendanceSection() {
 
   // Extra filters (department / employee / source).
   const [deptId, setDeptId] = useState<string>("");
-  const [employeeId, setEmployeeId] = useState<string>("");
+  const [employeeId, setEmployeeId] = useState<string>(() => searchParams?.get('employee') ?? "");
   // Free-text employee search (name, code, or id). Applying a suggestion sets
   // the server-side employeeId filter (pagination-safe); plain text narrows
   // the Live tab client-side. Cleared together with the other filters.
@@ -91,6 +91,10 @@ export default function AttendanceSection() {
     [empOptions, empQuery],
   );
   const showSuggestions = empFocused && empQuery.trim().length > 0;
+  const [activeSuggestion, setActiveSuggestion] = useState<number>(-1);
+  useEffect(() => {
+    setActiveSuggestion(-1);
+  }, [empQuery]);
 
   // Populate the department + employee dropdowns once.
   useEffect(() => {
@@ -106,14 +110,27 @@ export default function AttendanceSection() {
   const [selectedLog, setSelectedLog] = useState<TimeLogRow | null>(null);
   const [spinning, setSpinning] = useState(false);
 
-  // Mirror date range and active tab into the URL.
+  // Mirror date range, active tab, and selected employee into the URL so a
+  // filtered view ("all of John's sessions") is shareable. Only the resolved
+  // employeeId is mirrored — free text isn't stable across loads.
   useEffect(() => {
     const params = new URLSearchParams();
     params.set('start', dateRange.start);
     params.set('end', dateRange.end);
     if (activeTab !== 'live') params.set('tab', activeTab);
+    if (employeeId) params.set('employee', employeeId);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [dateRange.start, dateRange.end, activeTab, pathname, router]);
+  }, [dateRange.start, dateRange.end, activeTab, employeeId, pathname, router]);
+
+  // When landing with ?employee= (shared link), show the employee's name in
+  // the search box once the directory loads.
+  useEffect(() => {
+    if (employeeId && !empQuery) {
+      const match = employees.find((e) => String(e.private_user_id) === employeeId);
+      if (match?.name) setEmpQuery(match.name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, employees]);
 
   const liveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -273,6 +290,27 @@ export default function AttendanceSection() {
             }}
             onFocus={() => setEmpFocused(true)}
             onBlur={() => setTimeout(() => setEmpFocused(false), 120)}
+            onKeyDown={(e) => {
+              if (!showSuggestions || empSuggestions.length === 0) {
+                if (e.key === "Escape") setEmpFocused(false);
+                return;
+              }
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveSuggestion((i) => (i + 1) % empSuggestions.length);
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveSuggestion((i) => (i - 1 + empSuggestions.length) % empSuggestions.length);
+              } else if (e.key === "Enter") {
+                const pick = empSuggestions[activeSuggestion] ?? empSuggestions[0];
+                if (pick?.private_user_id != null) {
+                  e.preventDefault();
+                  applyEmployee(String(pick.private_user_id), pick.name ?? "");
+                }
+              } else if (e.key === "Escape") {
+                setEmpFocused(false);
+              }
+            }}
             placeholder="Employee, code, or ID…"
             aria-label="Search by employee name, code, or ID"
             className="rounded-md border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white pl-8 pr-7 py-1.5 text-sm w-56 placeholder:text-gray-400 dark:placeholder:text-gray-500"
@@ -294,13 +332,17 @@ export default function AttendanceSection() {
                   No employee matches “{empQuery.trim()}”.
                 </div>
               ) : (
-                empSuggestions.map((e) => (
+                empSuggestions.map((e, i) => (
                   <button
                     key={String(e.private_user_id)}
                     type="button"
                     onMouseDown={(ev) => ev.preventDefault()}
                     onClick={() => applyEmployee(String(e.private_user_id), e.name ?? "")}
-                    className="block w-full text-left px-3 py-2 text-sm text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    onMouseEnter={() => setActiveSuggestion(i)}
+                    aria-current={i === activeSuggestion ? true : undefined}
+                    className={`block w-full text-left px-3 py-2 text-sm text-gray-800 dark:text-gray-100 ${
+                      i === activeSuggestion ? "bg-gray-100 dark:bg-gray-700" : "hover:bg-gray-50 dark:hover:bg-gray-700"
+                    }`}
                   >
                     {e.name}
                   </button>
