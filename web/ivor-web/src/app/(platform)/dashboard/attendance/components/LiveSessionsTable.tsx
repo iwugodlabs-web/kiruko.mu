@@ -3,6 +3,7 @@
 import { TimeLogRow } from "./types";
 import StatusBadge from "./StatusBadge";
 import { MapPin, Clock } from "lucide-react";
+import { matchesEmployeeQuery } from "@/utils/employeeSearch";
 
 interface Props {
   // Expects the FULL set of logs for the date range (not a single paginated
@@ -10,6 +11,10 @@ interface Props {
   logs: TimeLogRow[];
   loading: boolean;
   onRowClick: (log: TimeLogRow) => void;
+  // Employee filter: server-selected id wins; otherwise free-text narrows
+  // client-side (name, code, or id).
+  employeeId?: string;
+  query?: string;
 }
 
 function formatDuration(startIso: string): string {
@@ -27,13 +32,19 @@ function formatTime(iso: string | null): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function LiveSessionsTable({ logs, loading, onRowClick }: Props) {
-  const active = logs.filter((l) => l.status === "active");
+export default function LiveSessionsTable({ logs, loading, onRowClick, employeeId, query }: Props) {
+  const filtered = employeeId
+    ? logs.filter((l) => String(l.private_user_id) === employeeId)
+    : (query ?? "").trim()
+      ? logs.filter((l) => matchesEmployeeQuery(l, query))
+      : logs;
+  const active = filtered.filter((l) => l.status === "active");
+  const isFiltering = !!employeeId || !!(query ?? "").trim();
 
   if (!loading && active.length === 0) {
     return (
       <div className="text-center py-10 text-gray-500 dark:text-gray-400 text-sm">
-        No employees currently clocked in.
+        {isFiltering ? "No matching sessions." : "No employees currently clocked in."}
       </div>
     );
   }
