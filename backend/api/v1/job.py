@@ -2266,8 +2266,49 @@ async def approve_employee_verification(job_id: int, current_user: User = Depend
         job.verified_by = 'employer'  # You might want to get this from authentication
         job.company_id = company.company_id  # Link job to company
         job.updated_at = datetime.utcnow()
-        
-        # Per policy: do NOT set PrivateUser.company_id here. Only link the job to the company.
+        # A missing start date would silently pay a full period (proration
+        # treats NULL as full-month). Default to the approval date so
+        # late joiners prorate correctly from here on.
+        if not getattr(job, 'first_date_of_employment', None):
+            job.first_date_of_employment = datetime.utcnow()
+
+        # Link the worker to the company as well (previously deliberately
+        # skipped). Without PrivateUser.company_id, salary-assignment creation
+        # 400s ("Employee has no company") and payroll's company filter
+        # silently excludes them — an employer approving a BRN-matched job is
+        # a conscious attach decision, same as POST /user/{id}/approve.
+        if private_user.company_id is None:
+            private_user.company_id = company.company_id
+            try:
+                from services.employee_code_service import ensure_employee_code
+                ensure_employee_code(db, private_user)
+            except Exception as e:
+                logger.warning(f"Could not ensure employee code for user {private_user.private_user_id}: {e}")
+            db.add(private_user)
+
+        # Backfill sibling jobs that only carried the BRN, plus their salaries'
+        # denormalized company_id (else those salaries read as company-less and
+        # assignment/payroll scoping keeps missing them).
+        try:
+            from core.model import Salary as SalaryModel
+            siblings = db.query(Job).filter(
+                Job.private_user_id == private_user.private_user_id,
+                Job.company_id == None,
+            ).all()
+            for sib in siblings:
+                if (sib.employer_brn or '').strip().lower() == (company.brn or '').strip().lower():
+                    sib.company_id = company.company_id
+                    db.add(sib)
+                    db.query(SalaryModel).filter(
+                        SalaryModel.job_id == sib.job_id,
+                        SalaryModel.company_id == None,
+                    ).update({'company_id': company.company_id}, synchronize_session=False)
+            db.query(SalaryModel).filter(
+                SalaryModel.job_id == job.job_id,
+                SalaryModel.company_id == None,
+            ).update({'company_id': company.company_id}, synchronize_session=False)
+        except Exception as e:
+            logger.warning(f"Could not backfill sibling company links for job {job_id}: {e}")
         # Mark the associated user as verified so dashboard counts them
         user = None
         try:
@@ -2292,6 +2333,21 @@ async def approve_employee_verification(job_id: int, current_user: User = Depend
         db.refresh(private_user)
         if user:
             db.refresh(user)
+
+        # Payroll-ready bootstrap (best-effort, own transaction — must never
+        # roll back the approval above): an approved company member with a
+        # legacy salary but no assignment would otherwise miss every run.
+        try:
+            from services.salary_assignment_bootstrap import ensure_assignment_from_legacy
+            created = ensure_assignment_from_legacy(
+                db, private_user.private_user_id, created_by_user_id=current_user.user_id
+            )
+            db.commit()
+            if created is not None:
+                logger.info(f"Bootstrapped salary assignment for user {private_user.private_user_id} on job approval {job_id}")
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Assignment bootstrap failed for job {job_id} (non-fatal): {e}")
 
         return {
             "message": "Employee verification approved successfully",

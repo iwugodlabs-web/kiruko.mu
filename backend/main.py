@@ -136,11 +136,26 @@ def get_application():
 
     @app.middleware("http")
     async def add_request_metadata_logging(request: Request, call_next):
-        # Paths to exclude from logging to save DB space
+        # Paths to exclude from logging to save DB space. Exact matches skip
+        # outright; prefixes below skip high-frequency polling endpoints that
+        # have no audit value (they generated ~40% of request_logs volume).
         excluded_paths = ["/docs", "/openapi.json", "/redoc", "/favicon.ico"]
+        excluded_prefixes = [
+            "/api/v1/user/me",
+            "/api/v1/notification",
+            "/api/v1/dashboard/stats",
+            "/api/v1/sponsored/serve",
+            "/api/v1/private-users/me/payslips/estimate",
+            "/api/v1/job/salary/company/",
+        ]
+        excluded_substrings = ["salary/preview", "payslips/estimate"]
         path = request.url.path
-        
+
         if path in excluded_paths:
+            return await call_next(request)
+        if any(path.startswith(p) for p in excluded_prefixes):
+            return await call_next(request)
+        if any(s in path for s in excluded_substrings):
             return await call_next(request)
 
         # Extract metadata
@@ -199,15 +214,18 @@ def get_application():
 
     def cleanup_old_logs():
         """Delete request logs older than 30 days to save space"""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         session_factory = get_session_local()
         if session_factory:
             db = session_factory()
             try:
-                retention_period = datetime.utcnow() - timedelta(days=30)
+                # Timezone-aware comparison: created_at is timestamptz, so a
+                # naive utcnow() is interpreted in the server's TimeZone
+                # setting and can shift (or miss) the retention boundary.
+                retention_period = datetime.now(timezone.utc) - timedelta(days=30)
                 db.query(RequestLog).filter(RequestLog.created_at < retention_period).delete()
                 db.commit()
-                print("✅ Cleaned up old request logs")
+                print("Cleaned up old request logs")
             except Exception as e:
                 print(f"Error cleaning up logs: {e}")
             finally:

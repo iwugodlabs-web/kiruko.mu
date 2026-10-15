@@ -1387,6 +1387,21 @@ async def approve_employee(
     ).all()
     for job in jobs_to_link:
         job.company_id = company.company_id
+        if not getattr(job, 'first_date_of_employment', None):
+            from datetime import datetime as _dt
+            job.first_date_of_employment = _dt.utcnow()
+
+    # 3b. Backfill the salaries' denormalized company_id for the linked jobs
+    # so assignment/payroll scoping sees them as company pay setups.
+    try:
+        from core.model import Salary as SalaryModel
+        for job in jobs_to_link:
+            db.query(SalaryModel).filter(
+                SalaryModel.job_id == job.job_id,
+                SalaryModel.company_id == None,
+            ).update({'company_id': company.company_id}, synchronize_session=False)
+    except Exception as e:
+        logger.warning(f'Salary company backfill failed for user {user_id} (non-fatal): {e}')
 
     db.commit()
     logger.info(
@@ -1403,6 +1418,20 @@ async def approve_employee(
         create_audit_log(db, current_user.user_id, 'approved', 'user_verification', user_id, details)
     except Exception as e:
         logger.warning(f'Audit log write failed for user {user_id} approval, continuing: {e}')
+
+    # 5. Payroll-ready bootstrap (best-effort, own transaction): an approved
+    # member with a legacy salary but no assignment would miss every run.
+    try:
+        from services.salary_assignment_bootstrap import ensure_assignment_from_legacy
+        created = ensure_assignment_from_legacy(
+            db, target.private_user.private_user_id, created_by_user_id=current_user.user_id
+        )
+        db.commit()
+        if created is not None:
+            logger.info(f'Bootstrapped salary assignment for user {user_id} on approval')
+    except Exception as e:
+        db.rollback()
+        logger.warning(f'Assignment bootstrap failed for user {user_id} (non-fatal): {e}')
 
     return {'user_id': user_id, 'user_verified': True, 'company_onboarding_status': 'approved'}
 
@@ -1871,6 +1900,19 @@ async def onboard_job(job_info: OnboardJob, db: Session = Depends(config.get_db)
             logger.warning(f"refresh_user_onboard_state failed (non-fatal): {ob_err}")
 
         db.commit()
+
+        # Payroll-ready bootstrap (best-effort, own transaction): a freshly
+        # onboarded member with a salary but no assignment would miss the
+        # next run. Skips safely when there is no company/job/salary yet.
+        try:
+            from services.salary_assignment_bootstrap import ensure_assignment_from_legacy
+            _boot = ensure_assignment_from_legacy(db, private_user_id)
+            db.commit()
+            if _boot is not None:
+                logger.info(f'Bootstrapped salary assignment for user {main_user.user_id} on onboard')
+        except Exception as boot_err:
+            db.rollback()
+            logger.warning(f'Assignment bootstrap on onboard failed (non-fatal): {boot_err}')
 
         # Fetch the fully updated user to return
         user = get_user_by_user_id(main_user.user_id, db)

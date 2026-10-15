@@ -1615,6 +1615,10 @@ def _eligible_employees(
     eligible: List[PrivateUser] = []
     for e in employees:
         job, salary = _active_job_with_salary(db, e.private_user_id)
+        # Onboarding placeholders (is_onboarding_draft) are not employment yet —
+        # they must never draw a payslip, even if a salary row exists.
+        if job is not None and getattr(job, "is_onboarding_draft", False):
+            continue
         # Skip employees who left BEFORE this period starts. A terminated worker
         # must not reappear in (or accrue an EOY bonus on) a later month's run —
         # their final pay and pro-rated gratuity belong to the termination
