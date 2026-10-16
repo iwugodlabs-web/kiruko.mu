@@ -56,14 +56,30 @@ const STATUS_STYLES: Record<PayrollRunStatus, { label: string; classes: string; 
 function groupWarnings(flags: string[], subjects?: Record<string, string>, currency?: string) {
   const order: string[] = [];
   const byName = new Map<string, string[]>();
+  let noClockinCount = 0;
   for (const f of flags) {
     const m = f.match(/^u(\d+):/);
+    const code = m ? f.slice(m[0].length) : f;
+    // Collapse the per-employee "salaried, no clock-ins → absence not measured"
+    // note into ONE summary line. It fires for every monthly employee who
+    // doesn't clock in and is non-actionable (no deduction applied), so a line
+    // per person is pure noise that buries the warnings that matter.
+    if (code === "salaried_absence_skipped:no_clockins") { noClockinCount += 1; continue; }
     const name = m ? (subjects?.[m[1]] ?? "An employee") : "";
     const msg = describeFlag(f, { who: "", currency }).replace(/^\s+/, "");
     if (!byName.has(name)) { byName.set(name, []); order.push(name); }
     byName.get(name)!.push(msg);
   }
-  return order.map((name) => ({ name, messages: byName.get(name)! }));
+  const groups = order.map((name) => ({ name, messages: byName.get(name)! }));
+  if (noClockinCount > 0) {
+    groups.push({
+      name: "",
+      messages: [
+        `${noClockinCount} salaried ${noClockinCount === 1 ? "employee" : "employees"} had no clock-ins — absence not measured (no deductions).`,
+      ],
+    });
+  }
+  return groups;
 }
 
 // Initials for the avatar chip (first letter of the first two words).
@@ -105,7 +121,8 @@ export default function PayrollRunList() {
   const toggleWarnings = (runId: number) =>
     setExpandedWarnings((prev) => {
       const next = new Set(prev);
-      next.has(runId) ? next.delete(runId) : next.add(runId);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
       return next;
     });
 
@@ -298,6 +315,13 @@ export default function PayrollRunList() {
               {runs.map((r) => {
                 const period = formatPeriod(r.period_start, r.period_end);
                 const isDraft = r.status === "draft";
+                // Compute the grouped warnings once (aggregates the no-clock-in
+                // noise) so the header count matches what's actually shown.
+                const warningGroups =
+                  r.status !== "cancelled"
+                    ? groupWarnings(r.warnings ?? [], r.warning_subjects, r.currency)
+                    : [];
+                const warningShown = warningGroups.reduce((n, g) => n + g.messages.length, 0);
                 return (
                 <Fragment key={r.id}>
                 <tr className="hover:bg-zinc-50/50">
@@ -388,7 +412,7 @@ export default function PayrollRunList() {
                     )}
                   </td>
                 </tr>
-                {r.status !== "cancelled" && (r.warnings?.length ?? 0) > 0 && (
+                {warningShown > 0 && (
                   <tr>
                     {/* empty leading cell aligns the panel under the Status column */}
                     <td aria-hidden className="px-4" />
@@ -402,7 +426,7 @@ export default function PayrollRunList() {
                         >
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                           <span>
-                            {r.warning_count} {(r.warning_count ?? 0) === 1 ? "thing" : "things"} to resolve{isDraft ? " before finalizing" : ""}
+                            {warningShown} {warningShown === 1 ? "thing" : "things"} to resolve{isDraft ? " before finalizing" : ""}
                           </span>
                           <ChevronRight
                             className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${expandedWarnings.has(r.id) ? "rotate-90" : ""}`}
@@ -410,7 +434,7 @@ export default function PayrollRunList() {
                         </button>
                         {expandedWarnings.has(r.id) && (
                         <div className="mt-2.5 space-y-2">
-                          {groupWarnings(r.warnings ?? [], r.warning_subjects, r.currency).map((g, gi) =>
+                          {warningGroups.map((g, gi) =>
                             g.name ? (
                               <div key={gi} className="flex items-start gap-2.5">
                                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-200/70 dark:bg-amber-500/25 text-[10px] font-bold text-amber-800 dark:text-amber-200">
