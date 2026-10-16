@@ -512,6 +512,38 @@ export interface PayslipEstimate {
   is_estimate: true;
 }
 
+/** One row of a run's completeness ledger — a company member's bucket for this
+ * run. Every in-scope member appears exactly once (paid / nil_paid / excluded),
+ * so a run can never silently omit someone. Returned on GET /payroll/runs/{id}. */
+export interface MemberStatus {
+  private_user_id: number;
+  bucket: "paid" | "nil_paid" | "excluded";
+  /** Coded reason for nil_paid / excluded (null for paid). e.g.
+   * "no_assignment_monthly", "no_job", "off_payroll_contractor", "data_error". */
+  reason_code?: string | null;
+  detail?: Record<string, unknown> | null;
+  /** True when this exclusion must be resolved/acknowledged before the finalize
+   * gate (when enforced) will pass. */
+  blocks_finalize: boolean;
+  acknowledged_at?: string | null;
+  acknowledged_by_user_id?: number | null;
+  ack_note?: string | null;
+  employee_name?: string | null;
+  employee_code?: string | null;
+}
+
+/** GET /companies/{id}/payroll-readiness — who WOULD be paid vs blocked if a
+ * run were created now. Advisory; creates nothing. */
+export interface PayrollReadiness {
+  company_id: number;
+  period_start: string;
+  period_end: string;
+  ready_count: number;
+  ready: number[];
+  not_ready: { private_user_id: number; reason_code: string; detail?: Record<string, unknown> | null; employee_name?: string | null }[];
+  intentional: { private_user_id: number; reason_code: string; employee_name?: string | null }[];
+}
+
 export interface PayrollRun {
   id: number;
   company_id: number;
@@ -523,6 +555,11 @@ export interface PayrollRun {
   country_rules_snapshot?: Record<string, unknown> | null;
   compute_version?: number | null;
   compliance_flags?: string[] | null;
+  /** Per-member completeness ledger (empty for runs created before the
+   * completeness feature). */
+  member_statuses?: MemberStatus[];
+  /** Completeness record frozen at finalize (null for drafts / older runs). */
+  completeness_attestation?: Record<string, unknown> | null;
   fx_snapshot?: { source?: string; as_of?: string | null; base?: string; rates?: Record<string, string> } | null;
   fx_source?: string | null;
   fx_as_of?: string | null;

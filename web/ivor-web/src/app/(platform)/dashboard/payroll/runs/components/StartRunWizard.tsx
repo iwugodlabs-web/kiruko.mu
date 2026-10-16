@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { payroll, stepUp, type PayrollRun, type Payslip } from "@/services/payroll-api";
+import RunCoveragePanel from "./RunCoveragePanel";
 import { fetchCompanyUsers, type User } from "@/services/api";
 import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, ShieldCheck, Timer, X } from "lucide-react";
 import { toast } from "sonner";
@@ -323,6 +324,11 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
                   </div>
                 </div>
               )}
+
+              <div className="mb-4">
+                <RunCoveragePanel members={draftRun.member_statuses ?? []} />
+              </div>
+
               <div className="rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
                 <table className="min-w-full divide-y divide-zinc-100">
                   <thead className="bg-zinc-50 dark:bg-zinc-900/40">
