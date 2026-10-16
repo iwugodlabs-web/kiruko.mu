@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { payroll, type PayrollRun, type Payslip } from "@/services/payroll-api";
+import RunCoveragePanel from "./RunCoveragePanel";
 import { fetchCompanyUsers, type User } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { isError, formatMoney as fmtMoneyBase } from "@/utils/payrollFormat";
@@ -184,7 +185,9 @@ export default function FinalizedRunDrawer({ runId, companyId, onClose, onOpenPa
           ) : run === null ? (
             <div className="text-zinc-500 dark:text-zinc-400 text-sm">Run not found.</div>
           ) : (
-            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            <div className="space-y-4">
+              <RunCoveragePanel members={run.member_statuses ?? []} />
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
               <table className="min-w-full divide-y divide-zinc-100 dark:divide-zinc-800">
                 <thead className="bg-zinc-50 dark:bg-zinc-900/40">
                   <tr>
@@ -241,6 +244,7 @@ export default function FinalizedRunDrawer({ runId, companyId, onClose, onOpenPa
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>

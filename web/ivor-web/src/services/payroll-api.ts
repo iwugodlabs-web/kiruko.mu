@@ -34,6 +34,7 @@ import type {
   ResolvedSalary,
   // payroll
   PayrollRun, PayrollRunCreate, PayrollRunSummary, Payslip, PayslipTimesheet,
+  PayrollReadiness,
   // leave types
   LeaveType, LeaveTypeCreate, LeaveTypeUpdate, SeedFromCountryReport,
   // one-offs
@@ -414,6 +415,52 @@ export const payroll = {
   getRun: async (runId: number): Promise<ApiResult<PayrollRun>> => {
     try {
       const r = await api.get(`/payroll/runs/${runId}`);
+      return r.data;
+    } catch (e) { return normalizeError(e); }
+  },
+
+  /** Acknowledge ONE blocking exclusion on a DRAFT run so it can finalize once
+   * the gate is enforced. Only setup-gap reasons are acknowledgeable — data
+   * errors / drift / drop-outs must be fixed. Returns the refreshed run. */
+  acknowledgeMember: async (
+    runId: number,
+    privateUserId: number,
+    reasonNote?: string,
+  ): Promise<ApiResult<PayrollRun>> => {
+    try {
+      const r = await api.post(
+        `/payroll/runs/${runId}/members/${privateUserId}/acknowledge`,
+        { reason_note: reasonNote ?? null },
+      );
+      return r.data;
+    } catch (e) { return normalizeError(e); }
+  },
+
+  /** Acknowledge several blocking exclusions at once (all-or-nothing). */
+  acknowledgeMembersBulk: async (
+    runId: number,
+    privateUserIds: number[],
+    reasonNote?: string,
+  ): Promise<ApiResult<PayrollRun>> => {
+    try {
+      const r = await api.post(`/payroll/runs/${runId}/members/acknowledge-bulk`, {
+        private_user_ids: privateUserIds,
+        reason_note: reasonNote ?? null,
+      });
+      return r.data;
+    } catch (e) { return normalizeError(e); }
+  },
+
+  /** Proactive, run-less readiness: who WOULD be paid vs blocked if payroll ran
+   * now for the given period (defaults to the current month). */
+  readiness: async (
+    companyId: number,
+    opts?: { period_start?: string; period_end?: string },
+  ): Promise<ApiResult<PayrollReadiness>> => {
+    try {
+      const r = await api.get(`/companies/${companyId}/payroll-readiness`, {
+        params: opts ?? {},
+      });
       return r.data;
     } catch (e) { return normalizeError(e); }
   },
