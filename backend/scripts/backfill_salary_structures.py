@@ -46,11 +46,15 @@ def main() -> None:
                 continue
             seen.add(pid)
             try:
-                created = ensure_assignment_from_legacy(
-                    db, pid, notes="Backfilled from legacy salaries row"
-                )
+                # SAVEPOINT per employee: one shared session/transaction spans the
+                # whole run, so a bare db.rollback() on failure would discard
+                # EVERY assignment created so far. begin_nested() scopes the
+                # rollback to just this employee, leaving prior successes intact.
+                with db.begin_nested():
+                    created = ensure_assignment_from_legacy(
+                        db, pid, notes="Backfilled from legacy salaries row"
+                    )
             except Exception as exc:
-                db.rollback()
                 print(f"  skip private_user_id={pid}: {exc}")
                 continue
             if created is None:

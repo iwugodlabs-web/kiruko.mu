@@ -66,6 +66,18 @@ def _ensure_component(
     )
     if existing is not None:
         return existing
+    # A company may already have a basic component under a DIFFERENT code
+    # (uq_salary_component_one_basic allows only one is_basic per company), so
+    # reuse it rather than inserting a duplicate BASIC that would violate the
+    # constraint. The structure line references it by id — the code is metadata.
+    if is_basic:
+        existing_basic = (
+            db.query(SalaryComponent)
+            .filter(SalaryComponent.company_id == company_id, SalaryComponent.is_basic.is_(True))
+            .first()
+        )
+        if existing_basic is not None:
+            return existing_basic
     comp = SalaryComponent(
         company_id=company_id,
         code=code,
