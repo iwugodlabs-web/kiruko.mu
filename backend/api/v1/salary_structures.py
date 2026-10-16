@@ -1279,3 +1279,123 @@ def preview_salary(
                 c.meta = {"frequency": "daily", "days": days, "rate": str(per_day)}
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Off-payroll standing status (payroll completeness, Phase 2)
+#
+# A deliberate "this person is not on payroll" marker so a stable exclusion
+# (contractor, director's fees, unpaid leave, suspended) auto-satisfies the
+# per-run completeness ledger instead of being hand-acknowledged every month.
+# ---------------------------------------------------------------------------
+
+_OFF_PAYROLL_REASONS = {"contractor", "director_fees", "unpaid_leave", "suspended", "other"}
+
+
+class OffPayrollSet(BaseModel):
+    reason: str
+    from_date: Optional[date] = None  # NULL = from the beginning of time
+    to_date: Optional[date] = None    # NULL = open-ended
+    note: Optional[str] = None
+
+
+class OffPayrollRead(BaseModel):
+    private_user_id: int
+    payroll_status: str
+    off_payroll_reason: Optional[str] = None
+    off_payroll_from: Optional[date] = None
+    off_payroll_to: Optional[date] = None
+    off_payroll_note: Optional[str] = None
+
+
+def _off_payroll_read(pu: PrivateUser) -> OffPayrollRead:
+    return OffPayrollRead(
+        private_user_id=pu.private_user_id,
+        payroll_status=pu.payroll_status,
+        off_payroll_reason=pu.off_payroll_reason,
+        off_payroll_from=pu.off_payroll_from,
+        off_payroll_to=pu.off_payroll_to,
+        off_payroll_note=pu.off_payroll_note,
+    )
+
+
+@router.get("/private-users/{private_user_id}/off-payroll", response_model=OffPayrollRead)
+def get_off_payroll(
+    private_user_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target = _resolve_target_employee(db, private_user_id)
+    if current_user.user_id != target.user_id:
+        if target.company_id is None:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        _require_admin_for_company(current_user, target.company_id, db, permission="view_salary")
+    return _off_payroll_read(target)
+
+
+@router.post("/private-users/{private_user_id}/off-payroll", response_model=OffPayrollRead)
+def set_off_payroll(
+    private_user_id: int,
+    payload: OffPayrollSet,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mark an employee off-payroll (admin only). Idempotent — re-posting
+    updates the reason/window. Audit-logged."""
+    target = _resolve_target_employee(db, private_user_id)
+    if target.company_id is None:
+        raise HTTPException(status_code=400, detail="Employee has no company")
+    _require_admin_for_company(current_user, target.company_id, db, permission="manage_payroll")
+
+    reason = (payload.reason or "").strip()
+    if reason not in _OFF_PAYROLL_REASONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"reason must be one of {sorted(_OFF_PAYROLL_REASONS)}",
+        )
+    if payload.from_date is not None and payload.to_date is not None and payload.to_date <= payload.from_date:
+        raise HTTPException(status_code=422, detail="to_date must be after from_date")
+
+    target.payroll_status = "off_payroll"
+    target.off_payroll_reason = reason
+    target.off_payroll_from = payload.from_date
+    target.off_payroll_to = payload.to_date
+    target.off_payroll_note = payload.note
+    target.off_payroll_set_by_user_id = current_user.user_id
+    db.add(target)
+    create_audit_log(
+        db, current_user.user_id, "private_user.off_payroll.set", "private_user", private_user_id,
+        {"reason": reason, "from": str(payload.from_date), "to": str(payload.to_date)},
+        commit=False,
+    )
+    db.commit()
+    db.refresh(target)
+    return _off_payroll_read(target)
+
+
+@router.delete("/private-users/{private_user_id}/off-payroll", response_model=OffPayrollRead)
+def clear_off_payroll(
+    private_user_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return an employee to on-payroll (admin only). Audit-logged."""
+    target = _resolve_target_employee(db, private_user_id)
+    if target.company_id is None:
+        raise HTTPException(status_code=400, detail="Employee has no company")
+    _require_admin_for_company(current_user, target.company_id, db, permission="manage_payroll")
+
+    target.payroll_status = "on_payroll"
+    target.off_payroll_reason = None
+    target.off_payroll_from = None
+    target.off_payroll_to = None
+    target.off_payroll_note = None
+    target.off_payroll_set_by_user_id = current_user.user_id
+    db.add(target)
+    create_audit_log(
+        db, current_user.user_id, "private_user.off_payroll.clear", "private_user", private_user_id,
+        {}, commit=False,
+    )
+    db.commit()
+    db.refresh(target)
+    return _off_payroll_read(target)

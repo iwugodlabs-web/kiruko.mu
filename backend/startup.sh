@@ -35,7 +35,10 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Migrate + seed (fail-loud: migrate.sh runs `set -e`).
+# Migrate + seed (fail-loud: migrate.sh runs `set -e`). The one-time legacy
+# salary backfill (converting pre-structured `salaries` rows into
+# EmployeeSalaryAssignments) runs INSIDE alembic as a tracked data migration
+# (payroll_backfill_20260924), so it executes exactly once and never re-runs.
 bash "${APP_DIR}/migrate.sh"
 if [ $? -ne 0 ]; then
     echo "❌ migrate.sh failed — refusing to serve on an unmigrated/unseeded DB."

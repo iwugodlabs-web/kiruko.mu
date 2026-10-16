@@ -21,6 +21,18 @@ class PayrollRunCreate(BaseModel):
     as_of: Optional[date] = None
 
 
+class ExclusionAcknowledgeRequest(BaseModel):
+    """Admin sign-off of a blocking exclusion on a draft run. Only setup-gap
+    reasons are acknowledgeable — data errors, drift, and silent drop-outs must
+    be fixed, not signed off."""
+    reason_note: Optional[str] = None
+
+
+class BulkExclusionAcknowledgeRequest(BaseModel):
+    private_user_ids: List[int]
+    reason_note: Optional[str] = None
+
+
 class PayslipComponent(BaseModel):
     code: str
     label: str
@@ -110,6 +122,31 @@ class PayslipRead(BaseModel):
         from_attributes = True
 
 
+class MemberStatusRead(BaseModel):
+    """One row of a run's completeness ledger — a company member's bucket for
+    this run. Every in-scope member appears exactly once, so a run can never
+    silently omit someone. See PayrollRunMemberStatus."""
+    private_user_id: int
+    # paid | nil_paid | excluded
+    bucket: str
+    # Coded reason for nil_paid / excluded (null for paid). e.g.
+    # "no_assignment_monthly", "hourly_zero_pay:no_logs_in_period", "data_error".
+    reason_code: Optional[str] = None
+    detail: Optional[Dict[str, Any]] = None
+    # True when this exclusion must be resolved or acknowledged before a future
+    # finalize gate will pass. Observational until the gate is enforced.
+    blocks_finalize: bool = False
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by_user_id: Optional[int] = None
+    ack_note: Optional[str] = None
+    # Resolved read-time for the UI.
+    employee_name: Optional[str] = None
+    employee_code: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class PayrollRunRead(BaseModel):
     id: int
     company_id: int
@@ -121,6 +158,11 @@ class PayrollRunRead(BaseModel):
     country_rules_snapshot: Optional[Dict[str, Any]] = None
     compute_version: Optional[int] = None
     compliance_flags: Optional[List[str]] = None
+    # Per-member completeness ledger (empty for runs created before this
+    # feature). Populated by the run read endpoint.
+    member_statuses: List[MemberStatusRead] = []
+    # Completeness record frozen at finalize (null for drafts / older runs).
+    completeness_attestation: Optional[Dict[str, Any]] = None
     fx_snapshot: Optional[Dict[str, Any]] = None
     fx_source: Optional[str] = None
     fx_as_of: Optional[date] = None

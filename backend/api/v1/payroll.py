@@ -25,9 +25,11 @@ from sqlalchemy.orm import Session
 from core import config
 from core.dependencies import get_current_user
 from core.idempotency import require_idempotency_key
-from core.model import Company, PayrollRun, Payslip, User
+from core.model import Company, PayrollRun, PayrollRunMemberStatus, Payslip, User
 from core.step_up import require_step_up_token
 from schema.payroll_schema import (
+    BulkExclusionAcknowledgeRequest,
+    ExclusionAcknowledgeRequest,
     PayrollRunCreate,
     PayrollRunRead,
     PayrollRunSummary,
@@ -336,6 +338,102 @@ def finalize_run(
     db.commit()
     db.refresh(finalized)
     return finalized
+
+
+def _acknowledge_one(
+    db: Session, run: PayrollRun, private_user_id: int, actor_user_id: int, reason_note,
+) -> PayrollRunMemberStatus:
+    """Sign off ONE blocking exclusion on a draft run. Refuses non-ackable
+    reasons (data_error / drift / drop-out must be fixed, not acknowledged) and
+    rows that aren't a blocking exclusion. Pins the acknowledged reason so a
+    later reason change re-opens the gate."""
+    from datetime import datetime, timezone
+    row = (
+        db.query(PayrollRunMemberStatus)
+        .filter(
+            PayrollRunMemberStatus.payroll_run_id == run.id,
+            PayrollRunMemberStatus.private_user_id == private_user_id,
+        )
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No ledger row for employee {private_user_id} on this run")
+    if row.bucket != "excluded" or not row.blocks_finalize:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Employee {private_user_id} is not a blocking exclusion ({row.bucket}/{row.reason_code}) — nothing to acknowledge.",
+        )
+    if row.reason_code not in payroll_engine._ACKABLE_EXCLUSION_REASONS:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "NOT_ACKNOWLEDGEABLE",
+                "message": (
+                    f"'{row.reason_code}' must be FIXED, not acknowledged "
+                    "(resolve the data / create the setup, then recompute)."
+                ),
+                "private_user_id": private_user_id,
+                "reason_code": row.reason_code,
+            },
+        )
+    row.acknowledged_by_user_id = actor_user_id
+    row.acknowledged_at = datetime.now(timezone.utc)
+    row.acknowledged_reason_code = row.reason_code
+    row.ack_note = reason_note
+    db.add(row)
+    create_audit_log(
+        db, actor_user_id, "payroll.run.member.acknowledge", "payroll_run_member_status", row.id,
+        {"run_id": run.id, "private_user_id": private_user_id, "reason_code": row.reason_code, "note": reason_note},
+        commit=False,
+    )
+    return row
+
+
+@router.post("/payroll/runs/{run_id}/members/{private_user_id}/acknowledge", response_model=PayrollRunRead)
+def acknowledge_member_exclusion(
+    run_id: int,
+    private_user_id: int,
+    payload: ExclusionAcknowledgeRequest,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Acknowledge a single blocking exclusion so the run can finalize. Draft
+    runs only — a finalized run's completeness is already frozen."""
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id).one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"PayrollRun {run_id} not found")
+    _require_admin_for_company(current_user, run.company_id, db, permission="manage_payroll")
+    if run.status != "draft":
+        raise HTTPException(status_code=409, detail=f"Can only acknowledge exclusions on a draft run (run is {run.status})")
+    _acknowledge_one(db, run, private_user_id, current_user.user_id, payload.reason_note)
+    db.commit()
+    db.refresh(run)
+    return get_run(run_id, db, current_user)
+
+
+@router.post("/payroll/runs/{run_id}/members/acknowledge-bulk", response_model=PayrollRunRead)
+def acknowledge_member_exclusions_bulk(
+    run_id: int,
+    payload: BulkExclusionAcknowledgeRequest,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Acknowledge several blocking exclusions at once (a first gated run can
+    have many). All-or-nothing: if any id is non-acknowledgeable, the whole
+    call is rejected so the admin can't half-apply."""
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id).one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"PayrollRun {run_id} not found")
+    _require_admin_for_company(current_user, run.company_id, db, permission="manage_payroll")
+    if run.status != "draft":
+        raise HTTPException(status_code=409, detail=f"Can only acknowledge exclusions on a draft run (run is {run.status})")
+    if not payload.private_user_ids:
+        raise HTTPException(status_code=422, detail="private_user_ids must be non-empty")
+    for pid in payload.private_user_ids:
+        _acknowledge_one(db, run, pid, current_user.user_id, payload.reason_note)
+    db.commit()
+    db.refresh(run)
+    return get_run(run_id, db, current_user)
 
 
 @router.post("/payroll/runs/{run_id}/cancel", response_model=PayrollRunRead)
@@ -819,6 +917,46 @@ def list_runs(
     ]
 
 
+@router.get("/companies/{company_id}/payroll-readiness")
+def payroll_readiness(
+    company_id: int,
+    period_start: Optional[str] = Query(None, description="ISO date; defaults to the 1st of the current month."),
+    period_end: Optional[str] = Query(None, description="ISO date; defaults to the last day of the month."),
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Proactive, run-less readiness: who WOULD be paid vs blocked if payroll
+    were run for this period now. Advisory — creates nothing. Lets the UI show
+    setup gaps before a run is started."""
+    import calendar as _calendar
+    from datetime import date as _date
+    from core.model import PrivateUser as _PU
+
+    _require_admin_for_company(current_user, company_id, db, permission="view_payslip")
+
+    today = _date.today()
+    ps = _date.fromisoformat(period_start) if period_start else today.replace(day=1)
+    pe = (
+        _date.fromisoformat(period_end) if period_end
+        else ps.replace(day=_calendar.monthrange(ps.year, ps.month)[1])
+    )
+    result = payroll_engine.assess_company_readiness(db, company_id, ps, pe)
+
+    # Enrich names for the two gap lists in one query.
+    pids = {r["private_user_id"] for r in result["not_ready"]} | {r["private_user_id"] for r in result["intentional"]}
+    if pids:
+        names = {
+            row[0]: f"{row[1] or ''} {row[2] or ''}".strip() or None
+            for row in db.query(_PU.private_user_id, _PU.first_name, _PU.last_name)
+            .filter(_PU.private_user_id.in_(pids)).all()
+        }
+        for r in result["not_ready"]:
+            r["employee_name"] = names.get(r["private_user_id"])
+        for r in result["intentional"]:
+            r["employee_name"] = names.get(r["private_user_id"])
+    return result
+
+
 @router.get("/payroll/runs/{run_id}", response_model=PayrollRunRead)
 def get_run(
     run_id: int,
@@ -831,12 +969,14 @@ def get_run(
     _require_admin_for_company(current_user, run.company_id, db, permission="view_payslip")
 
     out = PayrollRunRead.model_validate(run)
-    # Batch-resolve employee name/code for every embedded payslip in one
-    # query — the run-level ORM relationship has no employee_name/code
-    # column to fall back on, and _enrich_payslip's per-payslip version
-    # (also computing a leave-balance) would be wasteful N+1 here.
+    # Batch-resolve employee name/code for every embedded payslip AND every
+    # member-ledger row in one query — the run-level ORM relationship has no
+    # employee_name/code column to fall back on, and _enrich_payslip's
+    # per-payslip version (also computing a leave-balance) would be a wasteful
+    # N+1 here.
     from core.model import PrivateUser as _PU
     private_user_ids = {p.private_user_id for p in run.payslips}
+    private_user_ids |= {m.private_user_id for m in out.member_statuses}
     if private_user_ids:
         rows = (
             db.query(_PU.private_user_id, _PU.first_name, _PU.last_name, _PU.employee_code)
@@ -849,6 +989,11 @@ def get_run(
             if row is not None:
                 ps.employee_name = f"{row[1] or ''} {row[2] or ''}".strip() or None
                 ps.employee_code = row[3]
+        for ms in out.member_statuses:
+            row = by_id.get(ms.private_user_id)
+            if row is not None:
+                ms.employee_name = f"{row[1] or ''} {row[2] or ''}".strip() or None
+                ms.employee_code = row[3]
     return out
 
 

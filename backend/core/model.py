@@ -154,6 +154,20 @@ class PrivateUser(Base):
     # every existing independent user's behavior is unchanged until they
     # actively set it.
     country_code = Column(String(2), ForeignKey("countries.code"), nullable=True)
+    # Payroll completeness — a STANDING decision that this person is deliberately
+    # not on payroll (contractor paid separately, director's fees, unpaid leave,
+    # suspended). 'on_payroll' (default) means normal. When 'off_payroll' and the
+    # period falls within [off_payroll_from, off_payroll_to), the completeness
+    # ledger auto-buckets them excluded/off_payroll_<reason> with no per-run
+    # acknowledgement — so a stable exclusion isn't re-signed every month (which
+    # would breed ack-fatigue and defeat the finalize gate). Set/cleared via the
+    # off-payroll endpoints; every change is audit-logged.
+    payroll_status = Column(String(16), nullable=False, server_default='on_payroll')  # on_payroll | off_payroll
+    off_payroll_reason = Column(String(32), nullable=True)  # contractor | director_fees | unpaid_leave | suspended | other
+    off_payroll_from = Column(Date, nullable=True)
+    off_payroll_to = Column(Date, nullable=True)  # NULL = open-ended
+    off_payroll_set_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    off_payroll_note = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -280,6 +294,17 @@ class Company(Base):
     require_approved_clockins_for_payroll = Column(
         Boolean, nullable=False, server_default='false',
     )
+    # Payroll completeness gate (per-company override). NULL = fall back to the
+    # PAYROLL_COMPLETENESS_GATE env default. 'off' = no gate, 'warn' = record
+    # exclusions but never block finalize, 'enforce' = refuse to finalize while
+    # a blocking exclusion is unresolved/unacknowledged. Lets the gate be rolled
+    # out per-company before going global.
+    payroll_completeness_gate = Column(String(8), nullable=True)  # off | warn | enforce
+    # Maker-checker (segregation of duties). When true, the admin who finalizes a
+    # run must NOT be the one who acknowledged its exclusions — a second pair of
+    # eyes on deliberate omissions. Off by default so single-admin companies can
+    # still finalize; opt-in per company.
+    payroll_maker_checker = Column(Boolean, nullable=False, server_default='false')
     # Review-by-exception (RBE) — % of *clean* sessions to surface into the
     # admin review queue as a random-sample audit (deterministic per timelog_id),
     # so "clean" is never a guaranteed skip. 0 = off. Stored as integer 0-100.
@@ -2316,6 +2341,19 @@ class PayrollRun(Base):
     # Soft-cap / hard-cap / data-quality warnings collected during compute.
     # e.g. ["exceeded_weekly_max_h", "holiday_during_leave_adjusted"].
     compliance_flags = Column(JSONB, nullable=False, server_default='[]')
+    # The employee scope this run was built for. NULL = every company member
+    # (the normal case). A non-null list means the run was created with an
+    # explicit private_user_ids allowlist (a partial run) — the member-status
+    # ledger and the finalize completeness gate honour this so a deliberately
+    # partial run is not treated as "missing everyone else".
+    scope_user_ids = Column(JSONB, nullable=True)
+    # Completeness record frozen at FINALIZE (immutable thereafter, like
+    # country_rules_snapshot). member_ledger_snapshot = the full ledger as it
+    # stood when the run was signed off; completeness_attestation = the counts
+    # per bucket + who attested + when. Makes "who was in/out and why, and who
+    # signed it off" reproducible years later.
+    member_ledger_snapshot = Column(JSONB, nullable=True)
+    completeness_attestation = Column(JSONB, nullable=True)
     # Shadow-payroll FX snapshot (Phase 2). Frozen at run creation so a
     # finalized run's host-country shadow figures are auditable and never
     # re-derive from a later market rate. Shape:
@@ -2332,6 +2370,9 @@ class PayrollRun(Base):
 
     company = relationship("Company")
     payslips = relationship("Payslip", back_populates="run", cascade="all, delete-orphan")
+    member_statuses = relationship(
+        "PayrollRunMemberStatus", back_populates="run", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         # Partial unique: at most one NON-cancelled run per company+period.
@@ -2438,6 +2479,72 @@ class Payslip(Base):
             unique=True,
             postgresql_where=text("is_adjustment = false"),
         ),
+    )
+
+
+class PayrollRunMemberStatus(Base):
+    """Per-run accounting ledger — one row per in-scope company member.
+
+    Every member of the company (or, for a partial run, every member in
+    PayrollRun.scope_user_ids) lands in EXACTLY ONE bucket so a run can never
+    silently omit someone:
+
+      * ``paid``     — a payslip was produced with pay.
+      * ``nil_paid`` — a payslip was produced that computed to zero, WITH a
+                       machine reason (e.g. hourly worker logged no hours).
+                       This is a processed result, not a setup gap.
+      * ``excluded`` — NO payslip, with a reason_code explaining why
+                       (no_job / no_pay_setup / no_assignment_monthly /
+                       onboarding_draft_job / terminated_before_period /
+                       resolve_empty / data_error / unpaid_resolvable).
+
+    The computed columns (bucket / reason_code / detail) are rebuilt on every
+    draft create + recompute. The acknowledgement columns are written by an
+    admin and MUST survive recompute, so they live here (NOT in the run's
+    compliance_flags, which recompute wipes and rebuilds from scratch).
+
+    ``finalize_run`` refuses to finalize while any ``excluded`` row is
+    unacknowledged — or while an ack is stale (acknowledged_reason_code no
+    longer matches the current reason_code), so acknowledging a benign reason
+    can't wave through a different, more serious exclusion on a later recompute.
+    """
+
+    __tablename__ = "payroll_run_member_statuses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    payroll_run_id = Column(
+        Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    private_user_id = Column(
+        Integer, ForeignKey("private_users.private_user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    bucket = Column(String(16), nullable=False)  # paid | nil_paid | excluded
+    reason_code = Column(String(48), nullable=True)
+    # Free-form machine detail (counts, dates, the raw data_error message).
+    detail = Column(JSONB, nullable=True)
+    # Denormalized from the reason→policy matrix so the finalize gate (and the
+    # UI badge) don't re-derive policy per row. True ⇒ this row must be resolved
+    # or acknowledged before the run can finalize (once the gate is enforced).
+    blocks_finalize = Column(Boolean, nullable=False, server_default="false")
+
+    # Admin acknowledgement of an EXCLUDED row (reason + actor captured here and
+    # in the audit log). acknowledged_reason_code pins WHICH reason was signed
+    # off so a reason change re-opens the finalize gate.
+    acknowledged_by_user_id = Column(
+        Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_reason_code = Column(String(48), nullable=True)
+    ack_note = Column(String(500), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    run = relationship("PayrollRun", back_populates="member_statuses")
+    private_user = relationship("PrivateUser")
+
+    __table_args__ = (
+        UniqueConstraint("payroll_run_id", "private_user_id", name="uq_run_member_status"),
     )
 
 
