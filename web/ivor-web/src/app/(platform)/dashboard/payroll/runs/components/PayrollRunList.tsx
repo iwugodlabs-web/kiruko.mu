@@ -99,6 +99,15 @@ export default function PayrollRunList() {
   // fix). Hidden unless explicitly enabled; the backend also hard-403s it.
   const REDO_ENABLED = process.env.NEXT_PUBLIC_ENABLE_PAYROLL_REDO === "true";
   const [guideOpen, setGuideOpen] = useState(false);
+  // Which runs have their "things to resolve" panel expanded. Collapsed by
+  // default so a long list doesn't dominate the table; the count stays visible.
+  const [expandedWarnings, setExpandedWarnings] = useState<Set<number>>(new Set());
+  const toggleWarnings = (runId: number) =>
+    setExpandedWarnings((prev) => {
+      const next = new Set(prev);
+      next.has(runId) ? next.delete(runId) : next.add(runId);
+      return next;
+    });
 
   const refresh = useCallback(async () => {
     if (!companyId) return;
@@ -385,11 +394,22 @@ export default function PayrollRunList() {
                     <td aria-hidden className="px-4" />
                     <td colSpan={5} className="pb-3 pt-0 pr-4">
                       <div className="max-w-2xl rounded-lg border border-amber-200/80 dark:border-amber-500/25 bg-amber-50/70 dark:bg-amber-500/10 px-3.5 py-3">
-                        <p className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                        <button
+                          type="button"
+                          onClick={() => toggleWarnings(r.id)}
+                          aria-expanded={expandedWarnings.has(r.id)}
+                          className="flex w-full items-center gap-1.5 text-left text-xs font-semibold text-amber-800 dark:text-amber-300"
+                        >
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                          {r.warning_count} {(r.warning_count ?? 0) === 1 ? "thing" : "things"} to resolve{isDraft ? " before finalizing" : ""}
-                        </p>
-                        <div className="space-y-2">
+                          <span>
+                            {r.warning_count} {(r.warning_count ?? 0) === 1 ? "thing" : "things"} to resolve{isDraft ? " before finalizing" : ""}
+                          </span>
+                          <ChevronRight
+                            className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${expandedWarnings.has(r.id) ? "rotate-90" : ""}`}
+                          />
+                        </button>
+                        {expandedWarnings.has(r.id) && (
+                        <div className="mt-2.5 space-y-2">
                           {groupWarnings(r.warnings ?? [], r.warning_subjects, r.currency).map((g, gi) =>
                             g.name ? (
                               <div key={gi} className="flex items-start gap-2.5">
@@ -411,7 +431,8 @@ export default function PayrollRunList() {
                             )
                           )}
                         </div>
-                        {isDraft && (
+                        )}
+                        {isDraft && expandedWarnings.has(r.id) && (
                           <p className="mt-2.5 border-t border-amber-200/60 dark:border-amber-500/20 pt-2 text-[11px] text-amber-700/70 dark:text-amber-300/50">
                             These won&apos;t be in the run until you act — then Re-run to rebuild it.
                           </p>
