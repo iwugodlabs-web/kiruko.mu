@@ -1675,32 +1675,6 @@ def _pending_period_signals(db: Session, company_id: int, period_start: date, pe
     return flags
 
 
-def _worked_but_unpaid_flags(
-    db: Session, company_id: int, period_start: date, period_end: date, paid_ids: set
-) -> List[str]:
-    """Flag employees who have APPROVED clock-ins in the period but got NO payslip.
-
-    They were excluded for lack of an active salary assignment (``_eligible_employees``)
-    or resolved to nothing with no hourly diagnostic. Without this the run is
-    silently empty ("approved hours but Rs 0") with no reason — the single most
-    confusing payroll failure. Almost always a missing salary/rate setup.
-    """
-    tl_start = datetime.combine(period_start, time.min, tzinfo=timezone.utc)
-    tl_end = datetime.combine(period_end, time.max, tzinfo=timezone.utc)
-    worked = {
-        r[0]
-        for r in db.query(Job.private_user_id)
-        .join(TimeLog, TimeLog.job_id == Job.job_id)
-        .filter(Job.company_id == company_id)
-        .filter(Job.private_user_id.isnot(None))
-        .filter(TimeLog.start_time >= tl_start, TimeLog.start_time <= tl_end)
-        .filter(TimeLog.admin_approved.is_(True))
-        .distinct()
-        .all()
-    }
-    return [f"u{pid}:worked_but_unpaid_no_salary" for pid in (worked - paid_ids)]
-
-
 def _no_schedule_flags(
     db: Session, company_id: int, period_start: date, period_end: date,
     paid_ids: set, require_approved: bool,
@@ -1996,13 +1970,13 @@ def build_finalize_ledger(db: Session, run: PayrollRun) -> None:
             bucket, reason, detail = "paid", None, None
         else:
             bucket = "excluded"
-            # DRIFT: an in-scope member who now resolves to pay (an assignment
-            # was created after the draft) but has no payslip. Blocking and
-            # NON-ackable — the fix is a recompute, not a signature.
+            # DRIFT: an in-scope member who now WOULD produce a payslip (an
+            # assignment or hourly/daily rate was set up after the draft) but
+            # has none. Blocking and NON-ackable — the fix is a recompute, not a
+            # signature. Uses the same predicate as readiness so monthly,
+            # hourly, and daily late-setups are all caught consistently.
             if not _is_off_payroll_for_period(emp, run.period_start, run.period_end) and \
-                    salary_resolver.resolve_components(
-                        db, pid, run.period_start, run.period_end
-                    ).components:
+                    _would_produce_payslip(db, emp, run.period_start, run.period_end):
                 reason, detail = "unpaid_resolvable", None
             else:
                 reason, detail = _derive_exclusion_reason(db, emp, run.period_start, run.period_end)
