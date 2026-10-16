@@ -42,5 +42,32 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Legacy salary backfill — convert pre-structured `salaries` rows into
+# EmployeeSalaryAssignments so monthly staff set up the old way aren't silently
+# dropped from payroll. Runs AFTER migrate.sh so the new columns/tables exist.
+#
+# Safe to run automatically on every deploy:
+#   * ADDITIVE ONLY — creates assignment/structure rows; never updates or
+#     deletes existing pay data; the legacy `salaries` table is left untouched.
+#   * IDEMPOTENT — skips anyone already covered, so re-runs create 0 new rows
+#     and converge; it also self-heals any future legacy rows.
+#   * ISOLATED — one SAVEPOINT per employee, so a single bad record can't
+#     corrupt or discard the others.
+#   * FAIL-SOFT — unlike migrate.sh this must NEVER block serving: a hiccup
+#     leaves existing data intact and simply retries next deploy. Every row it
+#     creates is tagged notes='Backfilled from legacy salaries row', so it is
+#     fully identifiable and reversible.
+# Set RUN_LEGACY_BACKFILL=false to skip once the data has converged.
+# NOTE: like migrate.sh above, this assumes instance_count=1 (migrate-on-boot).
+# If you scale past one instance, move both to a PRE_DEPLOY job so instances
+# don't race.
+if [ "${RUN_LEGACY_BACKFILL:-true}" = "true" ]; then
+    echo "Running legacy salary backfill (additive, idempotent)..."
+    python3 -m scripts.backfill_salary_structures \
+        || echo "⚠️  backfill reported errors (non-fatal) — existing data untouched; will retry next deploy."
+else
+    echo "Skipping legacy salary backfill (RUN_LEGACY_BACKFILL=false)."
+fi
+
 echo "Starting FastAPI on port ${PORT:-8080}..."
 exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}

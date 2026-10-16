@@ -28,15 +28,22 @@ from services.salary_assignment_bootstrap import ensure_assignment_from_legacy
 
 
 def main() -> None:
+    from core.model import EmployeeSalaryAssignment, Job
+
     db = next(get_db())
     try:
         legacy_rows = db.query(Salary).order_by(Salary.salary_id).all()
         print(f"Found {len(legacy_rows)} legacy salary rows.")
+        # Snapshot existing assignment ids so we can tell a freshly-CREATED
+        # assignment from one ensure_assignment_from_legacy returned because it
+        # already covered the employee (it returns the existing row, truthy, in
+        # that case). Without this the counter double-counts idempotent returns
+        # and reports "N created" on a converged DB that created nothing.
+        pre_ids = {r[0] for r in db.query(EmployeeSalaryAssignment.id).all()}
         seen: set[int] = set()
         new_count = 0
+        covered_count = 0
         for row in legacy_rows:
-            from core.model import Job
-
             job = db.query(Job).filter(Job.job_id == row.job_id).one_or_none()
             if job is None:
                 print(f"  skip salary_id={row.salary_id}: job missing")
@@ -58,12 +65,17 @@ def main() -> None:
                 print(f"  skip private_user_id={pid}: {exc}")
                 continue
             if created is None:
-                print(f"  skip private_user_id={pid}: already covered or not eligible")
+                print(f"  skip private_user_id={pid}: not eligible (no job/salary/company or onboarding-draft)")
+            elif created.id in pre_ids:
+                covered_count += 1  # already had an assignment — idempotent no-op
             else:
                 new_count += 1
-                print(f"  ok private_user_id={pid}: assignment_id={created.id}")
+                print(f"  created private_user_id={pid}: assignment_id={created.id}")
         db.commit()
-        print(f"\nBackfill complete: {new_count} new assignment(s) created.")
+        print(
+            f"\nBackfill complete: {new_count} assignment(s) created, "
+            f"{covered_count} already covered (idempotent no-op)."
+        )
     except Exception:
         db.rollback()
         raise
