@@ -1729,6 +1729,530 @@ def _no_schedule_flags(
     return [f"u{r[0]}:no_schedule_hours_imprecise" for r in rows]
 
 
+# ---------------------------------------------------------------------------
+# Member-status ledger (payroll completeness). Every in-scope company member is
+# accounted for on a run in exactly one bucket — paid / nil_paid / excluded —
+# so a run can never silently omit someone. Phase 1 is OBSERVATIONAL: the
+# ledger is written on draft-create + recompute and surfaced read-side, but
+# nothing here changes who gets paid or blocks finalize (that gate is a later
+# phase, flag-gated). See the design spec.
+# ---------------------------------------------------------------------------
+
+# Exclusion reasons that a later finalize gate will REQUIRE to be resolved or
+# acknowledged. The informational ones (onboarding placeholder, left before the
+# period, off-payroll) correctly produce no pay and never block.
+_BLOCKING_EXCLUSION_REASONS = frozenset({
+    "no_job",
+    "no_pay_setup",
+    "no_assignment_monthly",
+    "resolve_empty",
+    "data_error",
+    "unpaid_resolvable",
+    "unexpected_dropout",
+})
+
+
+def _is_off_payroll_for_period(emp: PrivateUser, period_start: date, period_end: date) -> bool:
+    """True when the member carries a standing off-payroll status whose window
+    overlaps the run period. Open-ended bounds (NULL from/to) always overlap."""
+    if (getattr(emp, "payroll_status", "on_payroll") or "on_payroll") != "off_payroll":
+        return False
+    frm = getattr(emp, "off_payroll_from", None)
+    to = getattr(emp, "off_payroll_to", None)
+    if frm is not None and frm > period_end:
+        return False
+    if to is not None and to <= period_start:
+        return False
+    return True
+
+
+def _derive_exclusion_reason(
+    db: Session, emp: PrivateUser, period_start: date, period_end: date,
+) -> tuple[str, Optional[dict]]:
+    """Why an in-scope member produced no payslip — a coded reason + detail.
+
+    Mirrors the eligibility/skip logic in `_eligible_employees` + the compute
+    loop so the ledger explains every drop. Only called for members who did NOT
+    get a payslip (the minority), so the per-member query here is bounded.
+    """
+    # Standing off-payroll decision takes precedence over any setup reason: a
+    # deliberately off-payroll person (contractor, director's fees, unpaid
+    # leave, suspended) is EXPECTED to produce no payslip and must never block
+    # finalize or demand a monthly acknowledgement.
+    if _is_off_payroll_for_period(emp, period_start, period_end):
+        reason = (getattr(emp, "off_payroll_reason", None) or "other").strip() or "other"
+        return f"off_payroll_{reason}", {
+            "off_payroll_from": emp.off_payroll_from.isoformat() if emp.off_payroll_from else None,
+            "off_payroll_to": emp.off_payroll_to.isoformat() if emp.off_payroll_to else None,
+            "note": getattr(emp, "off_payroll_note", None),
+        }
+
+    job, salary = _active_job_with_salary(db, emp.private_user_id)
+    if job is None:
+        return "no_job", None
+    if getattr(job, "is_onboarding_draft", False):
+        return "onboarding_draft_job", None
+    end = getattr(job, "end_date", None)
+    if end is not None and end < period_start:
+        return "terminated_before_period", {"end_date": end.isoformat()}
+
+    assignment = salary_resolver.get_active_assignment(db, emp.private_user_id, period_start)
+    if assignment is not None:
+        # An assignment is in force but compute produced nothing — a misconfigured
+        # structure (no lines / all formula-only). Rare; flag it for a human.
+        return "resolve_empty", {"assignment_id": assignment.id}
+
+    # No structured assignment. A mid-period joiner's assignment (effective
+    # after period_start) would still resolve — if it does, they SHOULD have a
+    # payslip and their absence is drift, not a setup gap.
+    resolved = salary_resolver.resolve_components(
+        db, emp.private_user_id, period_start, period_end
+    )
+    if resolved.components:
+        return "unpaid_resolvable", None
+    if salary is None:
+        return "no_pay_setup", None
+    pay_basis = (getattr(salary, "pay_basis", None) or "monthly").lower()
+    if pay_basis == "monthly":
+        # The legacy monthly case: a `salaries` row exists but the monthly engine
+        # only reads structured assignments, so they resolve to nothing. Fixable
+        # by the salary-assignment bootstrap/backfill.
+        return "no_assignment_monthly", None
+    # Hourly/daily with a rate normally yields a nil_paid slip (hourly_zero_pay);
+    # reaching here means no usable rate and no payable hours.
+    return "no_pay_setup", {"pay_basis": pay_basis}
+
+
+def _build_member_ledger(
+    db: Session,
+    run: PayrollRun,
+    *,
+    period_start: date,
+    period_end: date,
+    paid_ids: set,
+    nil_reasons: Dict[int, str],
+    data_errors: Dict[int, str],
+    scope_ids: Optional[List[int]],
+) -> None:
+    """Upsert one PayrollRunMemberStatus row per in-scope company member.
+
+    Computed columns (bucket / reason_code / detail / blocks_finalize) are
+    rebuilt every call; acknowledgement columns are PRESERVED on existing rows
+    (they must survive recompute) and cleared only when a member is no longer
+    excluded. Rows for members who dropped out of scope are deleted.
+    """
+    from core.model import PayrollRunMemberStatus
+
+    q = db.query(PrivateUser).filter(PrivateUser.company_id == run.company_id)
+    if scope_ids:
+        q = q.filter(PrivateUser.private_user_id.in_(scope_ids))
+    members = q.all()
+
+    existing = {
+        r.private_user_id: r
+        for r in db.query(PayrollRunMemberStatus)
+        .filter(PayrollRunMemberStatus.payroll_run_id == run.id)
+        .all()
+    }
+    seen: set = set()
+
+    for emp in members:
+        pid = emp.private_user_id
+        seen.add(pid)
+        if pid in data_errors:
+            bucket, reason, detail = "excluded", "data_error", {"message": data_errors[pid]}
+        elif pid in nil_reasons:
+            bucket, reason, detail = "nil_paid", nil_reasons[pid], None
+        elif pid in paid_ids:
+            bucket, reason, detail = "paid", None, None
+        else:
+            bucket = "excluded"
+            reason, detail = _derive_exclusion_reason(db, emp, period_start, period_end)
+        blocks = bucket == "excluded" and reason in _BLOCKING_EXCLUSION_REASONS
+
+        row = existing.get(pid)
+        if row is None:
+            db.add(PayrollRunMemberStatus(
+                payroll_run_id=run.id, private_user_id=pid,
+                bucket=bucket, reason_code=reason, detail=detail, blocks_finalize=blocks,
+            ))
+        else:
+            row.bucket = bucket
+            row.reason_code = reason
+            row.detail = detail
+            row.blocks_finalize = blocks
+            # A member who is no longer excluded can't carry a stale ack.
+            if bucket != "excluded":
+                row.acknowledged_by_user_id = None
+                row.acknowledged_at = None
+                row.acknowledged_reason_code = None
+                row.ack_note = None
+
+    for pid, row in existing.items():
+        if pid not in seen:
+            db.delete(row)
+
+
+# Blocking exclusions an admin can SIGN OFF (a deliberate setup choice). The
+# rest of _BLOCKING_EXCLUSION_REASONS can only be FIXED — a crash, a drift, or a
+# silent drop of someone paid last period must never be rubber-stamped.
+_ACKABLE_EXCLUSION_REASONS = frozenset({
+    "no_job", "no_pay_setup", "no_assignment_monthly", "resolve_empty",
+})
+_INFORMATIONAL_EXCLUSION_PREFIXES = ("off_payroll_",)
+_INFORMATIONAL_EXCLUSION_REASONS = frozenset({
+    "onboarding_draft_job", "terminated_before_period",
+})
+# Net-pay movement beyond this fraction vs the prior finalized period is flagged
+# (informational — a wrong AMOUNT, distinct from a missing person; never blocks).
+_NET_VARIANCE_THRESHOLD = Decimal("0.5")
+
+
+def _is_informational_reason(reason: Optional[str]) -> bool:
+    if reason is None:
+        return False
+    if reason in _INFORMATIONAL_EXCLUSION_REASONS:
+        return True
+    return any(reason.startswith(p) for p in _INFORMATIONAL_EXCLUSION_PREFIXES)
+
+
+def _parse_flag_subjects(flags, infix: str) -> Dict[int, str]:
+    """Pull per-employee flags (u{pid}:{infix}...) out of a run's compliance_flags
+    into {pid: reason}. Used at finalize to recover nil / data_error outcomes."""
+    import re as _re
+    out: Dict[int, str] = {}
+    pat = _re.compile(rf"^u(\d+):({_re.escape(infix)}.*)$")
+    for f in flags or []:
+        if not isinstance(f, str):
+            continue
+        m = pat.match(f)
+        if m:
+            out[int(m.group(1))] = m.group(2)
+    return out
+
+
+def _last_finalized_run_before(db: Session, company_id: int, period_start: date) -> Optional[PayrollRun]:
+    """The company's most recent FINALIZED run ending before this period —
+    the movement-control baseline."""
+    return (
+        db.query(PayrollRun)
+        .filter(
+            PayrollRun.company_id == company_id,
+            PayrollRun.status == "finalized",
+            PayrollRun.period_start < period_start,
+        )
+        .order_by(PayrollRun.period_start.desc())
+        .first()
+    )
+
+
+def build_finalize_ledger(db: Session, run: PayrollRun) -> None:
+    """Refresh the member-status ledger from CURRENT state at finalize, adding
+    the two checks the draft-time build can't do: DRIFT (someone now resolves to
+    pay but has no payslip — set up after the draft, never recomputed) and
+    MOVEMENT (someone paid last finalized period who has silently dropped out).
+    Acknowledgements are preserved. Caller applies the gate afterwards."""
+    from core.model import PayrollRunMemberStatus
+
+    company_id = run.company_id
+    scope_ids = run.scope_user_ids or None
+
+    payslips = db.query(Payslip).filter(Payslip.payroll_run_id == run.id).all()
+    paid_ids = {p.private_user_id for p in payslips if not p.is_adjustment}
+    nil_reasons = _parse_flag_subjects(run.compliance_flags, "hourly_zero_pay:")
+    data_errors = _parse_flag_subjects(run.compliance_flags, "data_error:")
+
+    # Movement baseline — who we paid last finalized period.
+    baseline = _last_finalized_run_before(db, company_id, run.period_start)
+    baseline_paid: set = set()
+    if baseline is not None:
+        baseline_paid = {
+            p.private_user_id
+            for p in db.query(Payslip).filter(Payslip.payroll_run_id == baseline.id).all()
+            if not p.is_adjustment
+        }
+
+    q = db.query(PrivateUser).filter(PrivateUser.company_id == company_id)
+    if scope_ids:
+        q = q.filter(PrivateUser.private_user_id.in_(scope_ids))
+    members = q.all()
+
+    existing = {
+        r.private_user_id: r
+        for r in db.query(PayrollRunMemberStatus)
+        .filter(PayrollRunMemberStatus.payroll_run_id == run.id)
+        .all()
+    }
+    seen: set = set()
+
+    for emp in members:
+        pid = emp.private_user_id
+        seen.add(pid)
+        if pid in data_errors:
+            bucket, reason, detail = "excluded", "data_error", {"message": data_errors[pid]}
+        elif pid in nil_reasons:
+            bucket, reason, detail = "nil_paid", nil_reasons[pid], None
+        elif pid in paid_ids:
+            bucket, reason, detail = "paid", None, None
+        else:
+            bucket = "excluded"
+            # DRIFT: an in-scope member who now resolves to pay (an assignment
+            # was created after the draft) but has no payslip. Blocking and
+            # NON-ackable — the fix is a recompute, not a signature.
+            if not _is_off_payroll_for_period(emp, run.period_start, run.period_end) and \
+                    salary_resolver.resolve_components(
+                        db, pid, run.period_start, run.period_end
+                    ).components:
+                reason, detail = "unpaid_resolvable", None
+            else:
+                reason, detail = _derive_exclusion_reason(db, emp, run.period_start, run.period_end)
+
+        # MOVEMENT: paid last finalized period, now excluded for a reason that
+        # ISN'T a recognized leaver/off-payroll → a silent drop-out. Escalate to
+        # a non-ackable block so it can't be waved through: fix it, or formally
+        # mark them a leaver / off-payroll.
+        if (
+            bucket == "excluded"
+            and pid in baseline_paid
+            and not _is_informational_reason(reason)
+            and reason != "unpaid_resolvable"
+        ):
+            reason = "unexpected_dropout"
+            detail = {**(detail or {}), "was_paid_period": baseline.period_start.isoformat()}
+
+        blocks = bucket == "excluded" and reason in _BLOCKING_EXCLUSION_REASONS
+
+        row = existing.get(pid)
+        if row is None:
+            db.add(PayrollRunMemberStatus(
+                payroll_run_id=run.id, private_user_id=pid,
+                bucket=bucket, reason_code=reason, detail=detail, blocks_finalize=blocks,
+            ))
+        else:
+            row.bucket = bucket
+            row.reason_code = reason
+            row.detail = detail
+            row.blocks_finalize = blocks
+            if bucket != "excluded":
+                row.acknowledged_by_user_id = None
+                row.acknowledged_at = None
+                row.acknowledged_reason_code = None
+                row.ack_note = None
+
+    for pid, row in existing.items():
+        if pid not in seen:
+            db.delete(row)
+
+    # Net-pay variance (informational): flag a continuing employee whose net
+    # moved sharply vs the baseline period — a wrong amount, not a missing
+    # person. Recorded on compliance_flags; never blocks finalize.
+    if baseline is not None:
+        base_net = {
+            p.private_user_id: Decimal(str(p.net_pay or 0))
+            for p in db.query(Payslip).filter(Payslip.payroll_run_id == baseline.id).all()
+            if not p.is_adjustment
+        }
+        var_flags: List[str] = []
+        for p in payslips:
+            if p.is_adjustment:
+                continue
+            prev = base_net.get(p.private_user_id)
+            if not prev:  # None or 0 — no meaningful base to compare against
+                continue
+            delta = abs(Decimal(str(p.net_pay or 0)) - prev) / prev
+            if delta > _NET_VARIANCE_THRESHOLD:
+                var_flags.append(f"u{p.private_user_id}:net_variance:{(delta * 100).quantize(Decimal('1'))}pct")
+        flags = [f for f in (run.compliance_flags or []) if ":net_variance:" not in f]
+        run.compliance_flags = flags + var_flags
+
+
+def _would_produce_payslip(db: Session, emp: PrivateUser, period_start: date, period_end: date) -> bool:
+    """Would this member produce a payslip (paid or a processed nil) if a run
+    were created now? Mirrors eligibility + the compute skip-gate without
+    building anything."""
+    job, salary = _active_job_with_salary(db, emp.private_user_id)
+    if job is None or getattr(job, "is_onboarding_draft", False):
+        return False
+    end = getattr(job, "end_date", None)
+    if end is not None and end < period_start:
+        return False
+    if salary is not None and (getattr(salary, "pay_basis", None) or "monthly").lower() in ("hourly", "daily"):
+        return True  # hourly/daily always yield at least a nil slip
+    return bool(salary_resolver.resolve_components(db, emp.private_user_id, period_start, period_end).components)
+
+
+def assess_company_readiness(db: Session, company_id: int, period_start: date, period_end: date) -> dict:
+    """Proactive, run-less readiness: who WOULD be paid vs blocked if a run were
+    created for this period now. Advisory only — creates and persists nothing.
+    Lets the UI surface setup gaps BEFORE payroll is started."""
+    members = db.query(PrivateUser).filter(PrivateUser.company_id == company_id).all()
+    ready: List[int] = []
+    not_ready: List[dict] = []    # fixable setup gaps
+    intentional: List[dict] = []  # off-payroll / onboarding placeholder / left before period
+    for emp in members:
+        pid = emp.private_user_id
+        if _is_off_payroll_for_period(emp, period_start, period_end):
+            intentional.append({"private_user_id": pid,
+                                "reason_code": f"off_payroll_{emp.off_payroll_reason or 'other'}"})
+            continue
+        if _would_produce_payslip(db, emp, period_start, period_end):
+            ready.append(pid)
+            continue
+        reason, detail = _derive_exclusion_reason(db, emp, period_start, period_end)
+        if _is_informational_reason(reason):
+            intentional.append({"private_user_id": pid, "reason_code": reason})
+        else:
+            not_ready.append({"private_user_id": pid, "reason_code": reason, "detail": detail})
+    return {
+        "company_id": company_id,
+        "period_start": period_start,
+        "period_end": period_end,
+        "ready_count": len(ready),
+        "ready": ready,
+        "not_ready": not_ready,
+        "intentional": intentional,
+    }
+
+
+def completeness_gate_mode(db: Session, company) -> str:
+    """Resolve the completeness-gate mode for a company: its per-company
+    override, else the PAYROLL_COMPLETENESS_GATE env default ('off')."""
+    import os
+    override = (getattr(company, "payroll_completeness_gate", None) or "").strip().lower()
+    if override in ("off", "warn", "enforce"):
+        return override
+    env = (os.getenv("PAYROLL_COMPLETENESS_GATE", "off") or "off").strip().lower()
+    return env if env in ("off", "warn", "enforce") else "off"
+
+
+def assert_run_complete_for_finalize(
+    db: Session, run: PayrollRun, company, actor_user_id: Optional[int] = None,
+) -> None:
+    """The finalize completeness gate. Refreshes the ledger (drift + movement),
+    then — unless the mode is 'off'/'warn' — refuses to finalize while any
+    blocking exclusion is unresolved or unacknowledged. When maker-checker is
+    on, also refuses if the finalizer acknowledged any of the exclusions. Raises
+    HTTP 409."""
+    from core.model import PayrollRunMemberStatus
+
+    build_finalize_ledger(db, run)
+    db.flush()
+
+    mode = completeness_gate_mode(db, company)
+    if mode != "enforce":
+        return  # 'off' / 'warn' — ledger is refreshed + surfaced, but no block.
+
+    rows = (
+        db.query(PayrollRunMemberStatus)
+        .filter(
+            PayrollRunMemberStatus.payroll_run_id == run.id,
+            PayrollRunMemberStatus.blocks_finalize.is_(True),
+        )
+        .all()
+    )
+    must_fix: List[int] = []
+    needs_ack: List[int] = []
+    acked_rows: List[PayrollRunMemberStatus] = []
+    for r in rows:
+        ackable = r.reason_code in _ACKABLE_EXCLUSION_REASONS
+        acked = r.acknowledged_at is not None and r.acknowledged_reason_code == r.reason_code
+        if ackable and acked:
+            acked_rows.append(r)
+            continue
+        (needs_ack if ackable else must_fix).append(r.private_user_id)
+
+    if must_fix or needs_ack:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INCOMPLETE_PAYROLL_RUN",
+                "message": (
+                    "Cannot finalize: every employee must be paid, paid-zero with a "
+                    "reason, or an acknowledged/resolved exclusion."
+                ),
+                "must_fix": must_fix,       # data_error / drift / unexpected drop-out — recompute or fix
+                "needs_acknowledgement": needs_ack,  # setup gaps — fix or sign off
+            },
+        )
+
+    # Maker-checker (opt-in): a deliberate omission needs a second pair of eyes —
+    # the finalizer can't be the one who signed it off.
+    if bool(getattr(company, "payroll_maker_checker", False)) and actor_user_id is not None:
+        self_acked = [r.private_user_id for r in acked_rows if r.acknowledged_by_user_id == actor_user_id]
+        if self_acked:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "MAKER_CHECKER_REQUIRED",
+                    "message": (
+                        "Maker-checker is on: the exclusions you acknowledged must be "
+                        "finalized by a different admin."
+                    ),
+                    "self_acknowledged": self_acked,
+                },
+            )
+
+
+def _freeze_completeness_attestation(db: Session, run: PayrollRun, actor_user_id: Optional[int]) -> None:
+    """Freeze the ledger + per-bucket counts onto the run at finalize, so the
+    completeness decision (who was in/out, why, and who signed off) is an
+    immutable, reproducible record."""
+    from core.model import PayrollRunMemberStatus
+
+    rows = (
+        db.query(PayrollRunMemberStatus)
+        .filter(PayrollRunMemberStatus.payroll_run_id == run.id)
+        .all()
+    )
+    snapshot = [
+        {
+            "private_user_id": r.private_user_id,
+            "bucket": r.bucket,
+            "reason_code": r.reason_code,
+            "detail": r.detail,
+            "acknowledged_by_user_id": r.acknowledged_by_user_id,
+            "acknowledged_at": r.acknowledged_at.isoformat() if r.acknowledged_at else None,
+            "ack_note": r.ack_note,
+        }
+        for r in rows
+    ]
+    counts = {"paid": 0, "nil_paid": 0, "excluded": 0, "excluded_acknowledged": 0, "excluded_informational": 0}
+    for r in rows:
+        counts[r.bucket] = counts.get(r.bucket, 0) + 1
+        if r.bucket == "excluded":
+            if r.acknowledged_at is not None:
+                counts["excluded_acknowledged"] += 1
+            elif _is_informational_reason(r.reason_code):
+                counts["excluded_informational"] += 1
+
+    # Statutory headcount reconciliation hook (MU PAYE/CSG/NSF). Contributors =
+    # everyone who produced a payslip; expected = contributors PLUS anyone who is
+    # a setup-gap exclusion (should be contributing but isn't set up). Members
+    # off-payroll / terminated / onboarding are legitimately not contributors.
+    # NOTE: the MU statutory-EXEMPT ruleset (certain foreign workers, directors)
+    # is not yet applied — see spec Open Questions #4.
+    contributors = counts["paid"] + counts["nil_paid"]
+    expected = contributors + sum(
+        1 for r in rows
+        if r.bucket == "excluded" and r.reason_code in _ACKABLE_EXCLUSION_REASONS
+    )
+    statutory = {
+        "contributors": contributors,
+        "expected_contributors": expected,
+        "shortfall": expected - contributors,
+        "exempt_rules_applied": False,
+        "note": "MU statutory-exempt ruleset not yet applied",
+    }
+
+    run.member_ledger_snapshot = snapshot
+    run.completeness_attestation = {
+        "counts": counts,
+        "statutory": statutory,
+        "attested_by_user_id": actor_user_id,
+        "attested_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def _shadow_host_map(
     db: Session,
     employees: list,
@@ -1846,6 +2370,11 @@ def create_draft_run(
     db.add(run)
     db.flush()
 
+    # Record the run's scope so the completeness ledger (and a later finalize
+    # gate) treat an explicit allowlist as a deliberate partial run, not as
+    # "everyone else is missing". NULL = whole company.
+    run.scope_user_ids = list(payload.private_user_ids) if payload.private_user_ids else None
+
     employees = _eligible_employees(
         db, payload.company_id, payload.period_start, payload.private_user_ids
     )
@@ -1865,6 +2394,7 @@ def create_draft_run(
     require_approved = bool(getattr(company, "require_approved_clockins_for_payroll", False))
     run_flags: List[str] = []
     paid_ids: set = set()
+    nil_reasons: Dict[int, str] = {}
     skipped_for_data_error: List[dict] = []
     for emp in employees:
         emp_flags: List[str] = []
@@ -1955,6 +2485,14 @@ def create_draft_run(
                 )
                 db.add(payslip)
                 paid_ids.add(emp.private_user_id)
+                # A zero-pay diagnostic means a PROCESSED nil result (hourly
+                # worker, nothing payable) rather than real pay — record the
+                # reason so the ledger buckets it as nil_paid, not paid.
+                if has_zero_pay_reason:
+                    nil_reasons[emp.private_user_id] = next(
+                        (f for f in emp_flags if f.startswith("hourly_zero_pay:")),
+                        "hourly_zero_pay",
+                    )
         except Exception as exc:
             # A data problem with ONE employee (most plausibly overlapping
             # clock-in records reaching overtime_engine._assert_no_overlaps —
@@ -1978,11 +2516,21 @@ def create_draft_run(
             continue
 
     run_flags.extend(_pending_period_signals(db, company.company_id, payload.period_start, payload.period_end))
-    # Surface anyone with approved hours this period who got no payslip (excluded
-    # for no salary assignment) — otherwise the run is silently Rs 0 with no reason.
-    run_flags.extend(_worked_but_unpaid_flags(db, company.company_id, payload.period_start, payload.period_end, paid_ids))
     run_flags.extend(_no_schedule_flags(db, company.company_id, payload.period_start, payload.period_end, paid_ids, require_approved))
     run.compliance_flags = run_flags
+
+    # Completeness ledger — account for EVERY in-scope member in exactly one
+    # bucket (paid / nil_paid / excluded-with-reason). Supersedes the old
+    # _worked_but_unpaid_flags heuristic (which only caught approved-hours
+    # cases): the ledger is the single source of truth for who is/ isn't paid
+    # and why. Observational in this phase — it never blocks finalize yet.
+    data_errors = {d["private_user_id"]: d["reason"] for d in skipped_for_data_error}
+    _build_member_ledger(
+        db, run,
+        period_start=payload.period_start, period_end=payload.period_end,
+        paid_ids=paid_ids, nil_reasons=nil_reasons, data_errors=data_errors,
+        scope_ids=run.scope_user_ids,
+    )
     db.flush()
 
     if skipped_for_data_error:
@@ -2161,6 +2709,13 @@ def finalize_run(
             ),
         )
 
+    # Completeness gate — refresh the member ledger (drift + movement) and, when
+    # the gate is 'enforce', refuse to finalize while any blocking exclusion is
+    # unresolved/unacknowledged. 'off'/'warn' only refresh the ledger. Runs
+    # before the re-check loop so a drift (someone now resolvable but unpaid)
+    # surfaces as RECOMPUTE_REQUIRED rather than a silent omission.
+    assert_run_complete_for_finalize(db, run, company, actor_user_id=actor_user_id)
+
     require_approved = bool(getattr(company, "require_approved_clockins_for_payroll", False))
     company_tz = getattr(company, "timezone", None) or "Indian/Mauritius"
 
@@ -2254,6 +2809,9 @@ def finalize_run(
     run.finalized_at = datetime.now(timezone.utc)
     run.finalized_by_user_id = actor_user_id
     run.country_rules_snapshot = snapshot.model_dump(mode="json")
+    # Freeze the completeness ledger + attestation (who was in/out, why, who
+    # signed off) — immutable alongside the rules snapshot.
+    _freeze_completeness_attestation(db, run, actor_user_id)
     db.flush()
 
     # M21 — generate PDF artifacts. Runs synchronously (cheap enough for a
@@ -2294,70 +2852,107 @@ def recompute_draft_run(db: Session, run_id: int, actor_user_id: Optional[int]) 
     db.query(Payslip).filter(Payslip.payroll_run_id == run.id).delete()
     db.flush()
 
+    # Honour the run's original scope — a partial (allowlist) run must not
+    # silently expand to the whole company on recompute.
+    scope_ids = run.scope_user_ids or None
     prior_ids = [
-        e.private_user_id for e in _eligible_employees(db, run.company_id, run.period_start)
+        e.private_user_id
+        for e in _eligible_employees(db, run.company_id, run.period_start, scope_ids)
     ]
     run_flags: List[str] = []
     paid_ids: set = set()
+    nil_reasons: Dict[int, str] = {}
+    skipped_for_data_error: List[dict] = []
     for emp in db.query(PrivateUser).filter(PrivateUser.private_user_id.in_(prior_ids)).all():
         emp_flags: List[str] = []
-        resolved = _resolve_full(
-            db, emp, run.period_start, run.period_end, company.country_code,
-            require_approved_clockins=require_approved,
-            overtime_rule=overtime_rule,
-            company_timezone=company_tz, flags_out=emp_flags,
-        )
-        if not resolved.components:
+        # Same SAVEPOINT discipline as create_draft_run: a single bad employee
+        # must not abort the whole recompute, and their partial writes roll back
+        # to just this iteration (not the wiped-and-rebuilding run).
+        try:
+            with db.begin_nested():
+                resolved = _resolve_full(
+                    db, emp, run.period_start, run.period_end, company.country_code,
+                    require_approved_clockins=require_approved,
+                    overtime_rule=overtime_rule,
+                    company_timezone=company_tz, flags_out=emp_flags,
+                )
+                # Keep a PROCESSED nil result (hourly_zero_pay) visible — mirror
+                # create_draft_run. Previously recompute dropped these, so a
+                # recompute silently removed the zero-pay payslips the draft had.
+                has_zero_pay_reason = any(f.startswith("hourly_zero_pay:") for f in emp_flags)
+                if not resolved.components and not has_zero_pay_reason:
+                    continue
+                leave_summary = _compute_leave_summary(
+                    db, emp.private_user_id, run.period_start, run.period_end,
+                    country_code=company.country_code, flags_out=emp_flags,
+                )
+                loan_repayments = _compute_loan_repayments_for_period(db, emp.private_user_id, run.period_start, run.period_end)
+                earnings_gross_basic = sum(
+                    (c.amount for c in resolved.components if c.kind == "earning" and c.is_basic),
+                    Decimal("0.00"),
+                )
+                leave_impact = _compute_leave_impact_for_period(
+                    db, company.country_code, emp, leave_summary, earnings_gross_basic,
+                    run.period_start, run.period_end,
+                )
+                absence_deduction = _compute_salaried_absence_for_period(
+                    db, company.country_code, emp, earnings_gross_basic,
+                    run.period_start, run.period_end,
+                    company_tz, require_approved, flags_out=emp_flags,
+                )
+                shadow_host = _recompute_shadow_host(db, run, emp.private_user_id)
+                computed = compute_for_resolved(
+                    resolved, snapshot,
+                    db=db, private_user_id=emp.private_user_id,
+                    period_start=run.period_start, country_code=company.country_code,
+                    loan_repayments=loan_repayments, leave_impact=leave_impact,
+                    absence_deduction=absence_deduction, sdl_applicable=bool(company.sdl_applicable),
+                    flags_out=emp_flags,
+                    shadow_country_code=shadow_host,
+                    fx_rate=_shadow_rate(run.fx_snapshot, shadow_host),
+                )
+                active_job = (
+                    db.query(Job).filter(Job.private_user_id == emp.private_user_id)
+                    .order_by(Job.created_at.desc()).first()
+                )
+                db.add(Payslip(
+                    payroll_run_id=run.id,
+                    private_user_id=emp.private_user_id,
+                    job_id=active_job.job_id if active_job else None,
+                    home_geofence_id=emp.home_geofence_id,
+                    leave_summary=leave_summary,
+                    **computed,
+                ))
+                paid_ids.add(emp.private_user_id)
+                if has_zero_pay_reason:
+                    nil_reasons[emp.private_user_id] = next(
+                        (f for f in emp_flags if f.startswith("hourly_zero_pay:")),
+                        "hourly_zero_pay",
+                    )
+                run_flags.extend(f"u{emp.private_user_id}:{f}" for f in emp_flags)
+        except Exception as exc:  # noqa: BLE001
+            name = f"{emp.first_name} {emp.last_name}".strip() or f"user {emp.private_user_id}"
+            logger.error(
+                f"payroll_engine: recompute skipping private_user_id={emp.private_user_id} "
+                f"({name}) due to a data error — {exc}", exc_info=True,
+            )
+            run_flags.append(f"u{emp.private_user_id}:data_error:{str(exc)[:200]}")
+            skipped_for_data_error.append({"private_user_id": emp.private_user_id, "reason": str(exc)[:200]})
             continue
-        leave_summary = _compute_leave_summary(
-            db, emp.private_user_id, run.period_start, run.period_end,
-            country_code=company.country_code, flags_out=emp_flags,
-        )
-        loan_repayments = _compute_loan_repayments_for_period(db, emp.private_user_id, run.period_start, run.period_end)
-        earnings_gross_basic = sum(
-            (c.amount for c in resolved.components if c.kind == "earning" and c.is_basic),
-            Decimal("0.00"),
-        )
-        leave_impact = _compute_leave_impact_for_period(
-            db, company.country_code, emp, leave_summary, earnings_gross_basic,
-            run.period_start, run.period_end,
-        )
-        absence_deduction = _compute_salaried_absence_for_period(
-            db, company.country_code, emp, earnings_gross_basic,
-            run.period_start, run.period_end,
-            company_tz, require_approved, flags_out=emp_flags,
-        )
-        shadow_host = _recompute_shadow_host(db, run, emp.private_user_id)
-        computed = compute_for_resolved(
-            resolved, snapshot,
-            db=db, private_user_id=emp.private_user_id,
-            period_start=run.period_start, country_code=company.country_code,
-            loan_repayments=loan_repayments, leave_impact=leave_impact,
-            absence_deduction=absence_deduction, sdl_applicable=bool(company.sdl_applicable),
-            flags_out=emp_flags,
-            shadow_country_code=shadow_host,
-            fx_rate=_shadow_rate(run.fx_snapshot, shadow_host),
-        )
-        active_job = (
-            db.query(Job).filter(Job.private_user_id == emp.private_user_id)
-            .order_by(Job.created_at.desc()).first()
-        )
-        db.add(Payslip(
-            payroll_run_id=run.id,
-            private_user_id=emp.private_user_id,
-            job_id=active_job.job_id if active_job else None,
-            home_geofence_id=emp.home_geofence_id,
-            leave_summary=leave_summary,
-            **computed,
-        ))
-        paid_ids.add(emp.private_user_id)
-        run_flags.extend(f"u{emp.private_user_id}:{f}" for f in emp_flags)
 
     run_flags.extend(_pending_period_signals(db, company.company_id, run.period_start, run.period_end))
-    run_flags.extend(_worked_but_unpaid_flags(db, company.company_id, run.period_start, run.period_end, paid_ids))
     run_flags.extend(_no_schedule_flags(db, company.company_id, run.period_start, run.period_end, paid_ids, require_approved))
     run.compute_version = 2
     run.compliance_flags = run_flags
+
+    # Rebuild the completeness ledger, preserving any acknowledgements.
+    data_errors = {d["private_user_id"]: d["reason"] for d in skipped_for_data_error}
+    _build_member_ledger(
+        db, run,
+        period_start=run.period_start, period_end=run.period_end,
+        paid_ids=paid_ids, nil_reasons=nil_reasons, data_errors=data_errors,
+        scope_ids=scope_ids,
+    )
     db.flush()
     db.refresh(run)
     return run
