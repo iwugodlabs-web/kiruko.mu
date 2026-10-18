@@ -257,3 +257,55 @@ def test_rep_syncs_own_sale_idempotent(db, rep_company):
         .all()
     )
     assert len(sales) == 1
+
+
+def test_sales_view_scoping_rep_manager_admin(db, rep_company):
+    """Reads are scoped: admin → all, manager → self + direct reports,
+    plain rep → own only."""
+    company, rep, rep_user, rep2, owner = rep_company
+    cid = company.company_id
+
+    # rep manages rep2; a third rep is on nobody's team.
+    rep2.manager_private_user_id = rep.private_user_id
+    sfx = uuid.uuid4().hex[:8]
+    u3 = User(user_type="private", email=f"rt-rep3-{sfx}@kontokazdemo.com",
+              user_name=f"rt-rep3-{sfx}", password_hash="x")
+    db.add(u3)
+    db.flush()
+    rep3 = PrivateUser(user_id=u3.user_id, first_name="Asha", last_name="Rep3",
+                       company_id=cid, pass_port_number=f"RT_REP3_{sfx}", role="employee")
+    db.add(rep3)
+    db.flush()
+    db.commit()
+
+    variant_id = _make_variant(db, cid, owner.user_id)
+
+    # Admin books one sale for each of the three reps.
+    admin = _client(db, owner.user_id)
+    try:
+        for who in (rep.private_user_id, rep2.private_user_id, rep3.private_user_id):
+            _ok(admin.post(f"/api/v1/companies/{cid}/sales", json={
+                "rep_private_user_id": who,
+                "sold_at": "2026-05-10T09:00:00+00:00",
+                "lines": [{"variant_id": variant_id, "quantity": "1"}],
+            }))
+        assert len(_ok(admin.get(f"/api/v1/companies/{cid}/sales")).json()) == 3
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    # Manager (rep) sees self + direct report (rep2) — NOT rep3.
+    mgr = _client(db, rep_user.user_id)
+    try:
+        assert len(_ok(mgr.get(f"/api/v1/companies/{cid}/sales")).json()) == 2
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    # Plain rep (rep2, no reports) sees only their own.
+    rep2_client = _client(db, rep2.user_id)
+    try:
+        assert len(_ok(rep2_client.get(f"/api/v1/companies/{cid}/sales")).json()) == 1
+    finally:
+        from main import app
+        app.dependency_overrides.clear()

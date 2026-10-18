@@ -331,6 +331,7 @@ def list_sales(
     payment_method: Optional[str] = None,
     search: Optional[str] = None,
     limit: Optional[int] = None,
+    rep_private_user_ids: Optional[List[int]] = None,
     offset: int = 0,
 ) -> List[Sale]:
     q = (
@@ -344,6 +345,8 @@ def list_sales(
         q = q.filter(Sale.sold_at <= period_end)
     if rep_private_user_id is not None:
         q = q.filter(Sale.rep_private_user_id == rep_private_user_id)
+    if rep_private_user_ids is not None:
+        q = q.filter(Sale.rep_private_user_id.in_(rep_private_user_ids))
     if sale_status is not None:
         q = q.filter(Sale.status == sale_status)
     if outlet_id is not None:
@@ -390,6 +393,7 @@ def count_sales(
     payment_status: Optional[str] = None,
     payment_method: Optional[str] = None,
     search: Optional[str] = None,
+    rep_private_user_ids: Optional[List[int]] = None,
 ) -> int:
     """Cheap COUNT matching the same filters as list_sales — powers the pager."""
     q = db.query(Sale).filter(Sale.company_id == company_id)
@@ -399,6 +403,8 @@ def count_sales(
         q = q.filter(Sale.sold_at <= period_end)
     if rep_private_user_id is not None:
         q = q.filter(Sale.rep_private_user_id == rep_private_user_id)
+    if rep_private_user_ids is not None:
+        q = q.filter(Sale.rep_private_user_id.in_(rep_private_user_ids))
     if sale_status is not None:
         q = q.filter(Sale.status == sale_status)
     if outlet_id is not None:

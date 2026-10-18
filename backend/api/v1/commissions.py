@@ -96,6 +96,30 @@ def _rep_scope_private_user_id(current_user: User, company_id: int, db: Session)
     return pu.private_user_id
 
 
+def _visible_rep_ids(current_user: User, company_id: int, db: Session) -> Optional[List[int]]:
+    """Which reps' sales the caller may READ.
+
+    None → all reps (admin / platform operator / superuser). Otherwise the
+    caller's own private_user_id plus — for a manager — their direct reports
+    via PrivateUser.manager_private_user_id (the same team relation
+    team_override pays over). A plain rep sees only themselves.
+    """
+    bound = _rep_scope_private_user_id(current_user, company_id, db)
+    if bound is None:
+        return None
+    ids = {bound}
+    rows = (
+        db.query(PrivateUser.private_user_id)
+        .filter(
+            PrivateUser.company_id == company_id,
+            PrivateUser.manager_private_user_id == bound,
+        )
+        .all()
+    )
+    ids.update(r[0] for r in rows)
+    return list(ids)
+
+
 # ---------------------------------------------------------------------------
 # Catalog
 # ---------------------------------------------------------------------------
@@ -302,6 +326,7 @@ def list_sales(
     limit: Optional[int] = Query(None, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
     company=Depends(require_company_scope),
 ):
     def _parse(value: Optional[str], *, end: bool) -> Optional[datetime]:
@@ -311,10 +336,18 @@ def list_sales(
         d = _date.fromisoformat(value)
         return datetime.combine(d, time.max if end else time.min)
 
+    # View-scoping: a rep sees only their own sales, a manager sees their team
+    # (self + direct reports), an admin/operator sees all. Reject an explicit
+    # rep filter that falls outside the caller's visible set.
+    visible = _visible_rep_ids(current_user, company_id, db)
+    if visible is not None and rep_private_user_id is not None and rep_private_user_id not in visible:
+        raise HTTPException(status_code=403, detail="Not permitted to view this rep's sales.")
+
     filters = dict(
         period_start=_parse(period_start, end=False),
         period_end=_parse(period_end, end=True),
         rep_private_user_id=rep_private_user_id,
+        rep_private_user_ids=visible,
         sale_status=status_filter,
         outlet_id=outlet_id,
         payment_status=payment_status,
