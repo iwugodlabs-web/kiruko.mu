@@ -6,12 +6,12 @@
 
 A new selling surface bolted onto a payroll engine you've **already built**. Reps log what they sell at each outlet; the platform turns it into commission under rules you define, and pays it on the next payslip — no second system, no CSV export, no manual upload. This is the complete blueprint, with every piece marked as something you reuse or something new.
 
-- **19** new tables across all phases — **10** already scaffolded for Phase 0
+- **20** field-sales tables built, across 7 migrations (phase 0 → 3.2 + payment-method), single head
 - Built on the existing **payroll spine** — payout, PAYE/CSG, and finalize are reused
 - **1** write bridges sales → payroll (the one-off allowance)
-- **4** phases, shippable from Phase 0
+- Backend + web admin + mobile capture **built & committed** · 28 backend tests green
 
-> **Current state (2026-10-18):** Phases **0–3.2 backend are built**, and the **mobile field-capture client** and **web admin UI** are now built (all uncommitted). Migrations `field_sales_phase0/1/2/3/3_1/3_2_20261017.py` (all applied). Code: `schema/field_sales_schema.py`, `db_models/crud/field_sales.py`, `services/commission_service.py` (engine + rules + the one-off bridge), `services/commission_statement_pdf.py` + template, `api/v1/commissions.py` (registered), and tests `test_field_sales_phase0.py` (6) + `test_field_sales_phase2.py` (22) covering: sale → payable → one-off → taxed payslip line; outlets + geo-verified offline sync; all 5 rule types + `team_override`; on-collection; UoM volumetrics; attribute scope; targets + accelerator bands + mid-period pro-rating; catalogs; leaderboards; liability accrual; credit-assignment splits; clawbacks; **returns/credit-notes** driving negative commission; ERP reconcile **with idempotent commit**. The sync/capture routes now also enforce rep self-scoping (a rank-and-file member may only sync sales credited to themselves). **Web admin UI** (`web/ivor-web/src/app/(platform)/dashboard/field-sales/` — Overview/leaderboard/liability, Catalog, Plans + assignments, Sales approval queue + outlets, Runs with approve/push + statement PDF; Sidebar entry): the HTTP API it needs is in place. **Mobile field capture** (`mobile/app/private_dashboard/field_sales.tsx` + `field_sale_new.tsx`; `mobile/api/fieldSales.ts`; offline queue `sales_queue` / `services/offline/salesQueue.ts` + `salesSync.ts` — geofence check-in, catalog picker, barcode scan via expo-camera, offline-first submit; reachable from Settings). Everything below marked _reuse_ has been checked against the codebase; claims that failed that audit are reclassified as _new_.
+> **Current state (2026-10-18):** Phases **0–3.2 backend are built**, and the **mobile field-capture client** and **web admin UI** are now built and **committed** on `feat/field-sales-phase0` (commits `7d4c64b`, `2c88f95`; only `mobile/app.json` and `web/ivor-web/tsconfig.json` remain uncommitted). Migrations `field_sales_phase0/1/2/3/3_1/3_2_20261017.py` + `sale_payment_method_20261018.py` (single head; the test suite applies them cleanly). Code: `schema/field_sales_schema.py`, `db_models/crud/field_sales.py`, `services/commission_service.py` (engine + rules + the one-off bridge), `services/commission_statement_pdf.py` + template, `api/v1/commissions.py` (registered), and tests `test_field_sales_phase0.py` (6) + `test_field_sales_phase2.py` (22) covering: sale → payable → one-off → taxed payslip line; outlets + geo-verified offline sync; all 5 rule types + `team_override`; on-collection; UoM volumetrics; attribute scope; targets + accelerator bands + mid-period pro-rating; catalogs; leaderboards; liability accrual; credit-assignment splits; clawbacks; **returns/credit-notes** driving negative commission; ERP reconcile **with idempotent commit**. The sync/capture routes now also enforce rep self-scoping (a rank-and-file member may only sync sales credited to themselves). **Web admin UI** (`web/ivor-web/src/app/(platform)/dashboard/field-sales/` — Overview/leaderboard/liability, Catalog, Plans + assignments, Sales approval queue + outlets, Runs with approve/push + statement PDF; Sidebar entry): the HTTP API it needs is in place. **Mobile field capture** (`mobile/app/private_dashboard/field_sales.tsx` + `field_sale_new.tsx`; `mobile/api/fieldSales.ts`; offline queue `sales_queue` / `services/offline/salesQueue.ts` + `salesSync.ts` — geofence check-in, catalog picker, barcode scan via expo-camera, offline-first submit; reachable from Settings). Everything below marked _reuse_ has been checked against the codebase; claims that failed that audit are reclassified as _new_.
 
 **Legend:** 🟢 **Reuse** — already in your codebase · 🟠 **New** — to build · 🔵 **Goal** — the outcome it serves. _(Mauritius FMCG · currency MUR)_
 
@@ -87,17 +87,18 @@ The green zone is **already built and untouched**. The amber zones are the whole
 **Catalog** _(new)_
 - `ProductCategory` — parent_id → self · tree _(Phase 2; Phase 0 keeps `Product.category` a plain string)_
 - `Product` — category_id · brand · status
-- `ProductOption` / `OptionValue` — Size · Flavour · Pack
+- `ProductOption` — option axes (Size · Flavour · Pack); _no separate `OptionValue` table_
 - `ProductVariant` — sku · barcode · sell_uom · status
-- `VariantOptionValue` — variant ↔ option values
+- `ProductVariantOptionValue` — variant ↔ option values
 - `UnitOfMeasure` — base unit + pack conversions
 - `ProductPrice` — per variant · versioned · territory _(Phase 2; Phase 0 price is inline on `ProductVariant.unit_price` — a single price, no versioning or territory)_
 
 **Sales capture** _(new)_
 - `Sale` — rep · credited_to · outlet · geo · status · payment_status · client_uuid
 - `SaleLine` — variant · qty · uom · unit_price_snapshot
-- `Collection` — collected_amount / collected_at → earn-on-collection _(modelled as columns on `Sale` in the Phase 0 scaffold, not its own table; the on-collection evaluation lands Phase 2, so Phase 0/1 plans run earn-on-sale only)_
-- `Outlet` — geo+geofence · credit terms · assigned rep · visit cadence _(Phase 1; `Sale.outlet_id` is a placeholder column today)_
+- `Collection` — `collected_amount` / `collected_at` columns on `Sale` + `payment_method` (`sale_payment_method_20261018`); the on-collection trigger is **built**
+- `SalesReturn` / `SalesReturnLine` — returns / credit-notes linked to a Sale, driving negative commission **(built)**
+- `Outlet` — geo+geofence · credit terms · assigned rep · visit cadence **(built; Phase 1)**
 
 **Commission** _(new)_
 - `CommissionPlan` — per company · trigger: on-sale | on-collection
@@ -117,7 +118,7 @@ The green zone is **already built and untouched**. The amber zones are the whole
 - `CompanyGeofence` — geofence primitive **exists** (today wired to time-log clock-ins only); the outlet-visit check is **new** integration over it, and there is no outlet/visit entity yet
 - `AuditLog · RBAC · Idempotency` — approvals · perms · offline sync
 
-_Build state:_ Phase 0 has scaffolded (uncommitted) `Product`, `ProductVariant`, `Sale`, `SaleLine`, `CommissionPlan`, `CommissionRule`, `CommissionPlanAssignment`, `CommissionRun`, `CommissionLineItem`, `CommissionPayable`. The rest — `ProductCategory`, `ProductOption`/`OptionValue`, `VariantOptionValue`, `UnitOfMeasure`, `ProductPrice`, `Outlet`, `Collection` (currently columns on `Sale`), `CreditAssignment`, `SalesTarget` — **do not exist yet**.
+_Build state (verified 2026-10-18):_ all **20** field-sales models exist, are committed, and are exercised by **28 green tests** — including `ProductCategory`, `ProductOption`, `ProductVariantOptionValue`, `UnitOfMeasure`, `ProductPrice`, `Outlet`, `SalesReturn`/`SalesReturnLine`, `CreditAssignment`, and `SalesTarget`. The paid-module gate is the generic `company_modules` entitlement (`core/modules.py`). **Not built:** manager/team view-scoping (only rep self-scoping exists), maker-checker on plan/price changes, and the off-payroll **manual** payout-channel settlement (off-payroll reps are *detected and skipped*, not silently mispaid — see the completeness check).
 
 ### Key foreign keys — how the new tables wire into yours
 
@@ -206,18 +207,28 @@ Island Distributors Ltd. Rahul services ~30 shops. Follow a Coke case from his b
 
 ---
 
-## Completeness check — still open, refinements scoped to later phases
+## Completeness check — what's built vs still open
 
-The structural scope is settled. These are the remaining decisions; a few touch the data model, so they're captured now to avoid a retrofit. **None of them block Phase 0.**
+Most of the once-"open" refinements are now **built** (verified against the code, 28 tests green):
 
-- **Money & tax:** commission base gross vs **net-of-discount** (per-plan) + discount authority limits; statutory — commission sits in PAYE **and** CSG/NSF bases, counts toward EOY-bonus provisioning; rounding + sale-currency → pay-currency FX _(reuse shadow-FX)_.
-- **On-collection mechanics:** **returns / credit-notes** as a first-class entity linked to the Sale / SaleLine (incl. partial returns); **payment allocation** — partial payments, FIFO against invoices — driving pro-rata commission. These are what make the on-collection trigger real.
-- **Governance & lifecycle:** per-company **module feature-flag** (the B2B tier gate); **maker-checker** on plan & price changes _(existing pattern)_; never hard-delete a plan/product that has paid — archive only; sale edit / void window before approval.
-- **People & output:** **view-scoping** perms — rep sees own · manager sees team · admin sees all; rep hierarchy for team overrides; commission statement PDF _(reuse payslip_pdf)_; targets depth — team targets, mid-period pro-rating, accelerator bands.
+- **Returns / credit-notes** — `SalesReturn`/`SalesReturnLine` linked to a Sale, driving negative commission. ✅
+- **On-collection trigger** — per-plan `on_sale` | `on_collection`, plus a `sales.payment_method` column. ✅
+- **Targets depth** — team targets, mid-period pro-rating, accelerator bands. ✅
+- **Team overrides** — a `team_override` rule type + `CreditAssignment` splits. ✅
+- **Module feature-flag** — the paid-module gate via `company_modules` / `core/modules.py`. ✅
+- **Commission statement PDF** — `services/commission_statement_pdf.py`. ✅
+- **ERP reconcile** — idempotent batch, keyed on `client_uuid`. ✅
+- **Archive-not-delete**, and **rep self-scoping** on sync / edit / void (403s). ✅
+- **Period assignment by `sold_at`** within the period (not `synced_at`). ✅
+- **Clawback > net pay** — handled, but via the **payslip's own negative-net** mechanism (`record_clawback`), not the `Loan`/`Repayment` carry-forward the earlier plan assumed.
 
-**The load-bearing one: paying non-payroll reps.** The bridge assumes the rep is **on payroll**. But field reps are often commission-only **contractors** — and your existing `payroll_status='off_payroll'` marker auto-excludes them from every run, so their one-off would be written and then **silently never paid**: exactly the silent-exclusion bug your completeness work targets — and because that completeness gate is **opt-in (default off** unless a company override or `PAYROLL_COMPLETENESS_GATE` is set to warn/enforce), by default nothing would flag the omission at all. Needs a decision, not a hand-wave: a **second payout rail** (a commission payable + settlement for non-payroll reps), or scope the module to on-payroll reps first. Plus two edges: a **clawback that exceeds net pay** must carry forward as a recoverable (not vanish), and **period-boundary timing** (`sold_at` vs `synced_at`) needs a rule.
+**Still open:**
 
-**Phase 0 is still safe.** Scoped to **on-payroll reps**, Phase 0 (flat-%, earn-on-sale, admin-entered) exercises the full pipeline without any open item above. The contractor rail and these edges land in Phase 2–3 — but the on/off-payroll decision should be made *before* you promise a client commission-only reps.
+- **Off-payroll (contractor) payout execution — the load-bearing one.** The silent-exclusion risk is *handled*: `_is_off_payroll()` detects off-payroll reps and the bridge **skips** them (`reason: off_payroll` / `non_payroll_channel`) rather than writing a one-off that vanishes. But the `manual` channel only marks them **outstanding** — the actual off-payroll **settlement / payout is not built**. (Note: the completeness gate is **opt-in**, default off unless a company override or `PAYROLL_COMPLETENESS_GATE` is warn/enforce — so it's the engine's detect-and-skip, not the gate, that prevents the mispay.)
+- **Maker-checker** on plan & price changes — not built.
+- **Manager / team view-scoping** — only rep self-scoping exists; a manager seeing their team's numbers is not built.
+- **Money & tax refinements** — **confirmed not in the commission engine**: no net-of-discount base, discount limits, FX, or statutory/EOY interaction (commission is gross; it's only tagged taxable so PAYE/CSG apply downstream at the payslip).
+- **On-collection allocation** — the trigger prorates by `sale.collected_amount` per sale (**built**); **multi-invoice FIFO allocation is not built** (confirmed).
 
 ---
 
@@ -234,14 +245,16 @@ Naming the boundary is as much a part of the spec as naming the scope. These flo
 
 ## Delivery — four phases, value from the first
 
-Phase 0 proves the entire A→Z loop with the least possible code — before a line of mobile offline sync or the rules engine exists.
+Phases 0–3.2 are **built & committed** (28 backend tests green). The table records what each phase delivered.
 
 | Phase | Scope | New tables | Proves |
 |---|---|---|---|
-| **PHASE 0** | Catalog (default variant only) · admin-entered sale · one flat-% rule · on-payroll reps only | Product, ProductVariant, Sale, SaleLine, CommissionPlan, CommissionRule, CommissionPlanAssignment, CommissionRun, CommissionLineItem, CommissionPayable _(10 — schema + engine + API + tests, uncommitted)_ | the full pipeline: sale → payable → one-off → taxed payslip line |
+| **PHASE 0** | Catalog (default variant only) · admin-entered sale · one flat-% rule · on-payroll reps only | Product, ProductVariant, Sale, SaleLine, CommissionPlan, CommissionRule, CommissionPlanAssignment, CommissionRun, CommissionLineItem, CommissionPayable _(10 tables — committed; 28 tests green)_ | the full pipeline: sale → payable → one-off → taxed payslip line |
 | **PHASE 1** | Mobile field capture · offline sync · geofence visit · barcode scan · photo | Outlet · sync endpoints (no other core tables) | reps in the field, reliably, offline |
 | **PHASE 2** | Full variant/catalog model · on-collection trigger · all 5 rule types · targets · approval queue · leaderboards | ProductCategory, ProductOption/OptionValue, VariantOptionValue, UnitOfMeasure, ProductPrice, SalesTarget | real plans, real teams, self-serve |
 | **PHASE 3** | Clawbacks · team overrides · territories/routes · liability accrual · ERP reconcile | CreditAssignment (adjustments ride existing payslip rows) | the messy real world, cleanly |
+
+> **All phases built.** Phases 0–3.2 + the `sale_payment_method_20261018` follow-up are committed and backend-tested. What remains is the *Still open* list above (contractor payout settlement, maker-checker, team view-scoping) — follow-ups, not a new phase. The web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors). The HTTP route layer — previously only reached indirectly — now has a **route-level smoke** (`tests/test_field_sales_routes_smoke.py`) driving product → sale → plan → run → approve → push over HTTP, which also confirms the `company_modules` gate 403s when `field_sales` is disabled.
 
 ---
 
@@ -250,10 +263,10 @@ Phase 0 proves the entire A→Z loop with the least possible code — before a l
 Field-sales tools capture selling but can't pay. Payroll tools pay but can't see the field. You'd own the whole arc — product → field sale → commission → payslip → clawback — on infrastructure that's already built and paid for.
 
 - **The moat** — Sale and pay in one system. Once a rep's selling and earning live together, switching cost is enormous.
-- **The cost** — 19 new tables across all phases (10 scaffolded for Phase 0), in 3 clean layers. Stages D–L lean on the existing payroll spine — though several once-assumed reuses (geofence-for-visits, barcode OCR, the sector/rule/bonus/budget jobs) are new work over existing *patterns*, not drop-in reuse.
+- **The cost** — 20 field-sales tables, all built & committed, in 3 clean layers. Stages D–L lean on the existing payroll spine — though several once-assumed reuses (geofence-for-visits, barcode OCR, the sector/rule/bonus/budget jobs) proved to be new work over existing *patterns*, not drop-in reuse.
 - **The revenue** — A natural paid B2B tier — the field-sales upgrade on top of the payroll base.
 
-_Status: the entire module — backend (Phases 0–3.2), the **web admin UI** and the **mobile field-capture client** — is built and tested (all uncommitted). Review, commit, then verify the clients against a running backend._
+_Status (2026-10-18): backend (Phases 0–3.2) is built, **committed**, and **29 tests green** (incl. a new HTTP route smoke); the web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors) and the mobile capture client are committed too. Remaining: the *Still open* list — contractor payout settlement, maker-checker, team view-scoping, money/tax refinements (the new route smoke + the clean web build are uncommitted)._
 
 ---
 
