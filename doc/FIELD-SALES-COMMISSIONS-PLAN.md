@@ -254,7 +254,7 @@ Phases 0–3.2 are **built & committed** (28 backend tests green). The table rec
 | **PHASE 2** | Full variant/catalog model · on-collection trigger · all 5 rule types · targets · approval queue · leaderboards | ProductCategory, ProductOption/OptionValue, VariantOptionValue, UnitOfMeasure, ProductPrice, SalesTarget | real plans, real teams, self-serve |
 | **PHASE 3** | Clawbacks · team overrides · territories/routes · liability accrual · ERP reconcile | CreditAssignment (adjustments ride existing payslip rows) | the messy real world, cleanly |
 
-> **All phases built.** Phases 0–3.2 + the `sale_payment_method_20261018` follow-up are committed and backend-tested. What remains is the *Still open* list above (contractor payout settlement, maker-checker, team view-scoping) — follow-ups, not a new phase. The web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors). The HTTP route layer — previously only reached indirectly — now has a **route-level smoke** (`tests/test_field_sales_routes_smoke.py`) driving product → sale → plan → run → approve → push over HTTP, which also confirms the `company_modules` gate 403s when `field_sales` is disabled.
+> **All phases built.** Phases 0–3.2 + the `sale_payment_method_20261018` follow-up are committed and backend-tested. What remains is the *Still open* list above (contractor payout settlement, maker-checker, team view-scoping) — follow-ups, not a new phase. The web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors). The HTTP route layer — previously only reached indirectly — now has **route-level tests** (`tests/test_field_sales_routes_smoke.py`): the core loop (product → sale → plan → run → approve → push) over HTTP, the `company_modules` gate 403ing when `field_sales` is disabled, the **rep self-scoping boundary** (a rep syncing another rep's sale → 403), and an **idempotent offline sync** (same `client_uuid` twice → one sale).
 
 ---
 
@@ -266,7 +266,7 @@ Field-sales tools capture selling but can't pay. Payroll tools pay but can't see
 - **The cost** — 20 field-sales tables, all built & committed, in 3 clean layers. Stages D–L lean on the existing payroll spine — though several once-assumed reuses (geofence-for-visits, barcode OCR, the sector/rule/bonus/budget jobs) proved to be new work over existing *patterns*, not drop-in reuse.
 - **The revenue** — A natural paid B2B tier — the field-sales upgrade on top of the payroll base.
 
-_Status (2026-10-18): backend (Phases 0–3.2) is built, **committed**, and **29 tests green** (incl. a new HTTP route smoke); the web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors) and the mobile capture client are committed too. Remaining: the *Still open* list — contractor payout settlement, maker-checker, team view-scoping, money/tax refinements (the new route smoke + the clean web build are uncommitted)._
+_Status (2026-10-18): backend (Phases 0–3.2) is built, **committed**, and **31 tests green** (HTTP route tests now cover the core loop, the module gate, rep self-scoping 403s, and idempotent offline sync); the web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors) and the mobile capture client are committed too. Remaining: the *Still open* list — contractor payout settlement, maker-checker, team view-scoping, money/tax refinements (the new route smoke + the clean web build are uncommitted)._
 
 ---
 

@@ -21,6 +21,7 @@ from core.model import (
     Company,
     EmployeeOneOffAllowance,
     PrivateUser,
+    Sale,
     User,
 )
 from services import commission_service as engine
@@ -56,6 +57,20 @@ def rep_company(db):
     db.add(rep)
     db.flush()
 
+    # A second rank-and-file rep, to prove a rep cannot act on another's sales.
+    u2 = User(
+        user_type="private", email=f"rt-rep2-{sfx}@kontokazdemo.com",
+        user_name=f"rt-rep2-{sfx}", password_hash="x",
+    )
+    db.add(u2)
+    db.flush()
+    rep2 = PrivateUser(
+        user_id=u2.user_id, first_name="Sunil", last_name="Rep2",
+        company_id=company.company_id, pass_port_number=f"RT_REP2_{sfx}", role="employee",
+    )
+    db.add(rep2)
+    db.flush()
+
     # The field_sales paid module is OFF by default — enable it so the routes
     # (which correctly gate on the entitlement) are reachable.
     from core.modules import set_company_module
@@ -65,7 +80,7 @@ def rep_company(db):
     )
     db.commit()
 
-    yield company, rep, owner
+    yield company, rep, u, rep2, owner
 
     db.rollback()
     for stmt in [
@@ -109,7 +124,7 @@ def _ok(resp):
 
 
 def test_core_loop_over_http(db, rep_company):
-    company, rep, owner = rep_company
+    company, rep, _rep_user, _rep2, owner = rep_company
     cid = company.company_id
     client = _client(db, owner.user_id)
     try:
@@ -168,3 +183,77 @@ def test_core_loop_over_http(db, rep_company):
     finally:
         from main import app
         app.dependency_overrides.clear()
+
+
+def _make_variant(db, cid, owner_user_id) -> int:
+    """Create a product+variant via the admin HTTP path; return its variant id."""
+    admin = _client(db, owner_user_id)
+    try:
+        r = _ok(admin.post(f"/api/v1/companies/{cid}/products", json={
+            "name": "Spring Water", "category": "Beverages",
+            "default_variant": {"sku": "W-1L", "unit_price": "50.00"},
+        }))
+        return r.json()["variants"][0]["id"]
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
+def test_rep_cannot_sync_another_reps_sale(db, rep_company):
+    """Authorization boundary: a rank-and-file rep must not attribute a synced
+    sale to a different rep — the HTTP layer must 403."""
+    company, rep, rep_user, rep2, owner = rep_company
+    cid = company.company_id
+    variant_id = _make_variant(db, cid, owner.user_id)
+
+    rep_client = _client(db, rep_user.user_id)
+    try:
+        r = rep_client.post(f"/api/v1/companies/{cid}/sales/sync", json={"items": [{
+            "client_uuid": "cuid-cross-rep-0001",
+            "rep_private_user_id": rep2.private_user_id,   # NOT the caller
+            "sold_at": "2026-05-11T09:00:00+00:00",
+            "lines": [{"variant_id": variant_id, "quantity": "2"}],
+        }]})
+        assert r.status_code == 403, f"{r.status_code}: {r.text}"
+        assert "their own sales" in r.text
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    # And nothing was written for either rep.
+    assert db.query(Sale).filter(Sale.company_id == cid).count() == 0
+
+
+def test_rep_syncs_own_sale_idempotent(db, rep_company):
+    """Happy-path offline sync by a rep for their own sale, and idempotency:
+    the same client_uuid flushed twice yields one sale, not two."""
+    company, rep, rep_user, rep2, owner = rep_company
+    cid = company.company_id
+    variant_id = _make_variant(db, cid, owner.user_id)
+
+    rep_client = _client(db, rep_user.user_id)
+    item = {
+        "client_uuid": "cuid-own-sale-0001",
+        "rep_private_user_id": rep.private_user_id,        # the caller
+        "sold_at": "2026-05-12T09:00:00+00:00",
+        "lines": [{"variant_id": variant_id, "quantity": "3"}],
+    }
+    try:
+        res1 = _ok(rep_client.post(f"/api/v1/companies/{cid}/sales/sync",
+                                   json={"items": [item]})).json()
+        assert res1["accepted"] == 1 and res1["errors"] == 0, res1
+
+        # Retry the identical batch → recognised as a duplicate, no new sale.
+        res2 = _ok(rep_client.post(f"/api/v1/companies/{cid}/sales/sync",
+                                   json={"items": [item]})).json()
+        assert res2["duplicates"] == 1, res2
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    sales = (
+        db.query(Sale)
+        .filter(Sale.company_id == cid, Sale.rep_private_user_id == rep.private_user_id)
+        .all()
+    )
+    assert len(sales) == 1
