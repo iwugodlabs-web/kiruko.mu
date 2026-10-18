@@ -238,10 +238,10 @@ Five items are buildable now, headless, with tests; two are deferred until a cli
 
 **Build now**
 1. **Verification tests (Bucket 2)** — route tests for returns, clawbacks, ERP reconcile, bulk review, leaderboard/liability, product import; plus a statement-PDF check (assert a real `%PDF` document comes back). Pure verification, no product decisions.
-2. **Contractor manual-payout settlement** — a service + endpoint to settle `payout_channel='manual'` payables (record a payout reference, `status→settled`, `settled_at`), mirroring the existing payroll-channel settle path. The `CommissionPayable` ledger already exists and off-payroll reps are already detected + skipped, so this closes their loop.
+2. ✅ **Contractor manual-payout settlement** — **done (`0404f22`).** `payout_channel` is now **derived from the rep's `payroll_status`** at compute (off_payroll → `manual`), not hardcoded; new `settle_manual_payouts` service + `POST .../commission-runs/{id}/settle-manual` records an external reference (`commission_payables.settlement_reference`, migration `comm_settle_ref_20261018`) and settles off-payroll commission without a one-off/payslip. Tested (`test_field_sales_contractor.py`).
 3. **Maker-checker on plan/price** — an approval state + two-actor flow on plan and price changes, mirroring the existing `payroll_maker_checker` pattern. _Decision: which mutations require a second approver._
-4. **Team / manager view-scoping** — a visible-rep-set rule on list/read endpoints: owner/admin → all; **manager → self + direct reports** (reusing the existing `PrivateUser.manager_private_user_id` query `team_override` already uses); rep → self (already enforced). No new data model. _Default: direct reports, one level._
-5. **Statutory-codes hardening** — set `statutory_base_codes` explicitly on the `COMMISSION` component (PAYE/CSG/NSF) instead of relying on the engine's legacy inference.
+4. **Team / manager view-scoping** — a visible-rep-set rule on list/read endpoints: owner/admin → all; **manager → self + direct reports** (reusing the existing `PrivateUser.manager_private_user_id` query `team_override` already uses); rep → self (already enforced). No new data model. _Default: direct reports, one level._ _(next)_
+5. ✅ **Statutory-codes hardening** — **done (`0404f22`).** The `COMMISSION` component's `statutory_base_codes` now come from the shared resolver (`infer_statutory_base_codes`) — PAYE + CSG, no NSF — not a hardcoded literal.
 
 **Deferred — demand-driven (cheap to add when a client needs it)**
 - **FX (sale→pay currency)** — only if sales are booked in a currency ≠ the rep's pay; convert at run time via a single FX source (mirror payroll's `fx_snapshot`).
