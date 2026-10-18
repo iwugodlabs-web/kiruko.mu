@@ -14,7 +14,9 @@ from sqlalchemy import text
 
 from api.v1 import commissions
 from core.model import Company, PrivateUser, User
+from db_models.crud import field_sales as crud
 from schema.field_sales_schema import (
+    ProductCreate,
     SaleCreate,
     SaleLineCreate,
     SaleSyncItem,
@@ -59,18 +61,42 @@ def authz_company(db):
     rep_user, rep = _rep("one")
     _, other = _rep("two")
 
+    product = crud.create_product(db, company.company_id, ProductCreate(name="Cola 500ml"))
+    variant = product.variants[0]
+    db.commit()
+
     yield {
         "company_id": company.company_id,
         "owner_user": owner_user,
         "rep_user": rep_user,
         "rep": rep,
         "other": other,
+        "variant": variant,
     }
 
     db.rollback()
-    for stmt in ["DELETE FROM sale_lines", "DELETE FROM sales"]:
+    for stmt in [
+        "DELETE FROM sale_lines",
+        "DELETE FROM sales",
+        "DELETE FROM product_variants",
+        "DELETE FROM products",
+    ]:
         db.execute(text(stmt))
     db.commit()
+
+
+def _make_sale(db, company_id, rep_private_user_id, variant_id, *, status="approved"):
+    return crud.create_sale(
+        db,
+        company_id,
+        SaleCreate(
+            rep_private_user_id=rep_private_user_id,
+            sold_at=SOLD_AT,
+            lines=[SaleLineCreate(variant_id=variant_id, quantity=1)],
+        ),
+        None,
+        status=status,
+    )
 
 
 def test_rep_scope_helper_binds_rank_and_file_member(db, authz_company):
@@ -142,3 +168,109 @@ def test_sync_sales_route_rejects_foreign_rep(db, authz_company):
             company=None,
         )
     assert exc.value.status_code == 403
+
+
+def test_void_route_rejects_foreign_rep(db, authz_company):
+    sale = _make_sale(
+        db, authz_company["company_id"], authz_company["other"].private_user_id,
+        authz_company["variant"].id,
+    )
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        commissions.void_sale(
+            company_id=authz_company["company_id"],
+            sale_id=sale.id,
+            db=db,
+            current_user=authz_company["rep_user"],
+            company=None,
+        )
+    assert exc.value.status_code == 403
+    assert crud.get_sale(db, authz_company["company_id"], sale.id).status != "void"
+
+
+def test_void_route_allows_own_rep_before_approval(db, authz_company):
+    sale = _make_sale(
+        db, authz_company["company_id"], authz_company["rep"].private_user_id,
+        authz_company["variant"].id, status="submitted",
+    )
+    db.commit()
+    out = commissions.void_sale(
+        company_id=authz_company["company_id"],
+        sale_id=sale.id,
+        db=db,
+        current_user=authz_company["rep_user"],
+        company=None,
+    )
+    assert out.status == "void"
+
+
+def test_void_route_blocks_own_rep_on_approved_sale(db, authz_company):
+    sale = _make_sale(
+        db, authz_company["company_id"], authz_company["rep"].private_user_id,
+        authz_company["variant"].id, status="approved",
+    )
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        commissions.void_sale(
+            company_id=authz_company["company_id"],
+            sale_id=sale.id,
+            db=db,
+            current_user=authz_company["rep_user"],
+            company=None,
+        )
+    assert exc.value.status_code == 403
+    assert crud.get_sale(db, authz_company["company_id"], sale.id).status == "approved"
+
+
+def test_void_route_allows_admin_on_approved_sale(db, authz_company):
+    sale = _make_sale(
+        db, authz_company["company_id"], authz_company["other"].private_user_id,
+        authz_company["variant"].id, status="approved",
+    )
+    db.commit()
+    out = commissions.void_sale(
+        company_id=authz_company["company_id"],
+        sale_id=sale.id,
+        db=db,
+        current_user=authz_company["owner_user"],
+        company=None,
+    )
+    assert out.status == "void"
+
+
+def test_reopen_route_rejects_rep(db, authz_company):
+    sale = _make_sale(
+        db, authz_company["company_id"], authz_company["rep"].private_user_id,
+        authz_company["variant"].id, status="submitted",
+    )
+    crud.void_sale(db, authz_company["company_id"], sale.id)
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        commissions.reopen_sale(
+            company_id=authz_company["company_id"],
+            sale_id=sale.id,
+            payload=None,
+            db=db,
+            current_user=authz_company["rep_user"],
+            company=None,
+        )
+    assert exc.value.status_code == 403
+    assert crud.get_sale(db, authz_company["company_id"], sale.id).status == "void"
+
+
+def test_reopen_route_allows_company_owner(db, authz_company):
+    sale = _make_sale(
+        db, authz_company["company_id"], authz_company["other"].private_user_id,
+        authz_company["variant"].id,
+    )
+    crud.void_sale(db, authz_company["company_id"], sale.id)
+    db.commit()
+    out = commissions.reopen_sale(
+        company_id=authz_company["company_id"],
+        sale_id=sale.id,
+        payload=None,
+        db=db,
+        current_user=authz_company["owner_user"],
+        company=None,
+    )
+    assert out.status == "approved"

@@ -16,7 +16,8 @@ from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from core.model import (
     CommissionLineItem,
@@ -25,6 +26,7 @@ from core.model import (
     CommissionPlanAssignment,
     CommissionRule,
     CommissionRun,
+    Company,
     CreditAssignment,
     EmployeeOneOffAllowance,
     Outlet,
@@ -51,15 +53,18 @@ from schema.field_sales_schema import (
     SalesReturnCreate,
     OutletUpdate,
     ProductCategoryCreate,
+    ProductCategoryUpdate,
     ProductCreate,
     ProductOptionCreate,
     ProductPriceCreate,
     ProductUpdate,
     SaleCreate,
     SaleSyncItem,
+    SaleUpdate,
     SalesTargetCreate,
     UnitOfMeasureCreate,
     VariantCreate,
+    VariantUpdate,
 )
 
 
@@ -220,6 +225,14 @@ def _assert_rep_in_company(db: Session, company_id: int, private_user_id: int) -
     return rep
 
 
+def _company_currency(db: Session, company_id: int) -> str:
+    """The company's operating currency (derived from its country), so a sale
+    captured without an explicit currency is labelled correctly for a non-MU
+    company instead of defaulting to MUR."""
+    company = db.get(Company, company_id)
+    return (company.currency if company and company.currency else None) or "MUR"
+
+
 def create_sale(
     db: Session,
     company_id: int,
@@ -256,9 +269,10 @@ def create_sale(
         sold_at=payload.sold_at,
         status=status,
         payment_status=payload.payment_status or "paid",
+        payment_method=payload.payment_method,
         collected_amount=payload.collected_amount,
         collected_at=payload.collected_at,
-        currency=payload.currency or "MUR",
+        currency=payload.currency or _company_currency(db, company_id),
         source=payload.source or "admin",
         client_uuid=payload.client_uuid,
         visit_verified=visit_verified,
@@ -290,6 +304,20 @@ def create_sale(
     return sale
 
 
+def _sale_read_options():
+    """Loader chain so SaleRead can render *what* was sold without N+1: lines →
+    variant → product/sell_uom. Cheap for the small page sizes these endpoints
+    return."""
+    return [
+        joinedload(Sale.lines)
+        .joinedload(SaleLine.variant)
+        .joinedload(ProductVariant.product),
+        joinedload(Sale.lines)
+        .joinedload(SaleLine.variant)
+        .joinedload(ProductVariant.sell_uom),
+    ]
+
+
 def list_sales(
     db: Session,
     company_id: int,
@@ -298,10 +326,16 @@ def list_sales(
     period_end: Optional[datetime] = None,
     rep_private_user_id: Optional[int] = None,
     sale_status: Optional[str] = None,
+    outlet_id: Optional[int] = None,
+    payment_status: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> List[Sale]:
     q = (
         db.query(Sale)
-        .options(joinedload(Sale.lines))
+        .options(*_sale_read_options())
         .filter(Sale.company_id == company_id)
     )
     if period_start is not None:
@@ -312,18 +346,150 @@ def list_sales(
         q = q.filter(Sale.rep_private_user_id == rep_private_user_id)
     if sale_status is not None:
         q = q.filter(Sale.status == sale_status)
-    return q.order_by(Sale.sold_at.desc()).all()
+    if outlet_id is not None:
+        q = q.filter(Sale.outlet_id == outlet_id)
+    if payment_status is not None:
+        q = q.filter(Sale.payment_status == payment_status)
+    if payment_method is not None:
+        q = q.filter(Sale.payment_method == payment_method)
+    if search:
+        # Free-text across notes and the sold product names/SKUs. EXISTS keeps
+        # it a single indexed query rather than post-filtering in Python.
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                Sale.notes.ilike(like),
+                Sale.lines.any(
+                    SaleLine.variant.has(
+                        or_(
+                            ProductVariant.sku.ilike(like),
+                            ProductVariant.barcode.ilike(like),
+                            ProductVariant.product.has(Product.name.ilike(like)),
+                        )
+                    )
+                ),
+            )
+        )
+    q = q.order_by(Sale.sold_at.desc(), Sale.id.desc())
+    if offset:
+        q = q.offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
+
+
+def count_sales(
+    db: Session,
+    company_id: int,
+    *,
+    period_start: Optional[datetime] = None,
+    period_end: Optional[datetime] = None,
+    rep_private_user_id: Optional[int] = None,
+    sale_status: Optional[str] = None,
+    outlet_id: Optional[int] = None,
+    payment_status: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    search: Optional[str] = None,
+) -> int:
+    """Cheap COUNT matching the same filters as list_sales — powers the pager."""
+    q = db.query(Sale).filter(Sale.company_id == company_id)
+    if period_start is not None:
+        q = q.filter(Sale.sold_at >= period_start)
+    if period_end is not None:
+        q = q.filter(Sale.sold_at <= period_end)
+    if rep_private_user_id is not None:
+        q = q.filter(Sale.rep_private_user_id == rep_private_user_id)
+    if sale_status is not None:
+        q = q.filter(Sale.status == sale_status)
+    if outlet_id is not None:
+        q = q.filter(Sale.outlet_id == outlet_id)
+    if payment_status is not None:
+        q = q.filter(Sale.payment_status == payment_status)
+    if payment_method is not None:
+        q = q.filter(Sale.payment_method == payment_method)
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                Sale.notes.ilike(like),
+                Sale.lines.any(
+                    SaleLine.variant.has(
+                        or_(
+                            ProductVariant.sku.ilike(like),
+                            ProductVariant.barcode.ilike(like),
+                            ProductVariant.product.has(Product.name.ilike(like)),
+                        )
+                    )
+                ),
+            )
+        )
+    return q.count()
 
 
 def get_sale(db: Session, company_id: int, sale_id: int) -> Sale:
     sale = (
         db.query(Sale)
-        .options(joinedload(Sale.lines))
+        .options(*_sale_read_options())
         .filter(Sale.id == sale_id, Sale.company_id == company_id)
         .one_or_none()
     )
     if sale is None:
         raise HTTPException(status_code=404, detail=f"Sale {sale_id} not found")
+    return sale
+
+
+def update_sale(db: Session, company_id: int, sale_id: int, payload: SaleUpdate) -> Sale:
+    """Edit a sale's *attributes* (payment, outlet, notes). Line items are
+    immutable by design — see SaleUpdate. A switch to `paid` without an explicit
+    collected_amount backfills it from the line totals; `collected_at` is only
+    stamped when the sale is (or becomes) fully paid."""
+    sale = get_sale(db, company_id, sale_id)
+    if sale.status == "void":
+        raise HTTPException(status_code=409, detail="Voided sales can't be edited — reopen it first.")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "outlet_id" in data and data["outlet_id"] is not None:
+        get_outlet(db, company_id, data["outlet_id"])
+
+    for field in ("payment_status", "payment_method", "outlet_id", "notes"):
+        if field in data:
+            setattr(sale, field, data[field])
+
+    if "collected_amount" in data:
+        sale.collected_amount = data["collected_amount"]
+
+    if sale.payment_status == "paid":
+        if sale.collected_amount is None:
+            sale.collected_amount = sum(
+                (Decimal(l.line_total) for l in sale.lines), Decimal("0.00")
+            )
+        if sale.collected_at is None:
+            sale.collected_at = datetime.now(timezone.utc)
+    else:
+        # Moving off `paid` clears the collection stamp so it can't imply money
+        # was taken. Keep any partial collected_amount the admin typed.
+        sale.collected_at = None
+
+    db.commit()
+    db.refresh(sale)
+    return sale
+
+
+def reopen_sale(db: Session, company_id: int, sale_id: int, *, target_status: str = "approved") -> Sale:
+    """Re-version a voided sale. The original pre-void status isn't retained, so
+    the caller chooses: `approved` (admin-entered) or `submitted` (back to the
+    review queue)."""
+    if target_status not in ("approved", "submitted"):
+        raise HTTPException(status_code=422, detail="Reopen target must be 'approved' or 'submitted'.")
+    sale = get_sale(db, company_id, sale_id)
+    if sale.status != "void":
+        raise HTTPException(status_code=409, detail="Only voided sales can be reopened.")
+    sale.status = target_status
+    sale.reviewed_by_user_id = None
+    sale.reviewed_at = None
+    db.commit()
+    db.refresh(sale)
     return sale
 
 
@@ -621,6 +787,7 @@ def sync_sales(
                 currency=item.currency,
                 source="mobile",
                 client_uuid=item.client_uuid,
+                payment_method=item.payment_method,
                 notes=item.notes,
                 lines=item.lines,
             )
@@ -650,7 +817,7 @@ def sync_sales(
 def list_pending_sales(db: Session, company_id: int) -> List[Sale]:
     return (
         db.query(Sale)
-        .options(joinedload(Sale.lines))
+        .options(*_sale_read_options())
         .filter(Sale.company_id == company_id, Sale.status == "submitted")
         .order_by(Sale.sold_at)
         .all()
@@ -682,6 +849,36 @@ def review_sale(
     db.commit()
     db.refresh(sale)
     return sale
+
+
+def review_sales_bulk(
+    db: Session,
+    company_id: int,
+    sale_ids: List[int],
+    decision: str,
+    reviewer_user_id: int,
+    notes: Optional[str] = None,
+) -> dict:
+    """Best-effort batch review. Each sale is committed on its own so one bad
+    id (e.g. already void, or another company) can't sink the whole batch."""
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=422, detail="decision must be 'approve' or 'reject'")
+    results: List[dict] = []
+    succeeded = 0
+    for sale_id in sale_ids:
+        try:
+            sale = review_sale(db, company_id, sale_id, decision, reviewer_user_id, notes)
+            succeeded += 1
+            results.append({"sale_id": sale_id, "ok": True, "status": sale.status})
+        except HTTPException as exc:
+            db.rollback()
+            results.append({"sale_id": sale_id, "ok": False, "detail": str(exc.detail)})
+    return {
+        "decision": decision,
+        "succeeded": succeeded,
+        "failed": len(sale_ids) - succeeded,
+        "results": results,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1197,3 +1394,253 @@ def reconcile_external_sales(db: Session, company_id: int, items: List, commit: 
         "created": created,
         "unmatched": unmatched,
     }
+
+
+# ---------------------------------------------------------------------------
+# Catalog editing & deletion
+#
+# Invariant (module docstring): a product/variant referenced by a sale line can
+# never be hard-deleted — we 409 and direct the caller to archive instead. Sale
+# history must stay reproducible (SaleLine snapshots prices and points at a
+# variant row).
+# ---------------------------------------------------------------------------
+
+
+def _variant_reference_count(db: Session, variant_id: int) -> int:
+    return db.query(SaleLine).filter(SaleLine.variant_id == variant_id).count()
+
+
+def update_category(
+    db: Session, company_id: int, category_id: int, payload: ProductCategoryUpdate
+) -> ProductCategory:
+    cat = (
+        db.query(ProductCategory)
+        .filter(ProductCategory.id == category_id, ProductCategory.company_id == company_id)
+        .one_or_none()
+    )
+    if cat is None:
+        raise HTTPException(status_code=404, detail=f"Category {category_id} not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    new_parent = data.get("parent_id", cat.parent_id)
+    if "parent_id" in data and data["parent_id"] is not None:
+        if data["parent_id"] == category_id:
+            raise HTTPException(status_code=400, detail="A category cannot be its own parent.")
+        parent = (
+            db.query(ProductCategory)
+            .filter(ProductCategory.id == data["parent_id"], ProductCategory.company_id == company_id)
+            .one_or_none()
+        )
+        if parent is None:
+            raise HTTPException(status_code=404, detail=f"Parent category {data['parent_id']} not found")
+        # Walk up the ancestor chain to reject cycles (A -> B -> A).
+        cur = parent
+        while cur is not None:
+            if cur.id == category_id:
+                raise HTTPException(status_code=400, detail="That would create a category cycle.")
+            cur = (
+                db.get(ProductCategory, cur.parent_id)
+                if cur.parent_id is not None
+                else None
+            )
+
+    old_name = cat.name
+    new_name = data.get("name")
+    if new_name and new_name != old_name:
+        clash = (
+            db.query(ProductCategory)
+            .filter(
+                ProductCategory.company_id == company_id,
+                ProductCategory.name == new_name,
+                ProductCategory.parent_id == new_parent,
+                ProductCategory.id != category_id,
+            )
+            .one_or_none()
+        )
+        if clash is not None:
+            raise HTTPException(status_code=409, detail=f"Category '{new_name}' already exists here.")
+
+    for field, value in data.items():
+        setattr(cat, field, value)
+
+    # Rename products' free-text tag in step so nothing goes missing.
+    if new_name and new_name != old_name:
+        db.query(Product).filter(
+            Product.company_id == company_id, Product.category == old_name
+        ).update({"category": new_name}, synchronize_session=False)
+
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+def delete_category(
+    db: Session, company_id: int, category_id: int, reassign_products_to: Optional[str] = None
+) -> dict:
+    cat = (
+        db.query(ProductCategory)
+        .filter(ProductCategory.id == category_id, ProductCategory.company_id == company_id)
+        .one_or_none()
+    )
+    if cat is None:
+        raise HTTPException(status_code=404, detail=f"Category {category_id} not found")
+
+    # Promote children to the deleted node's parent rather than nuking a subtree.
+    children = (
+        db.query(ProductCategory)
+        .filter(ProductCategory.company_id == company_id, ProductCategory.parent_id == category_id)
+        .update({"parent_id": cat.parent_id}, synchronize_session=False)
+    )
+    # Products tagged with this name are re-tagged (or cleared). Their plain
+    # string tag is independent of the tree, so we must fix it explicitly.
+    retagged = db.query(Product).filter(
+        Product.company_id == company_id, Product.category == cat.name
+    ).update({"category": reassign_products_to or None}, synchronize_session=False)
+
+    db.delete(cat)
+    db.commit()
+    return {
+        "deleted": category_id,
+        "reparented_children": int(children or 0),
+        "products_retagged": int(retagged or 0),
+    }
+
+
+def set_product_archived(
+    db: Session, company_id: int, product_id: int, archived: bool
+) -> Product:
+    product = get_product(db, company_id, product_id)
+    product.archived_at = _now() if archived else None
+    product.status = "discontinued" if archived else "active"
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+def delete_product(db: Session, company_id: int, product_id: int) -> None:
+    product = get_product(db, company_id, product_id)
+    variant_ids = [v.id for v in product.variants]
+    refs = (
+        db.query(SaleLine).filter(SaleLine.variant_id.in_(variant_ids)).count()
+        if variant_ids
+        else 0
+    )
+    if refs:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"'{product.name}' is used by {refs} sale line(s) and cannot be deleted. "
+                "Archive it instead to hide it from reps."
+            ),
+        )
+    db.delete(product)  # cascades variants + their option-value links
+    db.commit()
+
+
+def update_variant(
+    db: Session, company_id: int, variant_id: int, payload: VariantUpdate
+) -> ProductVariant:
+    variant = get_variant(db, company_id, variant_id)
+    data = payload.model_dump(exclude_unset=True)
+
+    new_sku = data.get("sku")
+    if new_sku and new_sku != variant.sku:
+        clash = (
+            db.query(ProductVariant)
+            .filter(
+                ProductVariant.product_id == variant.product_id,
+                ProductVariant.sku == new_sku,
+                ProductVariant.id != variant_id,
+            )
+            .one_or_none()
+        )
+        if clash is not None:
+            raise HTTPException(status_code=409, detail=f"SKU '{new_sku}' already exists for this product.")
+
+    if data.get("sell_uom_id") is not None:
+        uom = (
+            db.query(UnitOfMeasure)
+            .filter(UnitOfMeasure.id == data["sell_uom_id"], UnitOfMeasure.company_id == company_id)
+            .one_or_none()
+        )
+        if uom is None:
+            raise HTTPException(status_code=404, detail=f"Unit of measure {data['sell_uom_id']} not found")
+
+    if data.get("is_default") is True:
+        db.query(ProductVariant).filter(
+            ProductVariant.product_id == variant.product_id, ProductVariant.id != variant_id
+        ).update({"is_default": False}, synchronize_session=False)
+
+    for field, value in data.items():
+        setattr(variant, field, value)
+    db.commit()
+    db.refresh(variant)
+    return variant
+
+
+def delete_variant(db: Session, company_id: int, variant_id: int) -> None:
+    variant = get_variant(db, company_id, variant_id)
+    refs = _variant_reference_count(db, variant_id)
+    if refs:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"SKU '{variant.sku}' is used by {refs} sale line(s) and cannot be deleted. "
+                "Archive it instead."
+            ),
+        )
+    remaining = (
+        db.query(ProductVariant)
+        .filter(ProductVariant.product_id == variant.product_id, ProductVariant.id != variant_id)
+        .count()
+    )
+    if remaining == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="A product must keep at least one variant — delete or archive the product instead.",
+        )
+    db.delete(variant)
+    db.commit()
+
+
+def set_outlet_archived(
+    db: Session, company_id: int, outlet_id: int, archived: bool
+) -> Outlet:
+    outlet = get_outlet(db, company_id, outlet_id)
+    outlet.archived_at = _now() if archived else None
+    outlet.status = "inactive" if archived else "active"
+    db.commit()
+    db.refresh(outlet)
+    return outlet
+
+
+def delete_outlet(db: Session, company_id: int, outlet_id: int) -> None:
+    outlet = get_outlet(db, company_id, outlet_id)
+    # sales.outlet_id is ON DELETE SET NULL — history survives, the link is dropped.
+    db.delete(outlet)
+    db.commit()
+
+
+def delete_option(db: Session, company_id: int, option_id: int) -> None:
+    option = (
+        db.query(ProductOption)
+        .filter(ProductOption.id == option_id, ProductOption.company_id == company_id)
+        .one_or_none()
+    )
+    if option is None:
+        raise HTTPException(status_code=404, detail=f"Option {option_id} not found")
+    db.delete(option)  # cascades values (and their variant links via FK)
+    db.commit()
+
+
+def delete_uom(db: Session, company_id: int, uom_id: int) -> None:
+    uom = (
+        db.query(UnitOfMeasure)
+        .filter(UnitOfMeasure.id == uom_id, UnitOfMeasure.company_id == company_id)
+        .one_or_none()
+    )
+    if uom is None:
+        raise HTTPException(status_code=404, detail=f"Unit of measure {uom_id} not found")
+    # variants.sell_uom_id / sale_lines.uom_id / base_uom_id all ON DELETE SET NULL.
+    db.delete(uom)
+    db.commit()

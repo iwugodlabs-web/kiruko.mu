@@ -37,6 +37,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import useAuth from '../hooks/useAuth';
+import useCurrency from '../hooks/useCurrency';
 import {
   isApiError,
   listCatalog,
@@ -55,6 +56,18 @@ interface DraftLine {
   quantity: string;
 }
 
+// Country-agnostic settlement methods. "Mobile money" is the generic bucket for
+// local wallets (M-Pesa, Orange Money, Juice, ...) — the specific wallet can go
+// in the notes. Must stay in step with PAYMENT_METHODS on the backend.
+const PAYMENT_METHODS: { value: string; label: string; icon: string }[] = [
+  { value: 'cash', label: 'Cash', icon: 'cash-outline' },
+  { value: 'card', label: 'Card', icon: 'card-outline' },
+  { value: 'mobile_money', label: 'Mobile money', icon: 'phone-portrait-outline' },
+  { value: 'bank_transfer', label: 'Bank transfer', icon: 'business-outline' },
+  { value: 'cheque', label: 'Cheque', icon: 'document-text-outline' },
+  { value: 'credit', label: 'Credit', icon: 'time-outline' },
+];
+
 function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -70,6 +83,7 @@ export default function NewFieldSaleScreen() {
   const router = useRouter();
   const toast = useToast();
   const { user } = useAuth();
+  const { baseCurrency } = useCurrency();
 
   const companyId = user?.private_user?.company_id ?? user?.company_id ?? null;
   const repId = user?.private_user?.private_user_id ?? (user?.private_user_id ? Number(user.private_user_id) : null);
@@ -84,6 +98,7 @@ export default function NewFieldSaleScreen() {
   const [visitDistance, setVisitDistance] = useState<number | null>(null);
 
   const [lines, setLines] = useState<DraftLine[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -208,6 +223,8 @@ export default function NewFieldSaleScreen() {
       outlet_id: selectedOutlet?.id ?? null,
       sold_at: new Date().toISOString(),
       geo: coords,
+      currency: baseCurrency || null,
+      payment_method: paymentMethod,
       notes: null,
       lines: validLines.map((l) => ({ variant_id: l.variant.id, quantity: Number(l.quantity) })),
     };
@@ -348,6 +365,34 @@ export default function NewFieldSaleScreen() {
           </HStack>
         )}
 
+        {/* Payment method */}
+        <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" mt="$5" mb="$2" ml="$1">
+          Payment
+        </Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4 }}>
+          {PAYMENT_METHODS.map((m) => {
+            const active = paymentMethod === m.value;
+            return (
+              <Pressable key={m.value} onPress={() => setPaymentMethod(m.value)}>
+                <HStack
+                  bg={active ? Palette.ink : 'white'}
+                  px="$3"
+                  py="$2"
+                  rounded="$full"
+                  space="xs"
+                  alignItems="center"
+                  style={{ borderWidth: 1, borderColor: active ? Palette.ink : Palette.gray100 }}
+                >
+                  <Ionicons name={m.icon as any} size={14} color={active ? 'white' : Palette.ink} />
+                  <Text color={active ? 'white' : Palette.ink} fontWeight="700" fontSize={Type.caption}>
+                    {m.label}
+                  </Text>
+                </HStack>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
         {/* Lines */}
         <HStack justifyContent="space-between" alignItems="center" mt="$5" mb="$2">
           <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" ml="$1">
@@ -441,7 +486,7 @@ export default function NewFieldSaleScreen() {
             Total
           </Text>
           <Text fontWeight="900" fontSize={20} color={Palette.ink}>
-            {lines[0]?.variant.currency ?? 'MUR'} {total.toFixed(2)}
+            {baseCurrency || lines[0]?.variant.currency || 'MUR'} {total.toFixed(2)}
           </Text>
         </HStack>
         <Button bg={Palette.ink} onPress={submit} isDisabled={submitting}>

@@ -7,14 +7,16 @@ import RoleGuard from "../../../components/RoleGuard";
 import CompanyDetails from "../../components/CompanyDetails";
 import SolarisBackground from "@/components/ui/SolarisBackground";
 import { getAdminCompanyById, Company } from "@/services/api";
+import type { CompanyModule } from "@/services/modules";
 import AdsEnabledToggle from "./AdsEnabledToggle";
+import ModuleToggles from "./ModuleToggles";
 import AdminEmployeesTab from "./components/AdminEmployeesTab";
 import AdminDepartmentsTab from "./components/AdminDepartmentsTab";
 import CompanyLifecycleControls from "./components/CompanyLifecycleControls";
 
-// The backend's /admin/companies/{id} endpoint now surfaces `ads_enabled`
-// (M9). The CompanySummary type doesn't declare it, so widen locally.
-type CompanyWithAds = Company & { ads_enabled?: boolean };
+// The backend's /admin/companies/{id} endpoint surfaces `ads_enabled` (M9) and
+// per-company `modules` entitlements. Neither is on the CompanySummary type.
+type CompanyWithAds = Company & { ads_enabled?: boolean; modules?: CompanyModule[] };
 
 type LifecycleStatus = "active" | "disabled" | "deleted";
 const TABS = ["details", "employees", "departments"] as const;
@@ -94,6 +96,7 @@ function CompanyDetailPage() {
   }
 
   const adsEnabled = (company as CompanyWithAds).ads_enabled ?? false;
+  const modules = (company as CompanyWithAds).modules ?? [];
   const status = (company.status ?? "active") as LifecycleStatus;
   const companyId = company.company_id;
 
@@ -136,6 +139,7 @@ function CompanyDetailPage() {
                 />
               )}
               <AdsEnabledToggle companyId={companyId} initial={adsEnabled} />
+              <ModuleToggles companyId={companyId} initial={modules} canManage={canEditCompany} />
             </div>
           </>
         )}

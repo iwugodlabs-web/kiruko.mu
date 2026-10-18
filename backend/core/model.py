@@ -2759,6 +2759,7 @@ class ProductVariant(Base):
 
     product = relationship("Product", back_populates="variants")
     option_values = relationship("ProductVariantOptionValue", cascade="all, delete-orphan")
+    sell_uom = relationship("UnitOfMeasure")
 
     __table_args__ = (
         UniqueConstraint("product_id", "sku", name="uq_variant_product_sku"),
@@ -2779,6 +2780,10 @@ class Sale(Base):
     sold_at = Column(DateTime(timezone=True), nullable=False)  # the business event — never synced_at
     status = Column(String(20), nullable=False, server_default="approved")  # draft|submitted|approved|rejected|void
     payment_status = Column(String(20), nullable=False, server_default="paid")  # paid|pending|partial (feeds on-collection)
+    # How the sale was settled (cash/card/bank_transfer/mobile_money/cheque/
+    # credit/other). Country-agnostic on purpose: "mobile_money" covers M-Pesa,
+    # Orange Money, Juice, etc. Null = unrecorded (legacy/admin rows).
+    payment_method = Column(String(30), nullable=True)
     collected_amount = Column(Numeric(14, 2), nullable=True)
     collected_at = Column(DateTime(timezone=True), nullable=True)
     currency = Column(String(3), nullable=False, server_default="MUR")
@@ -2825,6 +2830,27 @@ class SaleLine(Base):
 
     sale = relationship("Sale", back_populates="lines")
     variant = relationship("ProductVariant")
+
+    # Read-through helpers so SaleLineRead can show *what* was sold without the
+    # serializer needing a join. Null-safe: a line always has a variant (FK is
+    # RESTRICT), but guard anyway so a half-loaded object never raises.
+    @property
+    def product_id(self):
+        return self.variant.product_id if self.variant else None
+
+    @property
+    def product_name(self):
+        v = self.variant
+        return v.product.name if v and v.product else None
+
+    @property
+    def variant_sku(self):
+        return self.variant.sku if self.variant else None
+
+    @property
+    def uom(self):
+        v = self.variant
+        return v.sell_uom.code if v and v.sell_uom else None
 
 
 class SalesReturn(Base):
@@ -3222,4 +3248,32 @@ class CreditAssignment(Base):
     __table_args__ = (
         Index("ix_credit_assignments_company_outlet", "company_id", "outlet_id"),
         Index("ix_credit_assignments_company_territory", "company_id", "territory"),
+    )
+
+
+class CompanyModule(Base):
+    """Per-company feature entitlement (paid module activation).
+
+    One row per (company, module_key). The absence of a row means the module
+    sits at its registry default — OFF for paid modules (see `core/modules.py`).
+    Platform admins flip these to activate a paid service for a single company
+    without touching any other tenant. Kept as a table (not a Company column)
+    so we can grow past one module and keep an auditable enable/disable trail.
+    """
+    __tablename__ = "company_modules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    module_key = Column(String(64), nullable=False)
+    enabled = Column(Boolean, nullable=False, server_default=text("false"))
+    enabled_at = Column(DateTime(timezone=True), nullable=True)
+    disabled_at = Column(DateTime(timezone=True), nullable=True)
+    changed_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "module_key", name="uq_company_module"),
     )

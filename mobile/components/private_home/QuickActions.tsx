@@ -9,9 +9,11 @@ import {
   VStack
 } from '@gluestack-ui/themed';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Animated, { FadeIn } from '@/app/utils/animated';
 import { useTranslation } from 'react-i18next';
+import useAuth from '@/app/hooks/useAuth';
+import { isFieldSalesEnabled } from '@/api/fieldSales';
 
 interface QuickAction {
   id: string;
@@ -46,8 +48,33 @@ const QuickActions: React.FC<QuickActionsProps> = ({
 }) => {
   const router = useRouter();
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const companyId = user?.private_user?.company_id;
+
+  // Field Sales is a paid, per-company module. Show the shortcut unless the
+  // company is known to have it disabled (fail OPEN on lookup error).
+  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(true);
+  useEffect(() => {
+    if (!companyId) return;
+    isFieldSalesEnabled(companyId).then(setFieldSalesEnabled).catch(() => {});
+  }, [companyId]);
 
   const quickActions: QuickAction[] = [
+    ...(fieldSalesEnabled
+      ? [{
+          id: 'field-sales',
+          title: t('fieldSales.settingsRow', 'Field Sales'),
+          subtitle: t('fieldSales.settingsRowSubtitle', 'Log sales and track your commission'),
+          icon: 'point-of-sale',
+          route: '/private_dashboard/field_sales',
+          color: {
+            bg: '$amber50',
+            icon: Palette.gold,
+            text: '$amber700',
+            border: '$amber200',
+          },
+        } as QuickAction]
+      : []),
     {
       id: 'rights',
       title: t('privateHomeCards.actionRightsTitle'),

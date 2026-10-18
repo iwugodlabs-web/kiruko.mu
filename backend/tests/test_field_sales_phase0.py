@@ -327,7 +327,7 @@ def test_outlet_sync_verifies_visit_and_is_idempotent(db, sales_company):
 def test_submitted_sale_earns_only_after_approval(db, sales_company):
     from schema.field_sales_schema import SaleSyncItem
 
-    company, rep, _ = sales_company
+    company, rep, rep_user = sales_company
     product = crud.create_product(
         db, company.company_id,
         ProductCreate(
@@ -353,7 +353,7 @@ def test_submitted_sale_earns_only_after_approval(db, sales_company):
     run = engine.compute_run(db, company.company_id, PERIOD_START, PERIOD_END)
     assert run.payables == []
 
-    crud.review_sale(db, company.company_id, sale.id, "approve", reviewer_user_id=1)
+    crud.review_sale(db, company.company_id, sale.id, "approve", reviewer_user_id=rep_user.user_id)
     run = engine.compute_run(db, company.company_id, PERIOD_START, PERIOD_END)
     assert len(run.payables) == 1
     assert Decimal(run.payables[0].amount) == Decimal("100.00")  # 10 × 100 × 10%

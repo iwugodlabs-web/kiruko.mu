@@ -122,6 +122,7 @@ import {
 import SponsoredCard from "@/components/SponsoredCard";
 import { useSponsoredSlot } from "@/app/hooks/useSponsoredSlot";
 import { logClickAndResolveUrl } from "@/api/sponsored";
+import { isFieldSalesEnabled } from "@/api/fieldSales";
 import AdsConsentModal from "@/components/AdsConsentModal";
 import { Linking } from "react-native";
 import CurrencyIndicator from "@/components/private_home/CurrencyIndicator";
@@ -716,6 +717,21 @@ const Dashboard = () => {
   const [resolvedSalary, setResolvedSalary] = useState<ResolvedSalary | null>(null);
   const [assignedTasksData, setAssignedTasksData] = useState<Schedule[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
+
+  // Field Sales is a paid, per-company module. Show its quick-action tile
+  // unless the company is known to have it disabled (fail OPEN on lookup error).
+  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(true);
+  const homeCompanyId = user?.private_user?.company_id ?? null;
+  useEffect(() => {
+    if (!homeCompanyId) return;
+    let alive = true;
+    isFieldSalesEnabled(homeCompanyId).then((v) => {
+      if (alive) setFieldSalesEnabled(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [homeCompanyId]);
 
   // Use a secondary loading state to ensure we don't render content before data is ready
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
@@ -1989,6 +2005,7 @@ const Dashboard = () => {
                     { key: 'payslips', label: t('privateHome.payslips'), icon: 'payments', color: Palette.green, tint: Palette.greenTint, onPress: () => router.push('/private_dashboard/payslips') },
                     { key: 'documents', label: t('privateHome.documentVault'), icon: 'lock', color: Palette.teal, tint: Palette.tealTint, onPress: () => router.push('/private_dashboard/documents') },
                     { key: 'leave', label: t('privateHome.leaveRequest'), icon: 'event-available', color: Palette.gold, tint: Palette.goldTint, onPress: () => router.push('/private_dashboard/leave') },
+                    ...(fieldSalesEnabled ? [{ key: 'field-sales', label: t('fieldSales.settingsRow', 'Field Sales'), icon: 'point-of-sale', color: Palette.gold, tint: Palette.goldTint, onPress: () => router.push('/private_dashboard/field_sales') }] : []),
                   ].map((a) => (
                     <Pressable key={a.key} onPress={a.onPress} style={{ width: '31.5%', marginBottom: 12 }}>
                       <VStack

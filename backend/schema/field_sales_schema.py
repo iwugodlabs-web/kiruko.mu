@@ -10,7 +10,36 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+# How a sale was settled. `mobile_money` is the generic bucket for
+# country-specific wallets (M-Pesa, Orange Money, Juice, ...) — the specific
+# wallet goes in the sale notes so no migration is needed per country.
+PAYMENT_METHODS = ("cash", "card", "bank_transfer", "mobile_money", "cheque", "credit", "other")
+
+# Collection state (independent of the method).
+PAYMENT_STATUSES = ("pending", "partial", "paid")
+
+
+def _validate_payment_method(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if v == "":
+        return None
+    if v not in PAYMENT_METHODS:
+        raise ValueError(f"payment_method must be one of {', '.join(PAYMENT_METHODS)}")
+    return v
+
+
+def _validate_payment_status(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if v not in PAYMENT_STATUSES:
+        raise ValueError(f"payment_status must be one of {', '.join(PAYMENT_STATUSES)}")
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +117,7 @@ class SaleCreate(BaseModel):
     outlet_id: Optional[int] = None
     sold_at: datetime
     payment_status: Optional[str] = Field(default="paid")
+    payment_method: Optional[str] = Field(default=None, max_length=30)
     collected_amount: Optional[Decimal] = Field(default=None, ge=0)
     collected_at: Optional[datetime] = None
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
@@ -96,6 +126,45 @@ class SaleCreate(BaseModel):
     notes: Optional[str] = None
     lines: List[SaleLineCreate] = Field(min_length=1)
 
+    @field_validator("payment_status")
+    @classmethod
+    def _check_payment_status(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_payment_status(v)
+
+    @field_validator("payment_method")
+    @classmethod
+    def _check_payment_method(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_payment_method(v)
+
+
+class SaleUpdate(BaseModel):
+    """Admin edit of sale *attributes* — payment, outlet and notes. Line items
+    are intentionally immutable so an approved sale's commission math can never
+    silently change out from under a finalized period."""
+
+    payment_status: Optional[str] = None
+    payment_method: Optional[str] = Field(default=None, max_length=30)
+    collected_amount: Optional[Decimal] = Field(default=None, ge=0)
+    outlet_id: Optional[int] = None
+    notes: Optional[str] = None
+
+    @field_validator("payment_status")
+    @classmethod
+    def _check_payment_status(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_payment_status(v)
+
+    @field_validator("payment_method")
+    @classmethod
+    def _check_payment_method(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_payment_method(v)
+
+
+class SaleReopenRequest(BaseModel):
+    """Re-versions a voided sale. Defaults back to `approved`; a mobile sale
+    that was voided before review can be reopened to `submitted` instead."""
+
+    status: Optional[str] = Field(default="approved")
+
 
 class SaleLineRead(BaseModel):
     id: int
@@ -103,6 +172,13 @@ class SaleLineRead(BaseModel):
     quantity: Decimal
     unit_price_snapshot: Decimal
     line_total: Decimal
+    # Enriched so a receipt/list reads as "what was sold" without a second
+    # round-trip. Populated from the ORM relationships in crud.get_sale /
+    # list_sales (see SaleLine.product_name / variant_sku properties).
+    product_id: Optional[int] = None
+    product_name: Optional[str] = None
+    variant_sku: Optional[str] = None
+    uom: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -117,6 +193,7 @@ class SaleRead(BaseModel):
     sold_at: datetime
     status: str
     payment_status: str
+    payment_method: Optional[str] = None
     collected_amount: Optional[Decimal] = None
     collected_at: Optional[datetime] = None
     currency: str
@@ -356,8 +433,14 @@ class SaleSyncItem(BaseModel):
     sold_at: datetime
     geo: Optional[GeoPoint] = None
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    payment_method: Optional[str] = Field(default=None, max_length=30)
     notes: Optional[str] = None
     lines: List[SaleLineCreate] = Field(min_length=1)
+
+    @field_validator("payment_method")
+    @classmethod
+    def _check_payment_method(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_payment_method(v)
 
 
 class SaleSyncRequest(BaseModel):
@@ -383,6 +466,31 @@ class SaleReviewRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=500, description="Required when rejecting")
 
 
+class SaleBulkReviewRequest(BaseModel):
+    """Approve/reject a batch of submitted sales in one round-trip (month-end).
+
+    Best-effort: a sale that can't be reviewed (already void, wrong company) is
+    reported in `failed` rather than aborting the whole batch."""
+
+    sale_ids: List[int] = Field(min_length=1, max_length=500)
+    decision: str = Field(description="approve | reject")
+    notes: Optional[str] = Field(default=None, max_length=500, description="Required when rejecting")
+
+
+class SaleBulkReviewItemResult(BaseModel):
+    sale_id: int
+    ok: bool
+    status: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class SaleBulkReviewResult(BaseModel):
+    decision: str
+    succeeded: int
+    failed: int
+    results: List[SaleBulkReviewItemResult]
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 — full catalog, UoM, prices, targets, leaderboards
 # ---------------------------------------------------------------------------
@@ -390,6 +498,11 @@ class SaleReviewRequest(BaseModel):
 
 class ProductCategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    parent_id: Optional[int] = None
+
+
+class ProductCategoryUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     parent_id: Optional[int] = None
 
 
@@ -479,6 +592,16 @@ class VariantCreate(BaseModel):
     is_default: bool = False
     sell_uom_id: Optional[int] = None
     option_value_ids: List[int] = Field(default_factory=list)
+
+
+class VariantUpdate(BaseModel):
+    sku: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    barcode: Optional[str] = Field(default=None, max_length=64)
+    unit_price: Optional[Decimal] = Field(default=None, ge=0)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    is_default: Optional[bool] = None
+    sell_uom_id: Optional[int] = None
+    status: Optional[str] = None
 
 
 class SalesTargetCreate(BaseModel):

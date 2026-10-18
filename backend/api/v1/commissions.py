@@ -9,7 +9,8 @@ from datetime import datetime, time
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
 from core import config
@@ -38,6 +39,7 @@ from schema.field_sales_schema import (
     PlanAssignmentRead,
     ProductCategoryCreate,
     ProductCategoryRead,
+    ProductCategoryUpdate,
     ProductCreate,
     ProductOptionCreate,
     ProductOptionRead,
@@ -46,11 +48,15 @@ from schema.field_sales_schema import (
     ProductRead,
     ProductUpdate,
     ProductVariantRead,
+    SaleBulkReviewRequest,
+    SaleBulkReviewResult,
     SaleCreate,
     SaleRead,
+    SaleReopenRequest,
     SaleReviewRequest,
     SaleSyncRequest,
     SaleSyncResult,
+    SaleUpdate,
     SalesReturnCreate,
     SalesReturnRead,
     SalesTargetCreate,
@@ -58,11 +64,15 @@ from schema.field_sales_schema import (
     UnitOfMeasureCreate,
     UnitOfMeasureRead,
     VariantCreate,
+    VariantUpdate,
 )
 from services import commission_service as engine
+from services import product_import_service as product_imp
 
 
 router = APIRouter(tags=["Field Sales & Commissions"])
+
+MAX_IMPORT_BYTES = 5 * 1024 * 1024  # 5 MB — a catalog, not a data lake
 
 
 def _rep_scope_private_user_id(current_user: User, company_id: int, db: Session) -> Optional[int]:
@@ -122,6 +132,84 @@ def list_products(
     company=Depends(require_company_scope),
 ):
     return crud.list_products(db, company_id, include_archived=include_archived)
+
+
+# NOTE: the static import paths are declared *before* "/products/{product_id}"
+# so "import" can never be parsed as a product_id (FastAPI matches in order).
+@router.get("/companies/{company_id}/products/import/template")
+def download_product_import_template(
+    company_id: int,
+    company=Depends(require_company_scope),
+):
+    """Download the product-import CSV template (header + one example row)."""
+    return Response(
+        content=product_imp.template_csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="product_import_template.csv"'},
+    )
+
+
+@router.post("/companies/{company_id}/products/import")
+async def import_products(
+    company_id: int,
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True, description="true → validate + preview only (no writes); false → commit"),
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Upload a CSV/XLSX of products (one row per variant). dry_run=true returns
+    a validation preview without writing; dry_run=false creates the rows."""
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 5 MB).")
+
+    try:
+        rows = product_imp.parse(raw, file.filename or "upload.csv")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data rows found in the file.")
+
+    preview = product_imp.validate(db, company_id, rows)
+    if preview["missing_columns"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required columns: {', '.join(preview['missing_columns'])}",
+        )
+
+    if dry_run:
+        return {
+            "status": "preview",
+            "total": preview["total"],
+            "ready": len(preview["ok"]),
+            "products": preview["groups"],
+            "errors": preview["errors"],
+            "warnings": preview["warnings"],
+        }
+
+    summary = product_imp.commit(db, company_id, rows, actor_user_id=current_user.user_id)
+    db.commit()
+    create_audit_log(
+        db, current_user.user_id, "field_sales.product.bulk_import", "company", company_id,
+        {
+            "products_created": summary["created_products"],
+            "variants_created": summary["created_variants"],
+            "skipped": summary["skipped"],
+            "failed": len(summary["failed"]),
+        },
+        commit=True,
+    )
+    return {
+        "status": "imported",
+        "products_created": summary["created_products"],
+        "variants_created": summary["created_variants"],
+        "skipped": summary["skipped"],
+        "failed": summary["failed"],
+        "warnings": summary["warnings"],
+    }
 
 
 @router.get(
@@ -200,11 +288,18 @@ def create_sale(
     response_model=List[SaleRead],
 )
 def list_sales(
+    response: Response,
     company_id: int,
     period_start: Optional[str] = Query(None, description="ISO date; inclusive"),
     period_end: Optional[str] = Query(None, description="ISO date; inclusive"),
     rep_private_user_id: Optional[int] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
+    outlet_id: Optional[int] = Query(None),
+    payment_status: Optional[str] = Query(None),
+    payment_method: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, description="Free-text: product name/SKU/barcode or notes"),
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(config.get_db),
     company=Depends(require_company_scope),
 ):
@@ -215,14 +310,20 @@ def list_sales(
         d = _date.fromisoformat(value)
         return datetime.combine(d, time.max if end else time.min)
 
-    return crud.list_sales(
-        db,
-        company_id,
+    filters = dict(
         period_start=_parse(period_start, end=False),
         period_end=_parse(period_end, end=True),
         rep_private_user_id=rep_private_user_id,
         sale_status=status_filter,
+        outlet_id=outlet_id,
+        payment_status=payment_status,
+        payment_method=payment_method,
+        search=q,
     )
+    # Only pay for the COUNT when the caller is actually paging.
+    if limit is not None or offset:
+        response.headers["X-Total-Count"] = str(crud.count_sales(db, company_id, **filters))
+    return crud.list_sales(db, company_id, limit=limit, offset=offset, **filters)
 
 
 # NOTE: static "/sales/pending" MUST be declared before the dynamic
@@ -265,10 +366,73 @@ def void_sale(
     current_user: User = Depends(get_current_user),
     company=Depends(require_company_scope),
 ):
+    bound = _rep_scope_private_user_id(current_user, company_id, db)
+    if bound is not None:
+        existing = crud.get_sale(db, company_id, sale_id)
+        if existing.rep_private_user_id != bound:
+            raise HTTPException(status_code=403, detail="Reps may only void their own sales.")
+        if existing.status == "approved":
+            raise HTTPException(
+                status_code=403,
+                detail="An approved sale can only be voided by an admin.",
+            )
     sale = crud.void_sale(db, company_id, sale_id)
     create_audit_log(
         db, current_user.user_id, "field_sales.sale.void", "sale", sale.id,
         {"company_id": company_id}, commit=False,
+    )
+    db.commit()
+    return crud.get_sale(db, company_id, sale.id)
+
+
+@router.patch(
+    "/companies/{company_id}/sales/{sale_id}",
+    response_model=SaleRead,
+)
+def update_sale(
+    company_id: int,
+    sale_id: int,
+    payload: SaleUpdate,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Edit a sale's payment / outlet / notes. Line items are immutable so an
+    approved sale's commission math never silently changes."""
+    bound = _rep_scope_private_user_id(current_user, company_id, db)
+    if bound is not None and crud.get_sale(db, company_id, sale_id).rep_private_user_id != bound:
+        raise HTTPException(status_code=403, detail="Reps may only edit their own sales.")
+    sale = crud.update_sale(db, company_id, sale_id, payload)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.sale.update", "sale", sale.id,
+        {"company_id": company_id, "fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+        commit=False,
+    )
+    db.commit()
+    return crud.get_sale(db, company_id, sale.id)
+
+
+@router.post(
+    "/companies/{company_id}/sales/{sale_id}/reopen",
+    response_model=SaleRead,
+)
+def reopen_sale(
+    company_id: int,
+    sale_id: int,
+    payload: Optional[SaleReopenRequest] = None,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    # Reopening un-voids a sale (back to approved/submitted) — an admin decision,
+    # never a rep self-service action.
+    if _rep_scope_private_user_id(current_user, company_id, db) is not None:
+        raise HTTPException(status_code=403, detail="Only an admin can reopen a sale.")
+    target = (payload.status if payload else None) or "approved"
+    sale = crud.reopen_sale(db, company_id, sale_id, target_status=target)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.sale.reopen", "sale", sale.id,
+        {"company_id": company_id, "status": sale.status}, commit=False,
     )
     db.commit()
     return crud.get_sale(db, company_id, sale.id)
@@ -319,6 +483,35 @@ def review_sale(
     )
     db.commit()
     return crud.get_sale(db, company_id, sale.id)
+
+
+@router.post(
+    "/companies/{company_id}/sales/review-bulk",
+    response_model=SaleBulkReviewResult,
+)
+def review_sales_bulk(
+    company_id: int,
+    payload: SaleBulkReviewRequest,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Approve / reject many submitted sales at once (month-end). Best-effort:
+    per-sale outcomes come back in `results`; failures don't abort the batch."""
+    if payload.decision == "reject" and not payload.notes:
+        raise HTTPException(status_code=422, detail="A rejection reason (notes) is required.")
+    result = crud.review_sales_bulk(
+        db, company_id, payload.sale_ids, payload.decision, current_user.user_id, payload.notes
+    )
+    create_audit_log(
+        db, current_user.user_id, f"field_sales.sale.bulk_{payload.decision}", "sale", None,
+        {"company_id": company_id, "count": len(payload.sale_ids),
+         "succeeded": result["succeeded"], "failed": result["failed"],
+         "notes": payload.notes},
+        commit=False,
+    )
+    db.commit()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -390,10 +583,12 @@ def update_outlet(
     current_user: User = Depends(get_current_user),
     company=Depends(require_company_scope),
 ):
+    """Edit an outlet — notably its geofence coordinates, so a wrong lat/long
+    can be corrected instead of only re-created."""
     outlet = crud.update_outlet(db, company_id, outlet_id, payload)
     create_audit_log(
         db, current_user.user_id, "field_sales.outlet.update", "outlet", outlet.id,
-        {"company_id": company_id, "fields": list(payload.model_dump(exclude_unset=True))},
+        {"company_id": company_id, "fields": sorted(payload.model_dump(exclude_unset=True).keys())},
         commit=False,
     )
     db.commit()
@@ -974,3 +1169,227 @@ def _load_run(db: Session, company_id: int, run_id: int) -> CommissionRun:
     if run is None:
         raise HTTPException(status_code=404, detail=f"Commission run {run_id} not found")
     return run
+
+
+# ---------------------------------------------------------------------------
+# Catalog editing & deletion
+#
+# Products/outlets archive (reversible, keeps them out of reps' pickers); hard
+# DELETE is refused when a sale line references the row so history stays intact.
+# ---------------------------------------------------------------------------
+
+
+@router.patch(
+    "/companies/{company_id}/product-categories/{category_id}",
+    response_model=ProductCategoryRead,
+)
+def update_category(
+    company_id: int,
+    category_id: int,
+    payload: ProductCategoryUpdate,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    category = crud.update_category(db, company_id, category_id, payload)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.category.update", "product_category", category_id,
+        {"company_id": company_id, "fields": list(payload.model_dump(exclude_unset=True))},
+        commit=True,
+    )
+    return category
+
+
+@router.delete("/companies/{company_id}/product-categories/{category_id}")
+def delete_category(
+    company_id: int,
+    category_id: int,
+    reassign_to: Optional[str] = Query(
+        None, description="Rename products tagged with this category to this name (default: clear)."
+    ),
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    result = crud.delete_category(db, company_id, category_id, reassign_products_to=reassign_to)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.category.delete", "product_category", category_id,
+        {"company_id": company_id, "reassign_to": reassign_to}, commit=True,
+    )
+    return result
+
+
+@router.post(
+    "/companies/{company_id}/products/{product_id}/archive",
+    response_model=ProductRead,
+)
+def archive_product(
+    company_id: int,
+    product_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.set_product_archived(db, company_id, product_id, True)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.product.archive", "product", product_id,
+        {"company_id": company_id}, commit=True,
+    )
+    return crud.get_product(db, company_id, product_id)
+
+
+@router.post(
+    "/companies/{company_id}/products/{product_id}/unarchive",
+    response_model=ProductRead,
+)
+def unarchive_product(
+    company_id: int,
+    product_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.set_product_archived(db, company_id, product_id, False)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.product.unarchive", "product", product_id,
+        {"company_id": company_id}, commit=True,
+    )
+    return crud.get_product(db, company_id, product_id)
+
+
+@router.delete("/companies/{company_id}/products/{product_id}", status_code=204)
+def delete_product(
+    company_id: int,
+    product_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.delete_product(db, company_id, product_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.product.delete", "product", product_id,
+        {"company_id": company_id}, commit=True,
+    )
+
+
+@router.patch(
+    "/companies/{company_id}/products/{product_id}/variants/{variant_id}",
+    response_model=ProductVariantRead,
+)
+def update_variant(
+    company_id: int,
+    product_id: int,
+    variant_id: int,
+    payload: VariantUpdate,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.update_variant(db, company_id, variant_id, payload)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.variant.update", "product_variant", variant_id,
+        {"company_id": company_id, "fields": list(payload.model_dump(exclude_unset=True))},
+        commit=True,
+    )
+    return crud.get_variant(db, company_id, variant_id)
+
+
+@router.delete(
+    "/companies/{company_id}/products/{product_id}/variants/{variant_id}", status_code=204
+)
+def delete_variant(
+    company_id: int,
+    product_id: int,
+    variant_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.delete_variant(db, company_id, variant_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.variant.delete", "product_variant", variant_id,
+        {"company_id": company_id, "product_id": product_id}, commit=True,
+    )
+
+
+@router.post(
+    "/companies/{company_id}/outlets/{outlet_id}/archive",
+    response_model=OutletRead,
+)
+def archive_outlet(
+    company_id: int,
+    outlet_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    outlet = crud.set_outlet_archived(db, company_id, outlet_id, True)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.outlet.archive", "outlet", outlet_id,
+        {"company_id": company_id}, commit=True,
+    )
+    return outlet
+
+
+@router.post(
+    "/companies/{company_id}/outlets/{outlet_id}/unarchive",
+    response_model=OutletRead,
+)
+def unarchive_outlet(
+    company_id: int,
+    outlet_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    outlet = crud.set_outlet_archived(db, company_id, outlet_id, False)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.outlet.unarchive", "outlet", outlet_id,
+        {"company_id": company_id}, commit=True,
+    )
+    return outlet
+
+
+@router.delete("/companies/{company_id}/outlets/{outlet_id}", status_code=204)
+def delete_outlet(
+    company_id: int,
+    outlet_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.delete_outlet(db, company_id, outlet_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.outlet.delete", "outlet", outlet_id,
+        {"company_id": company_id}, commit=True,
+    )
+
+
+@router.delete("/companies/{company_id}/product-options/{option_id}", status_code=204)
+def delete_option(
+    company_id: int,
+    option_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.delete_option(db, company_id, option_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.option.delete", "product_option", option_id,
+        {"company_id": company_id}, commit=True,
+    )
+
+
+@router.delete("/companies/{company_id}/units-of-measure/{uom_id}", status_code=204)
+def delete_uom(
+    company_id: int,
+    uom_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    crud.delete_uom(db, company_id, uom_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.uom.delete", "unit_of_measure", uom_id,
+        {"company_id": company_id}, commit=True,
+    )

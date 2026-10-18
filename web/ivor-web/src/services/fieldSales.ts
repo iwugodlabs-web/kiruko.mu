@@ -20,6 +20,7 @@ export interface Product {
   id: number;
   company_id: number;
   name: string;
+  brand?: string | null;
   category?: string | null;
   status: string;
   variants: ProductVariant[];
@@ -59,6 +60,10 @@ export interface SaleLine {
   quantity: string;
   unit_price_snapshot: string;
   line_total: string;
+  product_id?: number | null;
+  product_name?: string | null;
+  variant_sku?: string | null;
+  uom?: string | null;
 }
 
 export interface Sale {
@@ -70,12 +75,16 @@ export interface Sale {
   sold_at: string;
   status: string;
   payment_status: string;
+  payment_method?: string | null;
   collected_amount?: string | null;
+  collected_at?: string | null;
   currency: string;
   source: string;
   client_uuid?: string | null;
   visit_verified?: boolean | null;
   visit_distance_m?: number | null;
+  reviewed_by_user_id?: number | null;
+  reviewed_at?: string | null;
   notes?: string | null;
   lines: SaleLine[];
 }
@@ -209,6 +218,15 @@ export async function createProduct(companyId: number, input: Record<string, unk
   return res.data;
 }
 
+export async function updateProduct(
+  companyId: number,
+  productId: number,
+  input: { name?: string; brand?: string | null; category?: string | null; status?: string },
+): Promise<Product> {
+  const res = await api.patch(`/companies/${companyId}/products/${productId}`, input);
+  return res.data;
+}
+
 export async function listCategories(companyId: number): Promise<ProductCategory[]> {
   const res = await api.get(`/companies/${companyId}/product-categories`);
   return res.data;
@@ -217,6 +235,40 @@ export async function listCategories(companyId: number): Promise<ProductCategory
 export async function createCategory(companyId: number, input: { name: string; parent_id?: number | null }): Promise<ProductCategory> {
   const res = await api.post(`/companies/${companyId}/product-categories`, input);
   return res.data;
+}
+
+export async function updateCategory(
+  companyId: number,
+  categoryId: number,
+  input: { name?: string; parent_id?: number | null },
+): Promise<ProductCategory> {
+  const res = await api.patch(`/companies/${companyId}/product-categories/${categoryId}`, input);
+  return res.data;
+}
+
+export async function deleteCategory(
+  companyId: number,
+  categoryId: number,
+  reassignTo?: string | null,
+): Promise<{ deleted: number; reparented_children: number; products_retagged: number }> {
+  const res = await api.delete(`/companies/${companyId}/product-categories/${categoryId}`, {
+    params: reassignTo ? { reassign_to: reassignTo } : undefined,
+  });
+  return res.data;
+}
+
+export async function archiveProduct(companyId: number, productId: number, archived: boolean): Promise<Product> {
+  const action = archived ? "archive" : "unarchive";
+  const res = await api.post(`/companies/${companyId}/products/${productId}/${action}`);
+  return res.data;
+}
+
+export async function deleteProduct(companyId: number, productId: number): Promise<void> {
+  await api.delete(`/companies/${companyId}/products/${productId}`);
+}
+
+export async function deleteUom(companyId: number, uomId: number): Promise<void> {
+  await api.delete(`/companies/${companyId}/units-of-measure/${uomId}`);
 }
 
 export async function listUoms(companyId: number): Promise<UnitOfMeasure[]> {
@@ -232,6 +284,28 @@ export async function createUom(companyId: number, input: Record<string, unknown
 export async function createVariant(companyId: number, productId: number, input: Record<string, unknown>): Promise<ProductVariant> {
   const res = await api.post(`/companies/${companyId}/products/${productId}/variants`, input);
   return res.data;
+}
+
+export async function updateVariant(
+  companyId: number,
+  productId: number,
+  variantId: number,
+  input: {
+    sku?: string;
+    barcode?: string | null;
+    unit_price?: string;
+    currency?: string;
+    is_default?: boolean;
+    sell_uom_id?: number | null;
+    status?: string;
+  },
+): Promise<ProductVariant> {
+  const res = await api.patch(`/companies/${companyId}/products/${productId}/variants/${variantId}`, input);
+  return res.data;
+}
+
+export async function deleteVariant(companyId: number, productId: number, variantId: number): Promise<void> {
+  await api.delete(`/companies/${companyId}/products/${productId}/variants/${variantId}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -250,20 +324,131 @@ export async function createOutlet(companyId: number, input: Record<string, unkn
   return res.data;
 }
 
+export async function updateOutlet(
+  companyId: number,
+  outletId: number,
+  input: Record<string, unknown>,
+): Promise<Outlet> {
+  const res = await api.patch(`/companies/${companyId}/outlets/${outletId}`, input);
+  return res.data;
+}
+
+export async function archiveOutlet(companyId: number, outletId: number, archived: boolean): Promise<Outlet> {
+  const action = archived ? "archive" : "unarchive";
+  const res = await api.post(`/companies/${companyId}/outlets/${outletId}/${action}`);
+  return res.data;
+}
+
+export async function deleteOutlet(companyId: number, outletId: number): Promise<void> {
+  await api.delete(`/companies/${companyId}/outlets/${outletId}`);
+}
+
 // ---------------------------------------------------------------------------
 // Sales
 // ---------------------------------------------------------------------------
 
-export async function listSales(
-  companyId: number,
-  opts?: { period_start?: string; period_end?: string; rep_private_user_id?: number; status?: string },
-): Promise<Sale[]> {
+export interface SaleListFilters {
+  period_start?: string;
+  period_end?: string;
+  rep_private_user_id?: number;
+  status?: string;
+  outlet_id?: number;
+  payment_status?: string;
+  payment_method?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listSales(companyId: number, opts?: SaleListFilters): Promise<Sale[]> {
   const res = await api.get(`/companies/${companyId}/sales`, { params: opts });
+  return res.data;
+}
+
+// Server-side paged variant: uses the X-Total-Count header the backend sets
+// when limit/offset is present so the pager can show "x–y of n".
+export async function pageSales(
+  companyId: number,
+  opts: SaleListFilters,
+): Promise<{ items: Sale[]; total: number }> {
+  const res = await api.get(`/companies/${companyId}/sales`, { params: opts });
+  const total = Number(res.headers["x-total-count"] ?? res.data.length);
+  return { items: res.data, total };
+}
+
+export async function createSale(
+  companyId: number,
+  input: {
+    rep_private_user_id: number;
+    credited_to_private_user_id?: number | null;
+    outlet_id?: number | null;
+    sold_at: string;
+    payment_status?: string;
+    payment_method?: string | null;
+    collected_amount?: number | null;
+    currency?: string;
+    notes?: string | null;
+    lines: Array<{ variant_id: number; quantity: number; unit_price?: number }>;
+  },
+): Promise<Sale> {
+  const res = await api.post(`/companies/${companyId}/sales`, input);
+  return res.data;
+}
+
+export interface SaleBulkReviewResult {
+  decision: string;
+  succeeded: number;
+  failed: number;
+  results: Array<{ sale_id: number; ok: boolean; status?: string | null; detail?: string | null }>;
+}
+
+export async function bulkReviewSales(
+  companyId: number,
+  saleIds: number[],
+  decision: "approve" | "reject",
+  notes?: string,
+): Promise<SaleBulkReviewResult> {
+  const res = await api.post(`/companies/${companyId}/sales/review-bulk`, {
+    sale_ids: saleIds,
+    decision,
+    notes,
+  });
   return res.data;
 }
 
 export async function listPendingSales(companyId: number): Promise<Sale[]> {
   const res = await api.get(`/companies/${companyId}/sales/pending`);
+  return res.data;
+}
+
+export async function getSale(companyId: number, saleId: number): Promise<Sale> {
+  const res = await api.get(`/companies/${companyId}/sales/${saleId}`);
+  return res.data;
+}
+
+export interface SaleUpdateInput {
+  payment_status?: string;
+  payment_method?: string | null;
+  collected_amount?: number | null;
+  outlet_id?: number | null;
+  notes?: string | null;
+}
+
+export async function updateSale(
+  companyId: number,
+  saleId: number,
+  input: SaleUpdateInput,
+): Promise<Sale> {
+  const res = await api.patch(`/companies/${companyId}/sales/${saleId}`, input);
+  return res.data;
+}
+
+export async function reopenSale(
+  companyId: number,
+  saleId: number,
+  status: "approved" | "submitted" = "approved",
+): Promise<Sale> {
+  const res = await api.post(`/companies/${companyId}/sales/${saleId}/reopen`, { status });
   return res.data;
 }
 
@@ -388,5 +573,78 @@ export async function createCreditAssignment(companyId: number, input: Record<st
 
 export async function createClawback(companyId: number, input: Record<string, unknown>): Promise<Record<string, unknown>> {
   const res = await api.post(`/companies/${companyId}/commission-clawbacks`, input);
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Returns / credit-notes
+// ---------------------------------------------------------------------------
+
+export interface SalesReturnLine {
+  id: number;
+  sale_line_id: number;
+  variant_id: number;
+  quantity: string;
+  unit_price_snapshot: string;
+  line_total: string;
+}
+
+export interface SalesReturn {
+  id: number;
+  company_id: number;
+  sale_id: number;
+  returned_at: string;
+  reason?: string | null;
+  currency: string;
+  lines: SalesReturnLine[];
+}
+
+export async function createSalesReturn(
+  companyId: number,
+  input: {
+    sale_id: number;
+    returned_at: string;
+    reason?: string | null;
+    lines: Array<{ sale_line_id: number; quantity: number }>;
+  },
+): Promise<SalesReturn> {
+  const res = await api.post(`/companies/${companyId}/sales-returns`, input);
+  return res.data;
+}
+
+export async function listSalesReturns(companyId: number, saleId?: number): Promise<SalesReturn[]> {
+  const res = await api.get(`/companies/${companyId}/sales-returns`, {
+    params: saleId ? { sale_id: saleId } : undefined,
+  });
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// ERP reconcile
+// ---------------------------------------------------------------------------
+
+export interface ErpReconcileItem {
+  external_id: string;
+  sku: string;
+  quantity: number;
+  sold_at: string;
+  rep_private_user_id?: number | null;
+}
+
+export interface ErpReconcileResult {
+  received: number;
+  new: number;
+  duplicates: number;
+  unmatched_sku: number;
+  created: number;
+  unmatched: Array<Record<string, unknown>>;
+}
+
+export async function erpReconcile(
+  companyId: number,
+  items: ErpReconcileItem[],
+  commit = false,
+): Promise<ErpReconcileResult> {
+  const res = await api.post(`/companies/${companyId}/sales/erp-reconcile`, { items, commit });
   return res.data;
 }

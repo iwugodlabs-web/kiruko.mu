@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Target, UserPlus } from "lucide-react";
+import { Plus, Trash2, Loader2, Target, UserPlus, Wand2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchCompanyUsers, type User } from "@/services/api";
 import {
@@ -13,6 +13,9 @@ import {
   type CommissionPlan,
   type PlanAssignment,
 } from "@/services/fieldSales";
+import EmptyState from "@/components/ui/EmptyState";
+import Hint from "./Hint";
+import type { NavigateTab } from "./types";
 
 interface RuleDraft {
   rule_type: string;
@@ -37,12 +40,56 @@ const EMPTY_RULE: RuleDraft = {
 };
 
 const RULE_TYPES = [
-  { value: "flat_percent", label: "Flat % of sale" },
-  { value: "per_unit", label: "Per unit" },
-  { value: "spiff", label: "Spiff (time-boxed)" },
-  { value: "tiered", label: "Tiered bands" },
-  { value: "target", label: "Target / quota" },
-  { value: "team_override", label: "Team override (manager)" },
+  { value: "flat_percent", label: "Flat % of sale", desc: "A percentage of each sale's value." },
+  { value: "per_unit", label: "Per unit", desc: "A fixed amount for every unit sold." },
+  { value: "spiff", label: "Spiff (time-boxed)", desc: "A temporary bonus that stops on an end date." },
+  { value: "tiered", label: "Tiered bands", desc: "Rate changes as volume grows (bands on units)." },
+  { value: "target", label: "Target / quota", desc: "Paid only if the rep hits a target level." },
+  { value: "team_override", label: "Team override (manager)", desc: "A manager earns a share of their team's commission." },
+];
+
+function ruleHelp(r: RuleDraft): string {
+  switch (r.rule_type) {
+    case "flat_percent":
+      return `Rep earns ${r.percent || "?"}% of every sale's value.`;
+    case "per_unit":
+      return `Rep earns Rs ${r.amount || r.percent || "?"} for each unit sold.`;
+    case "spiff":
+      return r.amount
+        ? `One-off Rs ${r.amount} per sale${r.effective_to ? ` until ${r.effective_to}` : " (set an end date!)"}.`
+        : `One-off ${r.percent || "?"}% of the sale${r.effective_to ? ` until ${r.effective_to}` : " (set an end date!)"}.`;
+    case "tiered":
+      return "The rate steps up once the rep passes each band's unit threshold.";
+    case "target":
+      return `Rep earns ${r.percent || "?"}% only once they reach ${r.attainment_pct || "?"}% of their ${r.metric} target.`;
+    case "team_override":
+      return `Manager earns ${r.percent || "?"}% of the commission their team members earn.`;
+    default:
+      return "";
+  }
+}
+
+const TEMPLATES: Array<{ name: string; blurb: string; draft: () => RuleDraft }> = [
+  {
+    name: "Simple 3%",
+    blurb: "Everyone earns 3% of every sale.",
+    draft: () => ({ ...EMPTY_RULE, rule_type: "flat_percent", percent: "3" }),
+  },
+  {
+    name: "Rs 20 / unit",
+    blurb: "Fixed amount per unit sold.",
+    draft: () => ({ ...EMPTY_RULE, rule_type: "per_unit", amount: "20" }),
+  },
+  {
+    name: "Tiered 3% → 5%",
+    blurb: "3% up to 100 units, then 5%.",
+    draft: () => ({ ...EMPTY_RULE, rule_type: "tiered" }),
+  },
+  {
+    name: "Manager 10% override",
+    blurb: "Manager earns 10% of their team's commission.",
+    draft: () => ({ ...EMPTY_RULE, rule_type: "team_override", percent: "10" }),
+  },
 ];
 
 function buildParams(r: RuleDraft): Record<string, unknown> {
@@ -64,7 +111,7 @@ function buildParams(r: RuleDraft): Record<string, unknown> {
   }
 }
 
-export default function PlansTab() {
+export default function PlansTab({ onNavigate }: { onNavigate: NavigateTab }) {
   const { companyId } = useAuth();
   const [plans, setPlans] = useState<CommissionPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -117,7 +164,7 @@ export default function PlansTab() {
         trigger: draft.trigger,
         rules,
       });
-      toast.success("Plan created.");
+      toast.success("Plan created — now assign it to reps so it starts paying.");
       setDraft({ name: "", description: "", trigger: "sale", rules: [EMPTY_RULE] });
       load();
     } catch (e: unknown) {
@@ -171,6 +218,44 @@ export default function PlansTab() {
         <h2 className="font-display text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
           <Target className="h-4 w-4" /> New plan
         </h2>
+
+        <Hint
+          title="A plan decides how reps get paid"
+          className="mb-4"
+          action={
+            <button
+              type="button"
+              onClick={() => onNavigate("sales")}
+              className="whitespace-nowrap rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300"
+            >
+              Next: Sales →
+            </button>
+          }
+        >
+          A plan is one or more <strong>rules</strong>. When a sale is approved, every matching rule
+          adds to the rep&apos;s commission. Create a plan here, then{" "}
+          <strong>assign it to reps</strong> on the right — a plan that isn&apos;t assigned pays nobody.
+        </Hint>
+
+        <div className="mb-4">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <Wand2 className="h-3.5 w-3.5" /> Start from a template
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {TEMPLATES.map((t) => (
+              <button
+                key={t.name}
+                type="button"
+                title={t.blurb}
+                onClick={() => setDraft((d) => ({ ...d, rules: [t.draft()] }))}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800/60"
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="space-y-3">
           <input
             placeholder="Plan name"
@@ -215,6 +300,9 @@ export default function PlansTab() {
                     </button>
                   )}
                 </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {RULE_TYPES.find((t) => t.value === r.rule_type)?.desc}
+                </p>
 
                 {(r.rule_type === "flat_percent" || r.rule_type === "target" || r.rule_type === "team_override") && (
                   <div className="flex gap-2">
@@ -279,20 +367,30 @@ export default function PlansTab() {
                 )}
 
                 {r.rule_type === "tiered" && (
-                  <textarea
-                    value={r.bands}
-                    onChange={(e) => updateRule(i, { bands: e.target.value })}
-                    rows={2}
-                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-2 py-1.5 text-xs font-mono"
-                  />
+                  <div className="space-y-1">
+                    <textarea
+                      value={r.bands}
+                      onChange={(e) => updateRule(i, { bands: e.target.value })}
+                      rows={2}
+                      className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-2 py-1.5 text-xs font-mono"
+                    />
+                    <p className="text-[11px] text-gray-400">
+                      JSON bands: <code>{`[{"up_to_units":100,"percent":"3"},{"percent":"5"}]`}</code> — the
+                      final band with no <code>up_to_units</code> catches everything above.
+                    </p>
+                  </div>
                 )}
 
                 <input
-                  placeholder="Scope category (optional)"
+                  placeholder="Limit to a category (optional)"
                   value={r.scope_category}
                   onChange={(e) => updateRule(i, { scope_category: e.target.value })}
                   className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-2 py-1.5 text-xs"
                 />
+
+                <p className="rounded-md bg-gray-50 px-2 py-1.5 text-[11px] text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
+                  {ruleHelp(r)}
+                </p>
               </div>
             ))}
           </div>
@@ -318,7 +416,11 @@ export default function PlansTab() {
         {loading ? (
           <div className="py-8 text-center text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin inline" /></div>
         ) : plans.length === 0 ? (
-          <div className="py-8 text-center text-sm text-gray-500">No plans yet.</div>
+          <EmptyState
+            icon={Target}
+            title="No plans yet"
+            description="Create your first plan on the left — pick a template to start fast, then assign it to reps so it starts paying."
+          />
         ) : (
           <ul className="space-y-3">
             {plans.map((p) => (
@@ -353,6 +455,10 @@ export default function PlansTab() {
               <span className="text-sm font-medium">Assign “{assignFor.name}”</span>
               <button onClick={() => setAssignFor(null)} className="text-xs text-gray-400">Close</button>
             </div>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Pick a rep and (optionally) a start date. The plan applies to their sales from that
+              date onward.
+            </p>
             <div className="flex flex-wrap gap-2">
               <select
                 value={assignRep}

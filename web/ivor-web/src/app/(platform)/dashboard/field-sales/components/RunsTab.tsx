@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Play, CheckCircle2, Upload, FileText, RefreshCcw, X } from "lucide-react";
+import { Loader2, Play, CheckCircle2, Upload, FileText, RefreshCcw, X, ReceiptText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   listRuns,
@@ -14,6 +14,11 @@ import {
   type CommissionRunSummary,
   type CommissionRun,
 } from "@/services/fieldSales";
+import { fetchCompanyUsers, type User } from "@/services/api";
+import EmptyState from "@/components/ui/EmptyState";
+import Hint from "./Hint";
+import AdjustmentsPanel from "./AdjustmentsPanel";
+import type { NavigateTab } from "./types";
 
 function monthBounds(d = new Date()): { start: string; end: string } {
   const start = new Date(d.getFullYear(), d.getMonth(), 1);
@@ -29,7 +34,7 @@ const STATUS_STYLES: Record<string, string> = {
   closed: "bg-gray-100 text-gray-600 border-gray-200",
 };
 
-export default function RunsTab() {
+export default function RunsTab({ onNavigate }: { onNavigate: NavigateTab }) {
   const { companyId } = useAuth();
   const [runs, setRuns] = useState<CommissionRunSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -37,6 +42,7 @@ export default function RunsTab() {
   const [computing, setComputing] = useState(false);
   const [detail, setDetail] = useState<CommissionRun | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reps, setReps] = useState<User[]>([]);
 
   async function load() {
     if (!companyId) return;
@@ -52,6 +58,11 @@ export default function RunsTab() {
 
   useEffect(() => {
     load();
+    if (companyId) {
+      fetchCompanyUsers(companyId)
+        .then((u) => { if (Array.isArray(u)) setReps(u); })
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
@@ -116,6 +127,12 @@ export default function RunsTab() {
 
   return (
     <div className="space-y-6">
+      <Hint title="Three steps: compute → approve → push to payroll">
+        Computing works out what each rep earned from this period&apos;s approved sales. Nothing is
+        paid yet — review the run, <strong>approve</strong> it, then <strong>push to payroll</strong>.
+        Only then does the commission land on the next payslip. Nothing is final until you push.
+      </Hint>
+
       <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl p-5">
         <h2 className="font-display text-lg font-semibold text-gray-900 dark:text-white mb-4">Compute a run</h2>
         <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +170,13 @@ export default function RunsTab() {
         {loading ? (
           <div className="py-8 text-center text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin inline" /></div>
         ) : runs.length === 0 ? (
-          <div className="py-8 text-center text-sm text-gray-500">No runs yet.</div>
+          <EmptyState
+            icon={ReceiptText}
+            title="No commission runs yet"
+            description="Pick a period above and hit Compute to work out what reps earned. You can review everything before anything reaches a payslip."
+            actionLabel="Review approved sales"
+            onAction={() => onNavigate("sales")}
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -226,6 +249,15 @@ export default function RunsTab() {
               </button>
             </div>
 
+            <p className="mb-5 text-xs text-gray-500 dark:text-gray-400">
+              {detail.status === "draft" &&
+                "This run is a draft. Check the amounts, then Approve to lock it in."}
+              {detail.status === "approved" &&
+                "Approved. Push to payroll to add these amounts to the reps' next payslip."}
+              {detail.status === "pushed" &&
+                "Pushed to payroll — these amounts are now on the reps' payslips. Download a statement per rep below."}
+            </p>
+
             <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Line items</h4>
             <div className="mb-5 divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-100 dark:border-gray-800">
               {detail.line_items.map((li) => (
@@ -269,6 +301,8 @@ export default function RunsTab() {
           </div>
         </div>
       )}
+
+      {companyId && <AdjustmentsPanel companyId={companyId} reps={reps} />}
     </div>
   );
 }

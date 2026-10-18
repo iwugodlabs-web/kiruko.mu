@@ -8,9 +8,9 @@
 
 import { Palette, Type } from '@/app/constants/theme';
 import { PremiumHeader } from '@/components/PremiumHeader';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, Alert, Modal as RNModal, RefreshControl, TextInput, TouchableOpacity } from 'react-native';
 import { Box, HStack, Pressable, ScrollView, Text, VStack } from '@gluestack-ui/themed';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,11 +19,25 @@ import useCurrency from '../hooks/useCurrency';
 import {
   getLeaderboard,
   isApiError,
+  isFieldSalesEnabled,
   listMySales,
+  updateSale,
+  voidSale,
   type RepSale,
 } from '@/api/fieldSales';
-import { salesQueueStore } from '@/services/offline/salesQueue';
+import { salesQueueStore, type QueuedSale } from '@/services/offline/salesQueue';
 import { salesSyncWorker } from '@/services/offline/salesSync';
+
+// Country-agnostic settlement methods — mirrors the backend PAYMENT_METHODS.
+const PAYMENT_METHODS: { value: string; label: string; icon: string }[] = [
+  { value: 'cash', label: 'Cash', icon: 'cash-outline' },
+  { value: 'card', label: 'Card', icon: 'card-outline' },
+  { value: 'mobile_money', label: 'Mobile money', icon: 'phone-portrait-outline' },
+  { value: 'bank_transfer', label: 'Bank transfer', icon: 'business-outline' },
+  { value: 'cheque', label: 'Cheque', icon: 'document-text-outline' },
+  { value: 'credit', label: 'Credit', icon: 'time-outline' },
+  { value: 'other', label: 'Other', icon: 'ellipsis-horizontal-outline' },
+];
 
 function monthBounds(): { start: string; end: string } {
   const now = new Date();
@@ -41,16 +55,40 @@ export default function FieldSalesScreen() {
   const repId = user?.private_user?.private_user_id ?? (user?.private_user_id ? Number(user.private_user_id) : null);
 
   const [sales, setSales] = useState<RepSale[]>([]);
+  const [queued, setQueued] = useState<QueuedSale[]>([]);
   const [pending, setPending] = useState(0);
   const [myCommission, setMyCommission] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [editing, setEditing] = useState<RepSale | null>(null);
+  const [editMethod, setEditMethod] = useState<string>('cash');
+  const [editNotes, setEditNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  // null = unknown (still checking); the entry is normally already hidden by
+  // Settings, this is a defence-in-depth guard if the screen is reached anyway.
+  const [moduleEnabled, setModuleEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!companyId) return;
+    let alive = true;
+    isFieldSalesEnabled(companyId).then((v) => {
+      if (alive) setModuleEnabled(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [companyId]);
 
   const load = useCallback(async () => {
+    if (moduleEnabled === false) {
+      setLoading(false);
+      return;
+    }
     if (!companyId || !repId) {
       setLoading(false);
       return;
     }
+    setQueued(await salesQueueStore.listPending());
     setPending(await salesQueueStore.count());
     const [salesRes, boardRes] = await Promise.all([
       listMySales(companyId, repId),
@@ -62,14 +100,20 @@ export default function FieldSalesScreen() {
       setMyCommission(mine ? mine.amount : '0.00');
     }
     setLoading(false);
-  }, [companyId, repId]);
+  }, [companyId, repId, moduleEnabled]);
 
   useEffect(() => {
     salesSyncWorker.register(companyId);
-    const unsub = salesSyncWorker.onChange(({ pending: p }) => setPending(p));
-    load();
-    return unsub;
-  }, [companyId, load]);
+    return salesSyncWorker.onChange(({ pending: p }) => setPending(p));
+  }, [companyId]);
+
+  // Reload every time the screen regains focus so a sale captured on the
+  // "Log a sale" screen shows up immediately on return.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -85,6 +129,93 @@ export default function FieldSalesScreen() {
     }
     await load();
   };
+
+  const discardQueued = useCallback((q: QueuedSale) => {
+    Alert.alert(
+      'Discard this sale?',
+      'It was captured offline and hasn’t reached the server. Discarding removes it for good — log it again if needed.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: async () => {
+            await salesQueueStore.markSynced(q.id);
+            await load();
+          },
+        },
+      ],
+    );
+  }, [load]);
+
+  const confirmVoid = useCallback((s: RepSale) => {
+    Alert.alert(
+      'Void this sale?',
+      'A voided sale no longer counts toward your commission. Use this when a line was wrong — you can log the corrected sale right after.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Void',
+          style: 'destructive',
+          onPress: async () => {
+            if (!companyId) return;
+            const res = await voidSale(companyId, s.id);
+            if (isApiError(res)) {
+              Alert.alert('Could not void', res.error);
+              return;
+            }
+            await load();
+          },
+        },
+      ],
+    );
+  }, [companyId, load]);
+
+  const openEdit = useCallback((s: RepSale) => {
+    setEditing(s);
+    setEditMethod(s.payment_method ?? 'cash');
+    setEditNotes(s.notes ?? '');
+  }, []);
+
+  const saveEdit = useCallback(async () => {
+    if (!companyId || !editing) return;
+    setSaving(true);
+    const res = await updateSale(companyId, editing.id, {
+      payment_method: editMethod || null,
+      notes: editNotes.trim() || null,
+    });
+    setSaving(false);
+    if (isApiError(res)) {
+      Alert.alert('Could not save', res.error);
+      return;
+    }
+    setEditing(null);
+    await load();
+  }, [companyId, editing, editMethod, editNotes, load]);
+
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const monthSales = sales.filter((s) => s.sold_at?.slice(0, 7) === monthKey);
+  const monthTotal = monthSales.reduce(
+    (acc, s) => acc + s.lines.reduce((a, l) => a + Number(l.line_total), 0),
+    0,
+  );
+
+  if (moduleEnabled === false) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: Palette.gray50 }}>
+        <PremiumHeader title="Field Sales" />
+        <Box flex={1} alignItems="center" justifyContent="center" p="$8">
+          <Ionicons name="lock-closed-outline" size={36} color={Palette.gray300} />
+          <Text fontWeight="800" color={Palette.ink} mt="$3">
+            Field Sales isn&apos;t enabled
+          </Text>
+          <Text color={Palette.gray500} textAlign="center" mt="$1" fontSize={Type.caption}>
+            Ask your employer to switch on Field Sales for your company.
+          </Text>
+        </Box>
+      </SafeAreaView>
+    );
+  }
 
   if (!companyId || !repId) {
     return (
@@ -119,22 +250,86 @@ export default function FieldSalesScreen() {
           </Text>
         </Box>
 
-        {/* Sync status */}
-        {pending > 0 && (
-          <Pressable onPress={retrySync}>
-            <HStack bg={Palette.warningTint} p="$4" rounded="$xl" mb="$3" alignItems="center" space="md">
+        {/* This month's own sales */}
+        <HStack space="sm" mb="$3">
+          <Box flex={1} bg="white" p="$4" rounded="$xl" style={{ borderWidth: 1, borderColor: Palette.gray100 }}>
+            <Text fontSize={Type.tiny} color={Palette.gray500} fontWeight="700" textTransform="uppercase">
+              Sales this month
+            </Text>
+            <Text fontSize={20} fontWeight="900" color={Palette.ink} mt="$1">
+              {monthSales.length}
+            </Text>
+          </Box>
+          <Box flex={1} bg="white" p="$4" rounded="$xl" style={{ borderWidth: 1, borderColor: Palette.gray100 }}>
+            <Text fontSize={Type.tiny} color={Palette.gray500} fontWeight="700" textTransform="uppercase">
+              Value this month
+            </Text>
+            <Text fontSize={20} fontWeight="900" color={Palette.ink} mt="$1">
+              {currency} {monthTotal.toFixed(2)}
+            </Text>
+          </Box>
+        </HStack>
+
+        {/* Sync status + offline edits */}
+        {queued.length > 0 && (
+          <Box bg={Palette.warningTint} p="$4" rounded="$xl" mb="$3">
+            <HStack alignItems="center" space="md">
               <Ionicons name="cloud-upload-outline" size={22} color={Palette.warning} />
               <VStack flex={1}>
                 <Text fontWeight="800" color={Palette.ink}>
                   {pending} sale{pending === 1 ? '' : 's'} waiting to sync
                 </Text>
                 <Text fontSize={Type.caption} color={Palette.gray500}>
-                  Saved on your device — tap to retry now.
+                  Saved on your device. Fix or discard a mistake before it syncs.
                 </Text>
               </VStack>
-              <Ionicons name="refresh" size={18} color={Palette.gray500} />
+              <Pressable onPress={retrySync} hitSlop={8}>
+                <HStack alignItems="center" space="xs">
+                  <Ionicons name="refresh" size={16} color={Palette.ink} />
+                  <Text fontSize={Type.caption} fontWeight="800" color={Palette.ink}>Retry</Text>
+                </HStack>
+              </Pressable>
             </HStack>
-          </Pressable>
+
+            <VStack mt="$3" space="xs">
+              {queued.map((q) => {
+                let lineCount = 0;
+                try {
+                  lineCount = (JSON.parse(q.payloadJson)?.lines ?? []).length;
+                } catch {
+                  lineCount = 0;
+                }
+                return (
+                  <HStack
+                    key={q.id}
+                    alignItems="center"
+                    justifyContent="space-between"
+                    bg="white"
+                    rounded="$lg"
+                    px="$3"
+                    py="$2"
+                    style={{ borderWidth: 1, borderColor: Palette.gray100 }}
+                  >
+                    <VStack flex={1}>
+                      <Text fontSize={Type.caption} fontWeight="700" color={Palette.ink}>
+                        Captured {new Date(q.createdAt).toLocaleString()}
+                      </Text>
+                      <Text fontSize={Type.tiny} color={Palette.gray500}>
+                        {lineCount} item{lineCount === 1 ? '' : 's'}
+                        {q.lastError ? ' · last attempt failed' : ''}
+                      </Text>
+                    </VStack>
+                    <Pressable onPress={() => discardQueued(q)} hitSlop={8}>
+                      <HStack alignItems="center" space="xs">
+                        <Ionicons name="trash-outline" size={16} color={Palette.error} />
+                        <Text fontSize={Type.tiny} fontWeight="800" color={Palette.error}>Discard</Text>
+                      </HStack>
+                    </Pressable>
+                  </HStack>
+                );
+              })}
+            </VStack>
+          </Box>
         )}
 
         {/* CTA */}
@@ -186,6 +381,11 @@ export default function FieldSalesScreen() {
                         <Text fontSize={Type.caption} color={Palette.gray500}>
                           {s.lines.length} line{s.lines.length === 1 ? '' : 's'}
                         </Text>
+                        {s.payment_method ? (
+                          <Text fontSize={Type.tiny} color={Palette.gray500} textTransform="capitalize">
+                            {s.payment_method.replace(/_/g, ' ')}
+                          </Text>
+                        ) : null}
                         {s.visit_verified === true && (
                           <HStack space="xs" alignItems="center">
                             <Ionicons name="checkmark-circle" size={12} color={Palette.success} />
@@ -201,21 +401,143 @@ export default function FieldSalesScreen() {
                         )}
                       </HStack>
                     </VStack>
-                    <VStack alignItems="flex-end">
+                    <VStack alignItems="flex-end" space="xs">
                       <Text fontWeight="900" color={Palette.ink}>
                         {s.currency} {total.toFixed(2)}
                       </Text>
                       <Text fontSize={Type.tiny} color={Palette.gray400} textTransform="capitalize">
                         {s.status}
                       </Text>
+                      {s.status !== 'void' && (
+                        <HStack space="md" alignItems="center">
+                          <Pressable onPress={() => openEdit(s)} hitSlop={8}>
+                            <HStack alignItems="center" space="xs">
+                              <Ionicons name="create-outline" size={14} color={Palette.blue} />
+                              <Text fontSize={Type.tiny} fontWeight="800" color={Palette.blue}>Edit</Text>
+                            </HStack>
+                          </Pressable>
+                          {s.status !== 'approved' && (
+                            <Pressable onPress={() => confirmVoid(s)} hitSlop={8}>
+                              <HStack alignItems="center" space="xs">
+                                <Ionicons name="close-circle-outline" size={14} color={Palette.error} />
+                                <Text fontSize={Type.tiny} fontWeight="800" color={Palette.error}>Void</Text>
+                              </HStack>
+                            </Pressable>
+                          )}
+                        </HStack>
+                      )}
                     </VStack>
                   </HStack>
+                  <VStack mt="$2" space="xs" style={{ borderTopWidth: 1, borderTopColor: Palette.gray100, paddingTop: 8 }}>
+                    {s.lines.map((l) => (
+                      <HStack key={l.id} justifyContent="space-between" alignItems="center">
+                        <Text fontSize={Type.caption} color={Palette.gray600} flex={1} numberOfLines={1}>
+                          {l.product_name ?? l.variant_sku ?? `Variant #${l.variant_id}`}
+                          {l.variant_sku && l.product_name ? ` · ${l.variant_sku}` : ''}
+                        </Text>
+                        <Text fontSize={Type.caption} color={Palette.gray500} fontWeight="700" ml="$2">
+                          ×{Number(l.quantity)}{l.uom ? ` ${l.uom}` : ''}
+                        </Text>
+                      </HStack>
+                    ))}
+                  </VStack>
                 </Box>
               );
             })}
           </VStack>
         )}
       </ScrollView>
+
+      <RNModal visible={editing != null} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
+        <Box flex={1} justifyContent="flex-end" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <Box bg="white" rounded="$2xl" p="$5" style={{ borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+            <HStack justifyContent="space-between" alignItems="center" mb="$3">
+              <Text fontWeight="900" fontSize={Type.body} color={Palette.ink}>
+                Edit payment
+              </Text>
+              <Pressable onPress={() => setEditing(null)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={Palette.gray500} />
+              </Pressable>
+            </HStack>
+            {editing && (
+              <Text fontSize={Type.caption} color={Palette.gray500} mb="$3">
+                Sale #{editing.id} · {new Date(editing.sold_at).toLocaleDateString()} · {editing.currency}
+              </Text>
+            )}
+
+            <Text fontSize={Type.small} fontWeight="700" color={Palette.gray500} mb="$2" textTransform="uppercase">
+              Payment method
+            </Text>
+            <HStack style={{ flexWrap: 'wrap' }} space="sm">
+              {PAYMENT_METHODS.map((m) => {
+                const active = editMethod === m.value;
+                return (
+                  <Pressable
+                    key={m.value}
+                    onPress={() => setEditMethod(m.value)}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: active ? Palette.ink : Palette.gray200,
+                      backgroundColor: active ? Palette.ink : 'white',
+                      borderRadius: 999,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      marginBottom: 8,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Ionicons name={m.icon as any} size={14} color={active ? 'white' : Palette.gray500} />
+                    <Text ml="$1" fontSize={Type.caption} fontWeight="700" color={active ? 'white' : Palette.ink}>
+                      {m.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </HStack>
+
+            <Text fontSize={Type.small} fontWeight="700" color={Palette.gray500} mt="$3" mb="$2" textTransform="uppercase">
+              Notes
+            </Text>
+            <TextInput
+              value={editNotes}
+              onChangeText={setEditNotes}
+              placeholder="Reference, wallet used (e.g. M-Pesa)…"
+              placeholderTextColor={Palette.gray400}
+              multiline
+              style={{
+                borderWidth: 1,
+                borderColor: Palette.gray200,
+                borderRadius: 12,
+                padding: 12,
+                minHeight: 64,
+                color: Palette.ink,
+                textAlignVertical: 'top',
+              }}
+            />
+
+            <HStack space="sm" mt="$4">
+              <Pressable
+                onPress={() => setEditing(null)}
+                style={{ flex: 1, borderWidth: 1, borderColor: Palette.gray200, borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+              >
+                <Text fontWeight="700" color={Palette.gray600}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveEdit}
+                disabled={saving}
+                style={{ flex: 1, backgroundColor: Palette.ink, borderRadius: 12, paddingVertical: 12, alignItems: 'center', opacity: saving ? 0.6 : 1 }}
+              >
+                {saving ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text fontWeight="800" color="white">Save</Text>
+                )}
+              </Pressable>
+            </HStack>
+          </Box>
+        </Box>
+      </RNModal>
     </SafeAreaView>
   );
 }

@@ -31,7 +31,7 @@ export default defineConfig({
     },
     {
       name: "authed-dark",
-      testMatch: /dark-contrast\.spec\.ts/,
+      testMatch: /(dark-contrast|field-sales)\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         colorScheme: "dark",

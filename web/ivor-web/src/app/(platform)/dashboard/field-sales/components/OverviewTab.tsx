@@ -11,6 +11,9 @@ import {
   type LiabilityAccrual,
 } from "@/services/fieldSales";
 import MetricCard from "@/components/ui/MetricCard";
+import EmptyState from "@/components/ui/EmptyState";
+import HowItWorks from "./HowItWorks";
+import type { NavigateTab } from "./types";
 
 function monthBounds(d = new Date()): { start: string; end: string } {
   const start = new Date(d.getFullYear(), d.getMonth(), 1);
@@ -19,7 +22,7 @@ function monthBounds(d = new Date()): { start: string; end: string } {
   return { start: iso(start), end: iso(end) };
 }
 
-export default function OverviewTab() {
+export default function OverviewTab({ onNavigate }: { onNavigate: NavigateTab }) {
   const { companyId } = useAuth();
   const [period, setPeriod] = useState(() => monthBounds());
   const [board, setBoard] = useState<Leaderboard | null>(null);
@@ -52,6 +55,8 @@ export default function OverviewTab() {
 
   return (
     <div className="space-y-6">
+      <HowItWorks onNavigate={onNavigate} />
+
       <div className="grid gap-4 sm:grid-cols-3">
         <MetricCard
           title="Outstanding liability"
@@ -105,7 +110,13 @@ export default function OverviewTab() {
         {loading ? (
           <div className="py-10 text-center text-sm text-gray-500">Loading…</div>
         ) : (board?.entries.length ?? 0) === 0 ? (
-          <div className="py-10 text-center text-sm text-gray-500">No approved sales in this period.</div>
+          <EmptyState
+            icon={Trophy}
+            title="No commissions earned in this period yet"
+            description="The leaderboard fills up once field sales are approved. Capture sales in the mobile app, then approve them under the Sales tab."
+            actionLabel="Go to Sales"
+            onAction={() => onNavigate("sales")}
+          />
         ) : (
           <ul className="space-y-3">
             {board!.entries.map((e, i) => (
