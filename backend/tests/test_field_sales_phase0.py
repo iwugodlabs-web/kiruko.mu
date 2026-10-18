@@ -241,11 +241,15 @@ def test_off_payroll_rep_skipped_not_paid(db, sales_company):
     result = engine.push_to_payroll(db, company.company_id, run.id, actor_user_id=None)
 
     assert result["settled"] == []
+    # Off-payroll status is now derived into the payable's channel at compute
+    # time, so push skips it as a non-payroll channel (routed to 'manual').
     assert result["skipped"] == [
-        {"private_user_id": rep.private_user_id, "reason": "off_payroll"}
+        {"private_user_id": rep.private_user_id, "reason": "non_payroll_channel"}
     ]
-    # The payable is left pending (never silently written-then-lost).
+    # The payable is on the manual channel and left pending (never silently
+    # written-then-lost) — it settles off-payroll via settle_manual_payouts.
     db.refresh(run)
+    assert all(p.payout_channel == "manual" for p in run.payables)
     assert all(p.status == "pending" for p in run.payables)
     assert all(p.one_off_allowance_id is None for p in run.payables)
     assert db.query(EmployeeOneOffAllowance).filter(

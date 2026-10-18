@@ -368,6 +368,13 @@ class CommissionPushRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ManualSettlementRequest(BaseModel):
+    """Settle off-payroll (contractor) commission outside payroll."""
+
+    reference: Optional[str] = Field(default=None, max_length=160)
+    private_user_id: Optional[int] = None
+
+
 class OutletCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     code: Optional[str] = Field(default=None, max_length=40)

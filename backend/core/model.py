@@ -3036,6 +3036,9 @@ class CommissionPayable(Base):
     status = Column(String(20), nullable=False, server_default="pending")  # pending|settled|void
     one_off_allowance_id = Column(Integer, ForeignKey("employee_one_off_allowances.id", ondelete="SET NULL"), nullable=True)
     settled_at = Column(DateTime(timezone=True), nullable=True)
+    # Manual (off-payroll) channel: the external payout reference an admin
+    # records when settling a contractor's commission outside payroll.
+    settlement_reference = Column(String(160), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

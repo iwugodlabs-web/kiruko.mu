@@ -22,6 +22,7 @@ from schema.field_sales_schema import (
     CommissionPlanCreate,
     CommissionPlanRead,
     CommissionPushRequest,
+    ManualSettlementRequest,
     CommissionRunCreate,
     CommissionRunRead,
     CommissionRunSummary,
@@ -776,6 +777,32 @@ def approve_commission_run(
     )
     db.commit()
     return _load_run(db, company_id, run.id)
+
+
+@router.post(
+    "/companies/{company_id}/commission-runs/{run_id}/settle-manual",
+)
+def settle_manual_payouts(
+    company_id: int,
+    run_id: int,
+    payload: Optional[ManualSettlementRequest] = None,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Settle off-payroll (contractor) commission outside payroll, recording an
+    external payout reference. Only pending `manual`-channel payables move."""
+    result = engine.settle_manual_payouts(
+        db, company_id, run_id, current_user.user_id,
+        reference=payload.reference if payload else None,
+        private_user_id=payload.private_user_id if payload else None,
+    )
+    create_audit_log(
+        db, current_user.user_id, "field_sales.run.settle_manual", "commission_run", run_id,
+        {"company_id": company_id, **result}, commit=False,
+    )
+    db.commit()
+    return result
 
 
 @router.post(

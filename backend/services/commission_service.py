@@ -76,6 +76,8 @@ def ensure_commission_component(db: Session, company_id: int) -> SalaryComponent
     )
     if existing is not None:
         return existing
+    from services.salary_resolver import infer_statutory_base_codes
+
     comp = SalaryComponent(
         company_id=company_id,
         code=COMMISSION_COMPONENT_CODE,
@@ -86,6 +88,12 @@ def ensure_commission_component(db: Session, company_id: int) -> SalaryComponent
         is_taxable=True,
         is_recurring=False,
         is_one_off=True,
+        # Statutory bases come from the shared resolver (the same rule payroll
+        # applies), not a hardcoded literal — commission is a non-basic taxable
+        # earning → PAYE + CSG (no NSF). Stays correct if that rule changes.
+        statutory_base_codes=infer_statutory_base_codes(
+            kind="earning", is_basic=False, is_taxable=True
+        ),
     )
     db.add(comp)
     db.flush()
@@ -501,6 +509,20 @@ def compute_run(
         total = _q(total)
         if total == 0:
             continue
+        # Route the payable by the rep's (configurable) payroll status rather
+        # than hardcoding a channel — mirrors how payroll keys off payroll_status.
+        # An off-payroll rep (contractor, director's fees, …) settles via the
+        # 'manual' channel; everyone else rides payroll.
+        rep_row = (
+            db.query(PrivateUser)
+            .filter(PrivateUser.private_user_id == rep_id)
+            .one_or_none()
+        )
+        channel = (
+            "manual"
+            if rep_row is not None and _is_off_payroll(rep_row, period_start, period_end)
+            else "payroll"
+        )
         db.add(
             CommissionPayable(
                 company_id=company_id,
@@ -508,7 +530,7 @@ def compute_run(
                 run_id=run.id,
                 amount=total,
                 currency=run.currency,
-                payout_channel="payroll",
+                payout_channel=channel,
                 status="pending",
             )
         )
@@ -790,6 +812,52 @@ def _is_off_payroll(rep: PrivateUser, period_start: date, period_end: date) -> b
     if rep.off_payroll_to is not None and rep.off_payroll_to <= period_start:
         return False
     return True
+
+
+def settle_manual_payouts(
+    db: Session,
+    company_id: int,
+    run_id: int,
+    actor_user_id: int,
+    reference: Optional[str] = None,
+    private_user_id: Optional[int] = None,
+) -> dict:
+    """Settle manual-channel (off-payroll / contractor) payables for an approved
+    run, recording an external payout reference — without writing a one-off or
+    touching a payslip. Optionally scope to a single rep via `private_user_id`.
+    Only `pending` manual payables move, so re-calling it is safe."""
+    run = _get_run(db, company_id, run_id)
+    if run.status != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail="Approve the run before settling manual payouts.",
+        )
+
+    q = db.query(CommissionPayable).filter(
+        CommissionPayable.run_id == run.id,
+        CommissionPayable.payout_channel == "manual",
+        CommissionPayable.status == "pending",
+    )
+    if private_user_id is not None:
+        q = q.filter(CommissionPayable.private_user_id == private_user_id)
+    payables = q.order_by(CommissionPayable.id).all()
+
+    now = datetime.now(timezone.utc)
+    settled: List[dict] = []
+    for payable in payables:
+        payable.status = "settled"
+        payable.settled_at = now
+        payable.settlement_reference = reference
+        settled.append(
+            {
+                "private_user_id": payable.private_user_id,
+                "amount": str(payable.amount),
+                "reference": reference,
+            }
+        )
+
+    db.commit()
+    return {"run_id": run.id, "settled": settled, "count": len(settled)}
 
 
 def push_to_payroll(
