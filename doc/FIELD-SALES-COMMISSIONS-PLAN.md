@@ -226,9 +226,31 @@ Most of the once-"open" refinements are now **built** (verified against the code
 
 - **Off-payroll (contractor) payout execution — the load-bearing one.** The silent-exclusion risk is *handled*: `_is_off_payroll()` detects off-payroll reps and the bridge **skips** them (`reason: off_payroll` / `non_payroll_channel`) rather than writing a one-off that vanishes. But the `manual` channel only marks them **outstanding** — the actual off-payroll **settlement / payout is not built**. (Note: the completeness gate is **opt-in**, default off unless a company override or `PAYROLL_COMPLETENESS_GATE` is warn/enforce — so it's the engine's detect-and-skip, not the gate, that prevents the mispay.)
 - **Maker-checker** on plan & price changes — not built.
-- **Manager / team view-scoping** — only rep self-scoping exists; a manager seeing their team's numbers is not built.
-- **Money & tax refinements** — **confirmed not in the commission engine**: no net-of-discount base, discount limits, FX, or statutory/EOY interaction (commission is gross; it's only tagged taxable so PAYE/CSG apply downstream at the payslip).
+- **Manager / team view-scoping** — only rep self-scoping exists; a manager seeing their team's numbers is not built. **No new model needed, though:** `PrivateUser.manager_private_user_id` already exists (used by `team_override`). See the agreed plan below.
+- **Money & tax** — statutory **and EOY-bonus are handled downstream automatically** (commission is a taxable payslip earning; `bonus_provisioning` sums `payslip.gross`, which includes it). Genuinely absent in the commission engine: a **net-of-discount base**, discount limits, and **sale→pay FX** — see the agreed plan below.
 - **On-collection allocation** — the trigger prorates by `sale.collected_amount` per sale (**built**); **multi-invoice FIFO allocation is not built** (confirmed).
+
+---
+
+## Agreed next build (plan — 2026-10-18)
+
+Five items are buildable now, headless, with tests; two are deferred until a client needs them; one stays out of scope.
+
+**Build now**
+1. **Verification tests (Bucket 2)** — route tests for returns, clawbacks, ERP reconcile, bulk review, leaderboard/liability, product import; plus a statement-PDF check (assert a real `%PDF` document comes back). Pure verification, no product decisions.
+2. **Contractor manual-payout settlement** — a service + endpoint to settle `payout_channel='manual'` payables (record a payout reference, `status→settled`, `settled_at`), mirroring the existing payroll-channel settle path. The `CommissionPayable` ledger already exists and off-payroll reps are already detected + skipped, so this closes their loop.
+3. **Maker-checker on plan/price** — an approval state + two-actor flow on plan and price changes, mirroring the existing `payroll_maker_checker` pattern. _Decision: which mutations require a second approver._
+4. **Team / manager view-scoping** — a visible-rep-set rule on list/read endpoints: owner/admin → all; **manager → self + direct reports** (reusing the existing `PrivateUser.manager_private_user_id` query `team_override` already uses); rep → self (already enforced). No new data model. _Default: direct reports, one level._
+5. **Statutory-codes hardening** — set `statutory_base_codes` explicitly on the `COMMISSION` component (PAYE/CSG/NSF) instead of relying on the engine's legacy inference.
+
+**Deferred — demand-driven (cheap to add when a client needs it)**
+- **FX (sale→pay currency)** — only if sales are booked in a currency ≠ the rep's pay; convert at run time via a single FX source (mirror payroll's `fx_snapshot`).
+- **Net-of-discount commission base** — needs a new discount field on sale lines; add when a client actually gives trade discounts.
+
+**Already handled — no build (commission rides the payslip)**
+- Statutory PAYE/CSG/NSF (taxable earning), **EOY-bonus inclusion** (automatic via `bonus_provisioning` summing `payslip.gross`), and rounding.
+
+**Out of scope** — multi-invoice FIFO payment allocation (needs an invoice/payment subsystem; collides with the "not an ERP" non-goal).
 
 ---
 
