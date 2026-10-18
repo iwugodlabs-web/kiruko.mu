@@ -299,6 +299,29 @@ export default function DashboardLayout() {
       />
 
       <Tabs.Screen
+        name="field_sales"
+        options={{
+          // Field-sales hub — surfaced from Settings, not the tab bar.
+          href: null,
+          title: 'Field Sales',
+          headerShown: false,
+          tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="field_sale_new"
+        options={{
+          // Capture flow — full-screen, no tab bar.
+          href: null,
+          title: 'Log a sale',
+          headerShown: false,
+          tabBarStyle: { display: 'none' },
+          tabBarIcon: ({ color }) => <MoreHorizontal size={24} color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
         name="notifications"
         options={{
           href: null,

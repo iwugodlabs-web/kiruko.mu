@@ -47,6 +47,22 @@ export const kioskQueue = sqliteTable("kiosk_queue", {
  * reused key with a different body). `timelogId` is the clock-out target id
  * (NULL for clock-in).
  */
+/**
+ * Field-sales offline queue. A captured sale that couldn't reach the server is
+ * pinned here and replayed by services/offline/salesSync.ts. `id` IS the
+ * client_uuid, so the backend's `/sales/sync` (idempotent on client_uuid)
+ * reports a resend as `duplicate` rather than creating a second sale.
+ */
+export const salesQueue = sqliteTable("sales_queue", {
+  id: text("id").primaryKey(), // client_uuid
+  payloadJson: text("payload_json").notNull(), // exact SaleSyncItem body
+  clientUuid: text("client_uuid").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull(), // Date.now() — oldest-first drain
+  deadLettered: integer("dead_lettered").notNull().default(0),
+});
+
 export const punchQueue = sqliteTable("punch_queue", {
   id: text("id").primaryKey(), // idempotency key (UUID) — also the row id
   action: text("action").notNull(), // 'clock_in' | 'clock_out'

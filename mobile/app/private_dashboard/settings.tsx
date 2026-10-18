@@ -274,6 +274,13 @@ export default function Settings() {
           onPress: () => router.push("/private_dashboard/payslips"),
         },
         {
+          label: t('fieldSales.settingsRow', 'Field Sales'),
+          subtitle: t('fieldSales.settingsRowSubtitle', 'Log sales and track your commission'),
+          icon: 'point-of-sale',
+          color: Palette.gold,
+          onPress: () => router.push("/private_dashboard/field_sales" as any),
+        },
+        {
           label: t('settings.yourRights'),
           subtitle: t('settings.yourRightsSubtitle'),
           icon: 'gavel',

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Commission Statement · {{ rep_name }} · {{ period_label }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 14mm 16mm;
+      @bottom-center {
+        content: "{{ company_name }} · Commission statement · {{ period_label }} · Generated {{ generated_at }}";
+        font-size: 8pt; color: #6b7280;
+      }
+      @bottom-right { content: "Page " counter(page) " / " counter(pages); font-size: 8pt; color: #6b7280; }
+    }
+    body { font-family: "Helvetica", "Arial", sans-serif; font-size: 10pt; color: #111827; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start;
+      border-bottom: 2px solid #047857; padding-bottom: 10pt; margin-bottom: 14pt; }
+    .header h1 { font-size: 16pt; font-weight: 800; margin: 0; letter-spacing: -0.3pt; color: #065f46; }
+    .header h1 .sub { display: block; font-size: 11pt; font-weight: 600; color: #6b7280; margin-top: 2pt; }
+    .header .right { text-align: right; font-size: 9pt; }
+    .header .right strong { display: block; font-size: 11pt; color: #111827; }
+    .section-title { font-size: 11pt; font-weight: 700; margin: 14pt 0 6pt 0; color: #111827;
+      border-left: 3px solid #047857; padding-left: 8pt; }
+    table.t { width: 100%; border-collapse: collapse; margin-bottom: 6pt; }
+    table.t th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.4pt;
+      color: #6b7280; padding: 5pt 6pt; border-bottom: 1px solid #e5e7eb; font-weight: 700; }
+    table.t th.num, table.t td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.t td { padding: 5pt 6pt; border-bottom: 1px dotted #e5e7eb; }
+    table.t tr.total td { font-weight: 800; border-top: 2px solid #047857; border-bottom: none;
+      padding-top: 7pt; background: #ecfdf5; }
+    .grand { margin-top: 14pt; background: #ecfdf5; border: 2px solid #047857; border-radius: 6pt;
+      padding: 10pt 14pt; display: flex; justify-content: space-between; align-items: center; }
+    .grand .lbl { font-size: 11pt; font-weight: 700; color: #065f46; }
+    .grand .amt { font-size: 18pt; font-weight: 800; color: #047857; font-variant-numeric: tabular-nums; }
+    .footer-meta { margin-top: 18pt; padding-top: 8pt; border-top: 1px solid #e5e7eb; font-size: 8pt; color: #6b7280; }
+    .footer-meta .hash { font-family: "Menlo", "Courier New", monospace; word-break: break-all; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>Commission Statement<span class="sub">{{ rep_name }} — {{ period_label }}</span></h1>
+      <div style="margin-top:4pt; color:#4b5563;">Run status: {{ run_status }} · {{ currency }}</div>
+    </div>
+    <div class="right">
+      <strong>{{ company_name }}</strong>
+      {% if company_brn %}<div>BRN: {{ company_brn }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="section-title">Earnings</div>
+  <table class="t">
+    <thead>
+      <tr><th>Rule</th><th>Basis</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.rule_type }}</td>
+        <td>{{ line.description }}</td>
+        <td class="num">{{ line.amount }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="total">
+        <td colspan="2">Total payable</td>
+        <td class="num">{{ currency }} {{ total }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="grand">
+    <div class="lbl">Total commission</div>
+    <div class="amt">{{ currency }} {{ total }}</div>
+  </div>
+
+  <div class="footer-meta">
+    Commission statement for {{ rep_name }} · {{ company_name }} · {{ period_label }}.
+    Figures reflect the commission run's earned line items; payroll settlement is tracked separately.
+    {% if hash_sha256 %}<br/>Document hash: <span class="hash">{{ hash_sha256 }}</span>{% endif %}
+  </div>
+
+</body>
+</html>

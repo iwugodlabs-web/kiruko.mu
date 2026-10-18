@@ -338,6 +338,16 @@ export default function Sidebar() {
             ],
         },
 
+        {
+            id: "field_sales",
+            label: "Field Sales",
+            sub: "Catalog, plans, commissions",
+            href: "/dashboard/field-sales",
+            icon: <Target size={18} />,
+            showFor: 'company',
+            requiredCompanyPermissions: ['view_salary', 'view_payslip', 'manage_payroll'],
+        },
+
         { id: "sep_insights", type: "separator", label: "Insights" },
 
         // ── 5. Insights ─ analytics & archives ────────────────────────────

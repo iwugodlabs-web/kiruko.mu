@@ -12,6 +12,7 @@ from . import (
     account_claim,
     country_assignments,
     geocode,
+    commissions,
 )
 
 router = APIRouter()
@@ -50,3 +51,4 @@ router.include_router(employee_import.router)
 router.include_router(account_claim.router)
 router.include_router(country_assignments.router)
 router.include_router(geocode.router)
+router.include_router(commissions.router)
