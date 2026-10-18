@@ -266,7 +266,7 @@ Field-sales tools capture selling but can't pay. Payroll tools pay but can't see
 - **The cost** — 20 field-sales tables, all built & committed, in 3 clean layers. Stages D–L lean on the existing payroll spine — though several once-assumed reuses (geofence-for-visits, barcode OCR, the sector/rule/bonus/budget jobs) proved to be new work over existing *patterns*, not drop-in reuse.
 - **The revenue** — A natural paid B2B tier — the field-sales upgrade on top of the payroll base.
 
-_Status (2026-10-18): backend (Phases 0–3.2) is built, **committed**, and **31 tests green** (HTTP route tests now cover the core loop, the module gate, rep self-scoping 403s, and idempotent offline sync); the web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors) and the mobile capture client are committed too. Remaining: the *Still open* list — contractor payout settlement, maker-checker, team view-scoping, money/tax refinements (the new route smoke + the clean web build are uncommitted)._
+_Status (2026-10-18): backend (Phases 0–3.2) is built, **committed**, and **31 tests green** (HTTP route tests now cover the core loop, the module gate, rep self-scoping 403s, and idempotent offline sync); the web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors); the mobile client **typechecks clean** and its **offline sync worker now has unit tests** (`services/offline/__tests__/salesSync.test.ts`, 3 passing: drain, no-attempt-burn on backend-down, dead-letter on exhaustion). Remaining: the mobile **UI screens have not been run in a simulator** and the SQLite queue persistence is mocked (not integration-tested); plus the *Still open* list — contractor payout settlement, maker-checker, team view-scoping, money/tax refinements._
 
 ---
 
