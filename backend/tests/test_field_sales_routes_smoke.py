@@ -188,6 +188,64 @@ def test_core_loop_over_http(db, rep_company):
         app.dependency_overrides.clear()
 
 
+def test_plan_versioning_over_http(db, rep_company):
+    """Step A over the actual HTTP layer: create → revise (draft) → versions →
+    activate (explicit date and no body) → archive, plus the per-family list."""
+    company, rep, _rep_user, _rep2, owner = rep_company
+    cid = company.company_id
+    client = _client(db, owner.user_id)
+    try:
+        base = f"/api/v1/companies/{cid}"
+
+        r = _ok(client.post(f"{base}/commission-plans", json={
+            "name": "Versioned 3%", "trigger": "on_sale",
+            "rules": [{"rule_type": "flat_percent", "params": {"percent": "3.00"}}],
+        }))
+        plan = r.json()
+        assert plan["version"] == 1 and plan["family_id"] == plan["id"]
+        assert plan["status"] == "active"
+        pid = plan["id"]
+
+        # revise (no name) → a draft clone that inherits the family name
+        r = _ok(client.put(f"{base}/commission-plans/{pid}", json={
+            "rules": [{"rule_type": "flat_percent", "params": {"percent": "6.00"}}],
+        }))
+        draft = r.json()
+        assert draft["version"] == 2 and draft["status"] == "draft"
+        assert draft["family_id"] == pid and draft["name"] == "Versioned 3%"
+
+        r = _ok(client.get(f"{base}/commission-plans/{pid}/versions"))
+        assert [v["version"] for v in r.json()] == [2, 1]
+
+        # activate with an explicit effective date
+        r = _ok(client.post(f"{base}/commission-plans/{draft['id']}/activate",
+                            json={"effective_from": "2026-05-16"}))
+        activated = r.json()
+        assert activated["status"] == "active"
+        assert activated["effective_from"] == "2026-05-16"
+
+        # listing collapses to one row per family (the effective version)
+        r = _ok(client.get(f"{base}/commission-plans"))
+        listed = [p for p in r.json() if p["family_id"] == pid]
+        assert len(listed) == 1 and listed[0]["version"] == 2
+
+        # a second revise, activated with an EMPTY body (defaults to today)
+        r = _ok(client.put(f"{base}/commission-plans/{pid}", json={
+            "rules": [{"rule_type": "flat_percent", "params": {"percent": "9.00"}}],
+        }))
+        draft2 = r.json()
+        r = _ok(client.post(f"{base}/commission-plans/{draft2['id']}/activate"))
+        assert r.json()["status"] == "active" and r.json()["effective_from"] is not None
+
+        # archive removes the family from the default list
+        _ok(client.post(f"{base}/commission-plans/{pid}/archive"))
+        r = _ok(client.get(f"{base}/commission-plans"))
+        assert [p for p in r.json() if p["family_id"] == pid] == []
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
 def _make_variant(db, cid, owner_user_id) -> int:
     """Create a product+variant via the admin HTTP path; return its variant id."""
     admin = _client(db, owner_user_id)

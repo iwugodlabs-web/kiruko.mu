@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 
 from core.model import Company, PrivateUser, User
@@ -262,6 +263,40 @@ def test_archived_family_pays_nothing(db, v_company):
     assert crud.list_plans(db, company.company_id) == []
     run = engine.compute_run(db, company.company_id, EARLY_START, EARLY_END)
     assert run.payables == []
+
+
+def test_archive_retires_every_version_in_the_family(db, v_company):
+    company, rep, _ = v_company
+    root = _plan(db, company, rep)
+    draft = crud.revise_plan(db, company.company_id, root.id, CommissionPlanRevise(
+        rules=[CommissionRuleCreate(rule_type="flat_percent", params={"percent": "10"})],
+    ))
+    crud.activate_plan(db, company.company_id, draft.id, effective_from=LATE_START)
+
+    # Archiving via the root id retires the whole family, drafts included.
+    crud.archive_plan(db, company.company_id, root.id)
+    versions = crud.list_plan_versions(db, company.company_id, root.id)
+    assert versions and all(v.status == "archived" for v in versions)
+    assert crud.list_plans(db, company.company_id) == []
+
+    product = _product(db, company)
+    _sale(db, company, rep, product.variants[0].id)
+    run = engine.compute_run(db, company.company_id, EARLY_START, EARLY_END)
+    assert run.payables == []
+
+
+def test_archived_family_is_frozen(db, v_company):
+    company, rep, _ = v_company
+    root = _plan(db, company, rep)
+    crud.archive_plan(db, company.company_id, root.id)
+
+    with pytest.raises(HTTPException) as revise_err:
+        crud.revise_plan(db, company.company_id, root.id, CommissionPlanRevise())
+    assert revise_err.value.status_code == 409
+
+    with pytest.raises(HTTPException) as activate_err:
+        crud.activate_plan(db, company.company_id, root.id)
+    assert activate_err.value.status_code == 409
 
 
 # ---------------------------------------------------------------------------

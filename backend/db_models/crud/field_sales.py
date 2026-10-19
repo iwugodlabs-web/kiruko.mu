@@ -616,6 +616,10 @@ def revise_plan(
         .filter(CommissionPlan.id == root)
         .one()
     )
+    if current.archived_at is not None or current.status == "archived":
+        raise HTTPException(
+            status_code=409, detail=f"Commission plan {root} is archived and cannot be revised."
+        )
     versions = (
         db.query(CommissionPlan)
         .filter(CommissionPlan.company_id == company_id, CommissionPlan.family_id == root)
@@ -694,6 +698,10 @@ def activate_plan(
     )
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Commission plan {plan_id} not found")
+    if plan.archived_at is not None or plan.status == "archived":
+        raise HTTPException(
+            status_code=409, detail=f"Commission plan {plan_id} is archived and cannot be activated."
+        )
     root = plan.family_id or plan.id
     start = effective_from or plan.effective_from or date.today()
 
@@ -722,12 +730,27 @@ def activate_plan(
 
 
 def archive_plan(db: Session, company_id: int, plan_id: int) -> CommissionPlan:
-    plan = get_plan(db, company_id, plan_id)
-    plan.status = "archived"
-    plan.archived_at = datetime.now(timezone.utc)
+    """Archive the whole plan family. Archiving a single row would leave the
+    family's other active versions paying, so every version is retired — the
+    returned row is the family root."""
+    root_id = _family_root_id(db, company_id, plan_id)
+    now = datetime.now(timezone.utc)
+    plans = (
+        db.query(CommissionPlan)
+        .filter(CommissionPlan.company_id == company_id, CommissionPlan.family_id == root_id)
+        .all()
+    )
+    root = None
+    for p in plans:
+        p.status = "archived"
+        p.archived_at = now
+        if p.id == root_id:
+            root = p
     db.commit()
-    db.refresh(plan)
-    return plan
+    if root is not None:
+        db.refresh(root)
+        return root
+    return get_plan(db, company_id, plan_id)
 
 
 def effective_plan_version(
@@ -739,16 +762,20 @@ def effective_plan_version(
 ) -> Optional[CommissionPlan]:
     """The version of the plan family effective for a run period. Among
     versions whose window covers the period, the latest `effective_from`
-    (NULL == open start, i.e. oldest) wins; ties break on higher `version`."""
-    root = plan_id
-    if cache is not None and root in cache:
-        return cache[root]
+    (NULL == open start, i.e. oldest) wins; ties break on higher `version`.
+
+    `plan_id` is the family root (assignments target the root). The optional
+    `cache` is keyed by `(root, period_start, period_end)` so a caller that
+    spans several periods (e.g. a season roll-up) can't get a stale hit."""
+    cache_key = (plan_id, period_start, period_end)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
 
     plans = (
         db.query(CommissionPlan)
         .options(joinedload(CommissionPlan.rules))
         .filter(
-            CommissionPlan.family_id == root,
+            CommissionPlan.family_id == plan_id,
             CommissionPlan.status == "active",
             CommissionPlan.archived_at.is_(None),
         )
@@ -765,7 +792,7 @@ def effective_plan_version(
         if best is None or key >= best_key:
             best, best_key = p, key
     if cache is not None:
-        cache[root] = best
+        cache[cache_key] = best
     return best
 
 

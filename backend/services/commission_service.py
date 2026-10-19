@@ -348,7 +348,7 @@ def compute_run(
 
     buckets: Dict[Tuple[int, int], dict] = {}
     rules_by_id: Dict[int, CommissionRule] = {}
-    plan_cache: Dict[int, Optional[CommissionPlan]] = {}
+    plan_cache: Dict[Tuple[int, date, date], Optional[CommissionPlan]] = {}
     uom_cache: Dict[int, Decimal] = {}
     opt_cache: Dict[int, set] = {}
 
@@ -601,7 +601,7 @@ def _apply_team_overrides(
     period_start: date,
     period_end: date,
     payable_totals: Dict[int, Decimal],
-    plan_cache: Dict[int, Optional[CommissionPlan]],
+    plan_cache: Dict[Tuple[int, date, date], Optional[CommissionPlan]],
 ) -> None:
     """Pay managers an override over their direct reports' earned commission.
 
