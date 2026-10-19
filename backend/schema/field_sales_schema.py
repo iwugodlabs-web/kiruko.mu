@@ -247,6 +247,18 @@ class CommissionPlanCreate(BaseModel):
     description: Optional[str] = None
     trigger: str = Field(default="on_sale", description="on_sale (Phase 0)")
     rules: List[CommissionRuleCreate] = Field(default_factory=list)
+    effective_from: Optional[date] = None
+
+
+class CommissionPlanRevise(BaseModel):
+    """Copy-on-write revision of an active plan. A new version is created as a
+    `draft` and only affects pay once activated. Omitted fields inherit the
+    family's current values."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = None
+    trigger: Optional[str] = None
+    rules: Optional[List[CommissionRuleCreate]] = None
+    effective_from: Optional[date] = None
 
 
 class CommissionPlanRead(BaseModel):
@@ -257,6 +269,13 @@ class CommissionPlanRead(BaseModel):
     trigger: str
     status: str
     archived_at: Optional[datetime] = None
+    version: int = 1
+    family_id: Optional[int] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    created_by_user_id: Optional[int] = None
+    approved_by_user_id: Optional[int] = None
+    approved_at: Optional[datetime] = None
     rules: List[CommissionRuleRead] = []
 
     class Config:

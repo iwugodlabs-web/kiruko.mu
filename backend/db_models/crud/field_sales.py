@@ -11,7 +11,7 @@ persistence + invariants:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 
@@ -48,6 +48,7 @@ from core.model import (
 )
 from schema.field_sales_schema import (
     CommissionPlanCreate,
+    CommissionPlanRevise,
     CreditAssignmentCreate,
     OutletCreate,
     SalesReturnCreate,
@@ -514,10 +515,37 @@ def void_sale(db: Session, company_id: int, sale_id: int) -> Sale:
 # ---------------------------------------------------------------------------
 
 
-def create_plan(db: Session, company_id: int, payload: CommissionPlanCreate) -> CommissionPlan:
+def _add_rules(db: Session, plan_id: int, rules) -> None:
+    for rule in rules:
+        _validate_rule(rule.rule_type, rule.params)
+        db.add(
+            CommissionRule(
+                plan_id=plan_id,
+                rule_type=rule.rule_type,
+                params=rule.params,
+                scope_category=rule.scope_category,
+                scope_product_id=rule.scope_product_id,
+                scope_variant_id=rule.scope_variant_id,
+                scope_option_value_id=rule.scope_option_value_id,
+                effective_from=rule.effective_from,
+                effective_to=rule.effective_to,
+            )
+        )
+
+
+def create_plan(
+    db: Session,
+    company_id: int,
+    payload: CommissionPlanCreate,
+    created_by_user_id: Optional[int] = None,
+) -> CommissionPlan:
     clash = (
         db.query(CommissionPlan)
-        .filter(CommissionPlan.company_id == company_id, CommissionPlan.name == payload.name)
+        .filter(
+            CommissionPlan.company_id == company_id,
+            CommissionPlan.name == payload.name,
+            CommissionPlan.version == 1,
+        )
         .one_or_none()
     )
     if clash is not None:
@@ -532,29 +560,213 @@ def create_plan(db: Session, company_id: int, payload: CommissionPlanCreate) -> 
         description=payload.description,
         trigger=payload.trigger or "on_sale",
         status="active",
+        version=1,
+        effective_from=payload.effective_from,
+        created_by_user_id=created_by_user_id,
     )
     db.add(plan)
     db.flush()
-
-    for rule in payload.rules:
-        _validate_rule(rule.rule_type, rule.params)
-        db.add(
-            CommissionRule(
-                plan_id=plan.id,
-                rule_type=rule.rule_type,
-                params=rule.params,
-                scope_category=rule.scope_category,
-                scope_product_id=rule.scope_product_id,
-                scope_variant_id=rule.scope_variant_id,
-                scope_option_value_id=rule.scope_option_value_id,
-                effective_from=rule.effective_from,
-                effective_to=rule.effective_to,
-            )
-        )
+    # Root row is its own family; assignments and versions reference this id.
+    plan.family_id = plan.id
+    _add_rules(db, plan.id, payload.rules)
     db.flush()
     db.commit()
     db.refresh(plan)
     return plan
+
+
+def _family_root_id(db: Session, company_id: int, plan_id: int) -> int:
+    """Resolve any version id to the family root id (assignments target the
+    root; the engine resolves the effective version from there)."""
+    plan = (
+        db.query(CommissionPlan)
+        .filter(CommissionPlan.id == plan_id, CommissionPlan.company_id == company_id)
+        .one_or_none()
+    )
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Commission plan {plan_id} not found")
+    return plan.family_id or plan.id
+
+
+def list_plan_versions(db: Session, company_id: int, plan_id: int) -> List[CommissionPlan]:
+    root = _family_root_id(db, company_id, plan_id)
+    return (
+        db.query(CommissionPlan)
+        .options(joinedload(CommissionPlan.rules))
+        .filter(CommissionPlan.company_id == company_id, CommissionPlan.family_id == root)
+        .order_by(CommissionPlan.version.desc())
+        .all()
+    )
+
+
+def revise_plan(
+    db: Session,
+    company_id: int,
+    plan_id: int,
+    payload: CommissionPlanRevise,
+    created_by_user_id: Optional[int] = None,
+) -> CommissionPlan:
+    """Copy-on-write: clone the family's current version into a new `draft`
+    version. A used version is never mutated, so historical pay is stable.
+    Rules are replaced wholesale (not inherited) when provided."""
+    root = _family_root_id(db, company_id, plan_id)
+    current = (
+        db.query(CommissionPlan)
+        .options(joinedload(CommissionPlan.rules))
+        .filter(CommissionPlan.id == root)
+        .one()
+    )
+    versions = (
+        db.query(CommissionPlan)
+        .filter(CommissionPlan.company_id == company_id, CommissionPlan.family_id == root)
+        .all()
+    )
+    next_version = max((v.version or 1) for v in versions) + 1
+
+    name = payload.name or current.name
+    clash = (
+        db.query(CommissionPlan)
+        .filter(
+            CommissionPlan.company_id == company_id,
+            CommissionPlan.name == name,
+            CommissionPlan.version == next_version,
+        )
+        .one_or_none()
+    )
+    if clash is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A commission plan named '{name}' version {next_version} already exists.",
+        )
+
+    new_plan = CommissionPlan(
+        company_id=company_id,
+        name=name,
+        description=payload.description if payload.description is not None else current.description,
+        trigger=payload.trigger or current.trigger,
+        status="draft",
+        version=next_version,
+        family_id=root,
+        effective_from=payload.effective_from,
+        created_by_user_id=created_by_user_id,
+    )
+    db.add(new_plan)
+    db.flush()
+
+    if payload.rules is not None:
+        _add_rules(db, new_plan.id, payload.rules)
+    else:
+        for rule in current.rules:
+            db.add(
+                CommissionRule(
+                    plan_id=new_plan.id,
+                    rule_type=rule.rule_type,
+                    params=dict(rule.params or {}),
+                    scope_category=rule.scope_category,
+                    scope_product_id=rule.scope_product_id,
+                    scope_variant_id=rule.scope_variant_id,
+                    scope_option_value_id=rule.scope_option_value_id,
+                    effective_from=rule.effective_from,
+                    effective_to=rule.effective_to,
+                )
+            )
+    db.flush()
+    db.commit()
+    db.refresh(new_plan)
+    return new_plan
+
+
+def activate_plan(
+    db: Session,
+    company_id: int,
+    plan_id: int,
+    *,
+    approved_by_user_id: Optional[int] = None,
+    effective_from: Optional[date] = None,
+) -> CommissionPlan:
+    """Activate a draft version and supersede the currently-active sibling
+    (its `effective_to` is closed the day before this version takes effect)."""
+    plan = (
+        db.query(CommissionPlan)
+        .options(joinedload(CommissionPlan.rules))
+        .filter(CommissionPlan.id == plan_id, CommissionPlan.company_id == company_id)
+        .one_or_none()
+    )
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Commission plan {plan_id} not found")
+    root = plan.family_id or plan.id
+    start = effective_from or plan.effective_from or date.today()
+
+    siblings = (
+        db.query(CommissionPlan)
+        .filter(
+            CommissionPlan.company_id == company_id,
+            CommissionPlan.family_id == root,
+            CommissionPlan.id != plan.id,
+            CommissionPlan.status == "active",
+            CommissionPlan.archived_at.is_(None),
+        )
+        .all()
+    )
+    for prior in siblings:
+        prior.effective_to = start - timedelta(days=1)
+
+    plan.status = "active"
+    plan.effective_from = start
+    plan.effective_to = None
+    plan.approved_by_user_id = approved_by_user_id
+    plan.approved_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def archive_plan(db: Session, company_id: int, plan_id: int) -> CommissionPlan:
+    plan = get_plan(db, company_id, plan_id)
+    plan.status = "archived"
+    plan.archived_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def effective_plan_version(
+    db: Session,
+    plan_id: int,
+    period_start: date,
+    period_end: date,
+    cache: Optional[dict] = None,
+) -> Optional[CommissionPlan]:
+    """The version of the plan family effective for a run period. Among
+    versions whose window covers the period, the latest `effective_from`
+    (NULL == open start, i.e. oldest) wins; ties break on higher `version`."""
+    root = plan_id
+    if cache is not None and root in cache:
+        return cache[root]
+
+    plans = (
+        db.query(CommissionPlan)
+        .options(joinedload(CommissionPlan.rules))
+        .filter(
+            CommissionPlan.family_id == root,
+            CommissionPlan.status == "active",
+            CommissionPlan.archived_at.is_(None),
+        )
+        .all()
+    )
+    best: Optional[CommissionPlan] = None
+    best_key = None
+    for p in plans:
+        if p.effective_from is not None and p.effective_from > period_end:
+            continue
+        if p.effective_to is not None and p.effective_to < period_start:
+            continue
+        key = (p.effective_from or date.min, p.version or 1)
+        if best is None or key >= best_key:
+            best, best_key = p, key
+    if cache is not None:
+        cache[root] = best
+    return best
 
 
 RULE_TYPES = {"flat_percent", "per_unit", "tiered", "target", "spiff", "team_override"}
@@ -606,6 +818,16 @@ def _validate_rule(rule_type: str, params: dict) -> None:
             raise HTTPException(status_code=422, detail="params.percent must be >= 0")
 
 
+def _representative_rank(plan: CommissionPlan):
+    """Pick the row that best represents a family in listings: the currently
+    effective active version, else the newest version."""
+    return (
+        1 if plan.status == "active" else 0,
+        1 if plan.effective_to is None else 0,
+        plan.version or 1,
+    )
+
+
 def list_plans(db: Session, company_id: int, include_archived: bool = False) -> List[CommissionPlan]:
     q = (
         db.query(CommissionPlan)
@@ -614,7 +836,15 @@ def list_plans(db: Session, company_id: int, include_archived: bool = False) -> 
     )
     if not include_archived:
         q = q.filter(CommissionPlan.archived_at.is_(None))
-    return q.order_by(CommissionPlan.name).all()
+    rows = q.all()
+
+    representatives: dict = {}
+    for plan in rows:
+        key = plan.family_id or plan.id
+        current = representatives.get(key)
+        if current is None or _representative_rank(plan) >= _representative_rank(current):
+            representatives[key] = plan
+    return sorted(representatives.values(), key=lambda p: p.name)
 
 
 def get_plan(db: Session, company_id: int, plan_id: int) -> CommissionPlan:
@@ -637,13 +867,15 @@ def assign_plan(
     effective_from=None,
     effective_to=None,
 ) -> CommissionPlanAssignment:
-    get_plan(db, company_id, plan_id)
+    # Assignments always target the family root; the engine resolves the
+    # version effective for the run period from there.
+    root_id = _family_root_id(db, company_id, plan_id)
     _assert_rep_in_company(db, company_id, private_user_id)
 
     existing = (
         db.query(CommissionPlanAssignment)
         .filter(
-            CommissionPlanAssignment.plan_id == plan_id,
+            CommissionPlanAssignment.plan_id == root_id,
             CommissionPlanAssignment.private_user_id == private_user_id,
         )
         .one_or_none()
@@ -656,7 +888,7 @@ def assign_plan(
         return existing
 
     assignment = CommissionPlanAssignment(
-        plan_id=plan_id,
+        plan_id=root_id,
         private_user_id=private_user_id,
         effective_from=effective_from,
         effective_to=effective_to,
@@ -668,10 +900,10 @@ def assign_plan(
 
 
 def list_assignments(db: Session, company_id: int, plan_id: int) -> List[CommissionPlanAssignment]:
-    get_plan(db, company_id, plan_id)
+    root_id = _family_root_id(db, company_id, plan_id)
     return (
         db.query(CommissionPlanAssignment)
-        .filter(CommissionPlanAssignment.plan_id == plan_id)
+        .filter(CommissionPlanAssignment.plan_id == root_id)
         .order_by(CommissionPlanAssignment.id)
         .all()
     )

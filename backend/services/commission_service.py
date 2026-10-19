@@ -41,6 +41,7 @@ from core.model import (
     SalesTarget,
     UnitOfMeasure,
 )
+from db_models.crud.field_sales import effective_plan_version
 
 COMMISSION_COMPONENT_CODE = "COMMISSION"
 _CENT = Decimal("0.01")
@@ -347,7 +348,7 @@ def compute_run(
 
     buckets: Dict[Tuple[int, int], dict] = {}
     rules_by_id: Dict[int, CommissionRule] = {}
-    plan_cache: Dict[int, CommissionPlan] = {}
+    plan_cache: Dict[int, Optional[CommissionPlan]] = {}
     uom_cache: Dict[int, Decimal] = {}
     opt_cache: Dict[int, set] = {}
 
@@ -360,11 +361,8 @@ def compute_run(
             if not assignments:
                 continue
             for assignment in assignments:
-                plan = plan_cache.get(assignment.plan_id)
+                plan = effective_plan_version(db, assignment.plan_id, period_start, period_end, plan_cache)
                 if plan is None:
-                    plan = db.query(CommissionPlan).filter(CommissionPlan.id == assignment.plan_id).one_or_none()
-                    plan_cache[assignment.plan_id] = plan
-                if plan is None or plan.status != "active" or plan.archived_at is not None:
                     continue
                 trigger = plan.trigger or "on_sale"
                 ratio = _sale_collection_ratio(sale, trigger) * weight
@@ -419,11 +417,8 @@ def compute_run(
         credits = _resolve_credits(db, sale, period_start, period_end)
         for rep_id, weight in credits:
             for assignment in _active_assignments(db, rep_id, period_start, period_end):
-                plan = plan_cache.get(assignment.plan_id)
+                plan = effective_plan_version(db, assignment.plan_id, period_start, period_end, plan_cache)
                 if plan is None:
-                    plan = db.query(CommissionPlan).filter(CommissionPlan.id == assignment.plan_id).one_or_none()
-                    plan_cache[assignment.plan_id] = plan
-                if plan is None or plan.status != "active" or plan.archived_at is not None:
                     continue
                 ratio = _sale_collection_ratio(sale, plan.trigger or "on_sale") * weight
                 if ratio == 0:
@@ -606,7 +601,7 @@ def _apply_team_overrides(
     period_start: date,
     period_end: date,
     payable_totals: Dict[int, Decimal],
-    plan_cache: Dict[int, CommissionPlan],
+    plan_cache: Dict[int, Optional[CommissionPlan]],
 ) -> None:
     """Pay managers an override over their direct reports' earned commission.
 
@@ -648,11 +643,8 @@ def _apply_team_overrides(
         if team_earned == 0:
             continue
         for assignment in _active_assignments(db, manager_id, period_start, period_end):
-            plan = plan_cache.get(assignment.plan_id)
+            plan = effective_plan_version(db, assignment.plan_id, period_start, period_end, plan_cache)
             if plan is None:
-                plan = db.query(CommissionPlan).filter(CommissionPlan.id == assignment.plan_id).one_or_none()
-                plan_cache[assignment.plan_id] = plan
-            if plan is None or plan.status != "active" or plan.archived_at is not None:
                 continue
             for rule in plan.rules:
                 if rule.rule_type != "team_override":

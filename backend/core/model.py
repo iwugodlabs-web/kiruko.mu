@@ -2901,7 +2901,15 @@ class SalesReturnLine(Base):
 class CommissionPlan(Base):
     """A per-company named commission plan — the self-service unit admins build
     rules under. `trigger` decides whether commission is earned when the order
-    is logged ('on_sale') or when the customer pays ('on_collection')."""
+    is logged ('on_sale') or when the customer pays ('on_collection').
+
+    Versioned + effective-dated (standard four-eyes design): a used version is
+    never edited in place. `family_id` groups the versions of one logical plan
+    (the root row's `family_id` == its own id); assignments reference the root,
+    and the engine selects the version effective for the run period. `status`
+    is draft|pending|active|archived — a new version starts as a `draft` and
+    only affects pay once activated.
+    """
     __tablename__ = "commission_plans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -2909,8 +2917,16 @@ class CommissionPlan(Base):
     name = Column(String(120), nullable=False)
     description = Column(String, nullable=True)
     trigger = Column(String(20), nullable=False, server_default="on_sale")  # on_sale|on_collection
-    status = Column(String(20), nullable=False, server_default="active")  # active|archived
+    status = Column(String(20), nullable=False, server_default="active")  # draft|pending|active|archived
     archived_at = Column(DateTime(timezone=True), nullable=True)
+    # --- versioning / effective dating (Step A) ---
+    version = Column(Integer, nullable=False, server_default="1")
+    family_id = Column(Integer, nullable=True, index=True)  # root plan id; == id for the root row
+    effective_from = Column(Date, nullable=True)  # NULL = open (effective since forever)
+    effective_to = Column(Date, nullable=True)    # NULL = open (still in effect)
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -2918,7 +2934,8 @@ class CommissionPlan(Base):
     rules = relationship("CommissionRule", back_populates="plan", cascade="all, delete-orphan")
 
     __table_args__ = (
-        UniqueConstraint("company_id", "name", name="uq_commission_plan_company_name"),
+        # Unique plan name per company per version (a version is a new row).
+        UniqueConstraint("company_id", "name", "version", name="uq_commission_plan_company_name_version"),
     )
 
 

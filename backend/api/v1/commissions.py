@@ -5,11 +5,11 @@ Every route is company-scoped via `require_company_scope`, which also authorizes
 the caller (owner / company admin / platform operator) and binds tenant context.
 """
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,6 +21,7 @@ from db_models.crud.audit import create_audit_log
 from schema.field_sales_schema import (
     CommissionPlanCreate,
     CommissionPlanRead,
+    CommissionPlanRevise,
     CommissionPushRequest,
     ManualSettlementRequest,
     CommissionRunCreate,
@@ -646,7 +647,7 @@ def create_plan(
     current_user: User = Depends(get_current_user),
     company=Depends(require_company_scope),
 ):
-    plan = crud.create_plan(db, company_id, payload)
+    plan = crud.create_plan(db, company_id, payload, created_by_user_id=current_user.user_id)
     create_audit_log(
         db, current_user.user_id, "field_sales.plan.create", "commission_plan", plan.id,
         {"company_id": company_id, "name": plan.name, "trigger": plan.trigger,
@@ -680,6 +681,90 @@ def get_plan(
     company=Depends(require_company_scope),
 ):
     return crud.get_plan(db, company_id, plan_id)
+
+
+@router.get(
+    "/companies/{company_id}/commission-plans/{plan_id}/versions",
+    response_model=List[CommissionPlanRead],
+)
+def list_plan_versions(
+    company_id: int,
+    plan_id: int,
+    db: Session = Depends(config.get_db),
+    company=Depends(require_company_scope),
+):
+    return crud.list_plan_versions(db, company_id, plan_id)
+
+
+@router.put(
+    "/companies/{company_id}/commission-plans/{plan_id}",
+    response_model=CommissionPlanRead,
+    status_code=201,
+)
+def revise_plan(
+    company_id: int,
+    plan_id: int,
+    payload: CommissionPlanRevise,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Copy-on-write: clone the plan into a new `draft` version. It only
+    affects pay once activated (a used version is never edited in place)."""
+    plan = crud.revise_plan(db, company_id, plan_id, payload, created_by_user_id=current_user.user_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.plan.revise", "commission_plan", plan.id,
+        {"company_id": company_id, "family_id": plan.family_id, "version": plan.version,
+         "name": plan.name}, commit=False,
+    )
+    db.commit()
+    return crud.get_plan(db, company_id, plan.id)
+
+
+@router.post(
+    "/companies/{company_id}/commission-plans/{plan_id}/activate",
+    response_model=CommissionPlanRead,
+)
+def activate_plan(
+    company_id: int,
+    plan_id: int,
+    effective_from: Optional[date] = Body(None, embed=True),
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Put a draft version into effect, superseding the current one."""
+    plan = crud.activate_plan(
+        db, company_id, plan_id,
+        approved_by_user_id=current_user.user_id, effective_from=effective_from,
+    )
+    create_audit_log(
+        db, current_user.user_id, "field_sales.plan.activate", "commission_plan", plan.id,
+        {"company_id": company_id, "family_id": plan.family_id, "version": plan.version,
+         "effective_from": str(plan.effective_from)}, commit=False,
+    )
+    db.commit()
+    return crud.get_plan(db, company_id, plan.id)
+
+
+@router.post(
+    "/companies/{company_id}/commission-plans/{plan_id}/archive",
+    response_model=CommissionPlanRead,
+)
+def archive_plan(
+    company_id: int,
+    plan_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    plan = crud.archive_plan(db, company_id, plan_id)
+    create_audit_log(
+        db, current_user.user_id, "field_sales.plan.archive", "commission_plan", plan.id,
+        {"company_id": company_id, "family_id": plan.family_id, "version": plan.version}, commit=False,
+    )
+    db.commit()
+    return plan
 
 
 @router.post(
