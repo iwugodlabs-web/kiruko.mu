@@ -306,6 +306,8 @@ A generic `change_requests(payload_json)` table (my first instinct) is **not** t
 - **Enable-time guard:** the flag can only be switched on when the company has **≥2 active admins**, so it can't brick a one-admin company or be worked around by self-approval.
 - **Web UI:** a *Pending approvals* inbox in Field Sales; plans/prices show `draft` vs `active` with a diff; the approve/reject control lives there.
 - **Tests:** self-approval → 403; a second admin activates; flag off → identical to today.
+- **As built (backend):** migration `field_sales_mkck_20261019` adds the flag plus `product_prices.status/created_by_user_id/approved_by_user_id/approved_at` (existing rows backfilled `active`). `GET/PUT /companies/{id}/field-sales/settings` reports/toggles the flag (PUT is admin-only; enabling with `<2` active admins → 409). With the flag on, `create_plan`/`revise_plan`/`create_price` land `pending`; `activate_plan`/`approve_price`/`reject_price` 403 when the actor is the creator; `resolve_price` only considers `active` rows, so a pending price cannot move pay. `PATCH variant.unit_price` (when the value actually changes) is refused with 409 in favour of effective-dated rows. `count_company_admins` counts the enabled owner + admin-level `PrivateUser`/`CompanyUserRole` holders.
+- **Tests:** `tests/test_field_sales_maker_checker.py` (4) — enable-time ≥2-admin guard, self-activation 403 then second-admin activation, pending price ignored then approved/rejected, raw `unit_price` lever refused.
 
 ### Scope boundaries
 

@@ -310,6 +310,9 @@ class Company(Base):
     # eyes on deliberate omissions. Off by default so single-admin companies can
     # still finalize; opt-in per company.
     payroll_maker_checker = Column(Boolean, nullable=False, server_default='false')
+    # Field Sales segregation of duties: when true, a plan/price version is
+    # created `pending` and must be activated by a different admin.
+    field_sales_maker_checker = Column(Boolean, nullable=False, server_default='false')
     # Review-by-exception (RBE) — % of *clean* sessions to surface into the
     # admin review queue as a random-sample audit (deterministic per timelog_id),
     # so "clean" is never a guaranteed skip. 0 = off. Stored as integer 0-100.
@@ -3204,6 +3207,13 @@ class ProductPrice(Base):
     effective_from = Column(Date, nullable=True)
     effective_to = Column(Date, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Maker-checker: `pending` rows do not resolve until approved by a second
+    # admin. Off (flag false) -> rows are created `active` immediately.
+    status = Column(String(20), nullable=False, server_default="active")
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
     # Denormalized product link so sales catalogue API can fetch time-versioned data.
     product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=True)

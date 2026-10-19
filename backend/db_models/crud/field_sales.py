@@ -19,6 +19,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from core.company_user_role import CompanyUserRole
+from core.roles import CompanyRole
 from core.model import (
     CommissionLineItem,
     CommissionPayable,
@@ -45,6 +47,7 @@ from core.model import (
     SalesReturnLine,
     SalesTarget,
     UnitOfMeasure,
+    User,
 )
 from schema.field_sales_schema import (
     CommissionPlanCreate,
@@ -522,6 +525,74 @@ def void_sale(db: Session, company_id: int, sale_id: int) -> Sale:
 # ---------------------------------------------------------------------------
 
 
+def _maker_checker(db: Session, company_id: int) -> bool:
+    """True when this company has opted into Field Sales segregation of duties."""
+    row = (
+        db.query(Company.field_sales_maker_checker)
+        .filter(Company.company_id == company_id)
+        .first()
+    )
+    return bool(row[0]) if row is not None else False
+
+
+def _norm_role(name) -> str:
+    return str(name).strip().lower().replace(" ", "_")
+
+
+def _admin_role_names() -> set:
+    names = {_norm_role(getattr(r, "value", r)) for r in CompanyRole.admin_roles()}
+    try:
+        from core.permission_guards import _SEEDED_COMPANY_ADMIN_ROLE_NAMES
+
+        names |= {_norm_role(n) for n in _SEEDED_COMPANY_ADMIN_ROLE_NAMES}
+    except Exception:
+        pass
+    return names
+
+
+def count_company_admins(db: Session, company_id: int) -> int:
+    """Enabled users holding an admin-level company role (owner included).
+
+    Used to gate switching maker-checker on: a company with one admin could
+    never satisfy `approved_by != created_by`, so the flag would deadlock it.
+    """
+    company = db.query(Company).filter(Company.company_id == company_id).one_or_none()
+    if company is None:
+        return 0
+
+    admin_names = _admin_role_names()
+    user_ids = set()
+    if company.user_id:
+        user_ids.add(company.user_id)
+
+    privates = (
+        db.query(PrivateUser.private_user_id, PrivateUser.user_id, PrivateUser.role)
+        .filter(PrivateUser.company_id == company_id)
+        .all()
+    )
+    private_to_user = {}
+    for pu_id, user_id, role in privates:
+        private_to_user[pu_id] = user_id
+        if _norm_role(role) in admin_names:
+            user_ids.add(user_id)
+
+    for pu_id, role in (
+        db.query(CompanyUserRole.private_user_id, CompanyUserRole.role)
+        .filter(CompanyUserRole.company_id == company_id)
+        .all()
+    ):
+        if _norm_role(role) in admin_names and pu_id in private_to_user:
+            user_ids.add(private_to_user[pu_id])
+
+    if not user_ids:
+        return 0
+    return (
+        db.query(User)
+        .filter(User.user_id.in_(user_ids), User.user_enabled.is_(True))
+        .count()
+    )
+
+
 def _add_rules(db: Session, plan_id: int, rules) -> None:
     for rule in rules:
         _validate_rule(rule.rule_type, rule.params)
@@ -566,7 +637,8 @@ def create_plan(
         name=payload.name,
         description=payload.description,
         trigger=payload.trigger or "on_sale",
-        status="active",
+        # Maker-checker: a new plan waits for a second admin to activate it.
+        status="pending" if _maker_checker(db, company_id) else "active",
         version=1,
         effective_from=payload.effective_from,
         created_by_user_id=created_by_user_id,
@@ -655,7 +727,7 @@ def revise_plan(
         name=name,
         description=payload.description if payload.description is not None else current.description,
         trigger=payload.trigger or current.trigger,
-        status="draft",
+        status="pending" if _maker_checker(db, company_id) else "draft",
         version=next_version,
         family_id=root,
         effective_from=payload.effective_from,
@@ -708,6 +780,15 @@ def activate_plan(
     if plan.archived_at is not None or plan.status == "archived":
         raise HTTPException(
             status_code=409, detail=f"Commission plan {plan_id} is archived and cannot be activated."
+        )
+    if (
+        _maker_checker(db, company_id)
+        and plan.created_by_user_id is not None
+        and approved_by_user_id == plan.created_by_user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker is on: a different admin must activate this version.",
         )
     root = plan.family_id or plan.id
     start = effective_from or plan.effective_from or date.today()
@@ -1294,7 +1375,12 @@ def create_variant(db: Session, company_id: int, product_id: int, payload: Varia
     return variant
 
 
-def create_price(db: Session, company_id: int, payload: ProductPriceCreate) -> ProductPrice:
+def create_price(
+    db: Session,
+    company_id: int,
+    payload: ProductPriceCreate,
+    created_by_user_id: Optional[int] = None,
+) -> ProductPrice:
     variant = get_variant(db, company_id, payload.variant_id)
     price = ProductPrice(
         company_id=company_id,
@@ -1305,8 +1391,66 @@ def create_price(db: Session, company_id: int, payload: ProductPriceCreate) -> P
         territory=payload.territory,
         effective_from=payload.effective_from,
         effective_to=payload.effective_to,
+        # Maker-checker: a pending price does not resolve until approved.
+        status="pending" if _maker_checker(db, company_id) else "active",
+        created_by_user_id=created_by_user_id,
     )
     db.add(price)
+    db.commit()
+    db.refresh(price)
+    return price
+
+
+def _get_price(db: Session, company_id: int, price_id: int) -> ProductPrice:
+    price = (
+        db.query(ProductPrice)
+        .filter(ProductPrice.company_id == company_id, ProductPrice.id == price_id)
+        .one_or_none()
+    )
+    if price is None:
+        raise HTTPException(status_code=404, detail=f"Product price {price_id} not found")
+    return price
+
+
+def approve_price(db: Session, company_id: int, price_id: int, *, approved_by_user_id: int) -> ProductPrice:
+    """Approve a pending price version. The approver must differ from its
+    creator when maker-checker is on (403 otherwise)."""
+    price = _get_price(db, company_id, price_id)
+    if price.status == "active":
+        return price
+    if (
+        _maker_checker(db, company_id)
+        and price.created_by_user_id is not None
+        and price.created_by_user_id == approved_by_user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker is on: a different admin must approve this price.",
+        )
+    price.status = "active"
+    price.approved_by_user_id = approved_by_user_id
+    price.approved_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(price)
+    return price
+
+
+def reject_price(db: Session, company_id: int, price_id: int, *, rejected_by_user_id: int) -> ProductPrice:
+    price = _get_price(db, company_id, price_id)
+    if price.status == "active":
+        raise HTTPException(status_code=409, detail="An active price cannot be rejected.")
+    if (
+        _maker_checker(db, company_id)
+        and price.created_by_user_id is not None
+        and price.created_by_user_id == rejected_by_user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker is on: a different admin must reject this price.",
+        )
+    price.status = "rejected"
+    price.approved_by_user_id = rejected_by_user_id
+    price.approved_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(price)
     return price
@@ -1328,7 +1472,9 @@ def resolve_price(
     """The effective price for a variant on a date (optionally per territory),
     falling back to the variant's inline price."""
     q = db.query(ProductPrice).filter(
-        ProductPrice.company_id == company_id, ProductPrice.variant_id == variant_id
+        ProductPrice.company_id == company_id,
+        ProductPrice.variant_id == variant_id,
+        ProductPrice.status == "active",
     )
     if territory is not None:
         q = q.filter(ProductPrice.territory == territory)
@@ -1818,6 +1964,19 @@ def update_variant(
 ) -> ProductVariant:
     variant = get_variant(db, company_id, variant_id)
     data = payload.model_dump(exclude_unset=True)
+
+    # Maker-checker: the inline unit price is the uncontrolled lever. When the
+    # flag is on, route price changes through effective-dated price versions.
+    if data.get("unit_price") is not None:
+        current = Decimal(str(variant.unit_price or 0))
+        if Decimal(str(data["unit_price"])) != current and _maker_checker(db, company_id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Maker-checker is on: change prices via effective-dated price "
+                    "versions, not the variant's inline unit price."
+                ),
+            )
 
     new_sku = data.get("sku")
     if new_sku and new_sku != variant.sku:

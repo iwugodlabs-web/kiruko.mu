@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from core import config
 from core.dependencies import get_current_user, require_company_scope
 from core.model import Company, CommissionRun, PrivateUser, User
+from core.roles import is_company_admin_for
 from db_models.crud import field_sales as crud
 from db_models.crud.audit import create_audit_log
 from schema.field_sales_schema import (
@@ -32,6 +33,7 @@ from schema.field_sales_schema import (
     ClawbackCreate,
     ErpReconcileRequest,
     ErpReconcileResult,
+    FieldSalesSettingsUpdate,
     LeaderboardRead,
     LiabilityAccrualRead,
     OutletCreate,
@@ -631,6 +633,55 @@ def update_outlet(
 
 
 # ---------------------------------------------------------------------------
+# Module settings (maker-checker)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/companies/{company_id}/field-sales/settings", response_model=dict)
+def get_field_sales_settings(
+    company_id: int,
+    db: Session = Depends(config.get_db),
+    company=Depends(require_company_scope),
+):
+    return {
+        "company_id": company_id,
+        "maker_checker": bool(company.field_sales_maker_checker),
+        "admin_count": crud.count_company_admins(db, company_id),
+    }
+
+
+@router.put("/companies/{company_id}/field-sales/settings", response_model=dict)
+def update_field_sales_settings(
+    company_id: int,
+    payload: FieldSalesSettingsUpdate,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    """Toggle segregation of duties. Enabling requires at least two active
+    admins — otherwise nobody could ever activate a version they created."""
+    if not is_company_admin_for(current_user, company_id, db):
+        raise HTTPException(status_code=403, detail="Only company admins can change this setting.")
+    if payload.maker_checker and not company.field_sales_maker_checker:
+        if crud.count_company_admins(db, company_id) < 2:
+            raise HTTPException(
+                status_code=409,
+                detail="Enabling maker-checker requires at least two active admins.",
+            )
+    company.field_sales_maker_checker = payload.maker_checker
+    db.commit()
+    create_audit_log(
+        db, current_user.user_id, "field_sales.settings.update", "company", company_id,
+        {"company_id": company_id, "maker_checker": payload.maker_checker}, commit=True,
+    )
+    return {
+        "company_id": company_id,
+        "maker_checker": bool(company.field_sales_maker_checker),
+        "admin_count": crud.count_company_admins(db, company_id),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Commission plans / rules / assignments
 # ---------------------------------------------------------------------------
 
@@ -1184,9 +1235,60 @@ def create_price(
     company_id: int,
     payload: ProductPriceCreate,
     db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
     company=Depends(require_company_scope),
 ):
-    return crud.create_price(db, company_id, payload)
+    price = crud.create_price(
+        db, company_id, payload, created_by_user_id=current_user.user_id
+    )
+    create_audit_log(
+        db, current_user.user_id, "field_sales.price.create", "product_price", price.id,
+        {"company_id": company_id, "variant_id": price.variant_id,
+         "amount": str(price.amount), "status": price.status}, commit=True,
+    )
+    return price
+
+
+@router.post(
+    "/companies/{company_id}/product-prices/{price_id}/approve",
+    response_model=ProductPriceRead,
+)
+def approve_price(
+    company_id: int,
+    price_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    price = crud.approve_price(
+        db, company_id, price_id, approved_by_user_id=current_user.user_id
+    )
+    create_audit_log(
+        db, current_user.user_id, "field_sales.price.approve", "product_price", price.id,
+        {"company_id": company_id, "status": price.status}, commit=True,
+    )
+    return price
+
+
+@router.post(
+    "/companies/{company_id}/product-prices/{price_id}/reject",
+    response_model=ProductPriceRead,
+)
+def reject_price(
+    company_id: int,
+    price_id: int,
+    db: Session = Depends(config.get_db),
+    current_user: User = Depends(get_current_user),
+    company=Depends(require_company_scope),
+):
+    price = crud.reject_price(
+        db, company_id, price_id, rejected_by_user_id=current_user.user_id
+    )
+    create_audit_log(
+        db, current_user.user_id, "field_sales.price.reject", "product_price", price.id,
+        {"company_id": company_id, "status": price.status}, commit=True,
+    )
+    return price
 
 
 @router.get(

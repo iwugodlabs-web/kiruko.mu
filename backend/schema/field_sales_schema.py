@@ -603,9 +603,17 @@ class ProductPriceRead(BaseModel):
     territory: Optional[str] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
+    status: str = "active"
+    created_by_user_id: Optional[int] = None
+    approved_by_user_id: Optional[int] = None
+    approved_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+class FieldSalesSettingsUpdate(BaseModel):
+    maker_checker: bool
 
 
 class VariantCreate(BaseModel):
