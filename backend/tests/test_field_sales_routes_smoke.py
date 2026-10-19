@@ -21,6 +21,7 @@ from core.model import (
     Company,
     EmployeeOneOffAllowance,
     PrivateUser,
+    ProductVariant,
     Sale,
     User,
 )
@@ -90,6 +91,8 @@ def rep_company(db):
         "DELETE FROM commission_plan_assignments",
         "DELETE FROM commission_rules",
         "DELETE FROM commission_plans",
+        "DELETE FROM sales_return_lines",
+        "DELETE FROM sales_returns",
         "DELETE FROM sale_lines",
         "DELETE FROM sales",
         "DELETE FROM product_variants",
@@ -309,3 +312,238 @@ def test_sales_view_scoping_rep_manager_admin(db, rep_company):
     finally:
         from main import app
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Bucket-2: verification smokes for the lower-risk read/report endpoints.
+# ---------------------------------------------------------------------------
+
+
+def _seed_approved_run(db, cid, rep_pid, owner_user_id):
+    """Via the admin HTTP path: product -> sale(for rep) -> plan+rule -> assign
+    -> compute -> approve. Returns ids for the downstream report endpoints."""
+    admin = _client(db, owner_user_id)
+    try:
+        pr = _ok(admin.post(f"/api/v1/companies/{cid}/products", json={
+            "name": "Coca-Cola", "category": "Beverages",
+            "default_variant": {"sku": "CC-500", "unit_price": "100.00"},
+        })).json()
+        variant_id = pr["variants"][0]["id"]
+        sale = _ok(admin.post(f"/api/v1/companies/{cid}/sales", json={
+            "rep_private_user_id": rep_pid,
+            "sold_at": "2026-05-10T09:00:00+00:00",
+            "lines": [{"variant_id": variant_id, "quantity": "24"}],
+        })).json()
+        plan = _ok(admin.post(f"/api/v1/companies/{cid}/commission-plans", json={
+            "name": "Rep 3%", "trigger": "on_sale",
+            "rules": [{"rule_type": "flat_percent", "params": {"percent": "3.00"},
+                       "scope_category": "Beverages"}],
+        })).json()
+        _ok(admin.post(f"/api/v1/companies/{cid}/commission-plans/{plan['id']}/assignments",
+                       json={"private_user_id": rep_pid, "effective_from": "2026-01-01"}))
+        run = _ok(admin.post(f"/api/v1/companies/{cid}/commission-runs",
+                             json={"period_start": "2026-05-01", "period_end": "2026-05-31"})).json()
+        _ok(admin.post(f"/api/v1/companies/{cid}/commission-runs/{run['id']}/approve", json={}))
+        return {"run_id": run["id"], "sale_id": sale["id"],
+                "sale_line_id": sale["lines"][0]["id"], "variant_id": variant_id}
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
+def test_leaderboard_and_liability_smoke(db, rep_company):
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    _seed_approved_run(db, cid, rep.private_user_id, owner.user_id)
+    admin = _client(db, owner.user_id)
+    try:
+        lb = _ok(admin.get(f"/api/v1/companies/{cid}/commission-leaderboard",
+                           params={"period_start": "2026-05-01", "period_end": "2026-05-31"})).json()
+        assert isinstance(lb.get("entries"), list) and len(lb["entries"]) >= 1
+        liab = _ok(admin.get(f"/api/v1/companies/{cid}/commission-liability")).json()
+        assert liab is not None
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
+def test_statement_pdf_smoke(db, rep_company):
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    seed = _seed_approved_run(db, cid, rep.private_user_id, owner.user_id)
+    admin = _client(db, owner.user_id)
+    try:
+        r = admin.get(
+            f"/api/v1/companies/{cid}/commission-runs/{seed['run_id']}/statement/{rep.private_user_id}.pdf"
+        )
+        # 503 only if the PDF renderer isn't installed in this env — the wiring
+        # (auth, run/rep lookup, line selection) is exercised either way.
+        assert r.status_code in (200, 503), f"{r.status_code}: {r.text}"
+        if r.status_code == 200:
+            assert r.content[:4] == b"%PDF"
+            assert r.headers.get("content-type", "").startswith("application/pdf")
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
+def test_sales_return_smoke(db, rep_company):
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    seed = _seed_approved_run(db, cid, rep.private_user_id, owner.user_id)
+    admin = _client(db, owner.user_id)
+    try:
+        ret = _ok(admin.post(f"/api/v1/companies/{cid}/sales-returns", json={
+            "sale_id": seed["sale_id"],
+            "returned_at": "2026-06-02T09:00:00+00:00",
+            "reason": "Damaged on delivery",
+            "lines": [{"sale_line_id": seed["sale_line_id"], "quantity": "6"}],
+        })).json()
+        assert "id" in ret
+        listed = _ok(admin.get(f"/api/v1/companies/{cid}/sales-returns",
+                               params={"sale_id": seed["sale_id"]})).json()
+        assert len(listed) == 1
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
+def test_bulk_review_smoke(db, rep_company):
+    """Month-end batch review: a reject needs a reason; both decisions apply to
+    the whole batch and report per-sale outcomes."""
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    variant_id = _make_variant(db, cid, owner.user_id)
+    admin = _client(db, owner.user_id)
+    try:
+        sale_ids = [
+            _ok(admin.post(f"/api/v1/companies/{cid}/sales", json={
+                "rep_private_user_id": rep.private_user_id,
+                "sold_at": "2026-05-10T09:00:00+00:00",
+                "lines": [{"variant_id": variant_id, "quantity": "1"}],
+            })).json()["id"]
+            for _ in range(2)
+        ]
+
+        # Reject without a reason is refused up front.
+        r = admin.post(f"/api/v1/companies/{cid}/sales/review-bulk",
+                       json={"sale_ids": sale_ids, "decision": "reject"})
+        assert r.status_code == 422, f"{r.status_code}: {r.text}"
+
+        rejected = _ok(admin.post(f"/api/v1/companies/{cid}/sales/review-bulk", json={
+            "sale_ids": sale_ids, "decision": "reject", "notes": "Pricing data wrong",
+        })).json()
+        assert rejected["succeeded"] == 2 and rejected["failed"] == 0, rejected
+        assert {r0["status"] for r0 in rejected["results"]} == {"rejected"}
+
+        approved = _ok(admin.post(f"/api/v1/companies/{cid}/sales/review-bulk", json={
+            "sale_ids": sale_ids, "decision": "approve",
+        })).json()
+        assert approved["succeeded"] == 2, approved
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+
+def test_clawback_smoke(db, rep_company):
+    """A clawback is recorded as a negative COMMISSION earning (never a rewrite)."""
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    admin = _client(db, owner.user_id)
+    try:
+        res = _ok(admin.post(f"/api/v1/companies/{cid}/commission-clawbacks", json={
+            "private_user_id": rep.private_user_id,
+            "amount": "120.00",
+            "reason": "Over-paid on a disputed sale",
+        })).json()
+        assert res.get("one_off_allowance_id"), res
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    row = (
+        db.query(EmployeeOneOffAllowance)
+        .filter(EmployeeOneOffAllowance.private_user_id == rep.private_user_id)
+        .one()
+    )
+    assert Decimal(row.amount) == Decimal("-120.00")
+
+
+def test_erp_reconcile_smoke(db, rep_company):
+    """External sales feed: dry-run matches SKUs, commit imports new rows, and a
+    replay of the same external_id is idempotent."""
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    _make_variant(db, cid, owner.user_id)  # sku "W-1L"
+    admin = _client(db, owner.user_id)
+
+    item = {
+        "external_id": "ERP-1001", "sku": "W-1L", "quantity": "5",
+        "sold_at": "2026-05-14T09:00:00+00:00", "rep_private_user_id": rep.private_user_id,
+    }
+    try:
+        dry = _ok(admin.post(f"/api/v1/companies/{cid}/sales/erp-reconcile",
+                             json={"items": [item], "commit": False})).json()
+        assert (dry["new"], dry["created"]) == (1, 0), dry
+
+        first = _ok(admin.post(f"/api/v1/companies/{cid}/sales/erp-reconcile",
+                               json={"items": [item], "commit": True})).json()
+        assert (first["new"], first["created"]) == (1, 1), first
+
+        replay = _ok(admin.post(f"/api/v1/companies/{cid}/sales/erp-reconcile",
+                                json={"items": [item], "commit": True})).json()
+        assert (replay["duplicates"], replay["created"]) == (1, 0), replay
+
+        unknown = _ok(admin.post(f"/api/v1/companies/{cid}/sales/erp-reconcile", json={
+            "items": [{**item, "external_id": "ERP-1002", "sku": "NOPE"}], "commit": False,
+        })).json()
+        assert unknown["unmatched_sku"] == 1, unknown
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    assert db.query(Sale).filter(
+        Sale.company_id == cid, Sale.client_uuid == "erp:ERP-1001"
+    ).count() == 1
+
+
+def test_product_import_smoke(db, rep_company):
+    """CSV product import: the template downloads, dry-run previews without
+    writing, and a commit creates the product/variant."""
+    company, rep, _ru, _r2, owner = rep_company
+    cid = company.company_id
+    admin = _client(db, owner.user_id)
+    csv_body = (
+        "name,sku,price,category\n"
+        "Imported Soda 1L,IMP-1L,50.00,Beverages\n"
+    )
+    try:
+        tpl = admin.get(f"/api/v1/companies/{cid}/products/import/template")
+        assert tpl.status_code == 200
+        assert tpl.headers.get("content-type", "").startswith("text/csv")
+        assert "name" in tpl.text
+
+        preview = _ok(admin.post(
+            f"/api/v1/companies/{cid}/products/import",
+            params={"dry_run": "true"},
+            files={"file": ("products.csv", csv_body, "text/csv")},
+        )).json()
+        assert preview["status"] == "preview" and preview["ready"] == 1, preview
+
+        imported = _ok(admin.post(
+            f"/api/v1/companies/{cid}/products/import",
+            params={"dry_run": "false"},
+            files={"file": ("products.csv", csv_body, "text/csv")},
+        )).json()
+        assert imported["status"] == "imported", imported
+        assert imported["products_created"] == 1 and imported["variants_created"] == 1, imported
+    finally:
+        from main import app
+        app.dependency_overrides.clear()
+
+    variant = (
+        db.query(ProductVariant)
+        .filter(ProductVariant.sku == "IMP-1L")
+        .one_or_none()
+    )
+    assert variant is not None
