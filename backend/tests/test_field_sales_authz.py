@@ -136,13 +136,19 @@ def test_pending_sales_route_is_not_shadowed_by_sale_id():
     Regression: with "{sale_id}" declared first, GET /sales/pending was parsed
     as sale_id="pending" and returned 422 before auth ran (seen in server logs).
     """
-    from main import app
+    # Inspect the router that actually declares these routes rather than the
+    # assembled `main.app`: the app is a module-level singleton, and under some
+    # pytest import orders it can be observed mid-construction (with a partial
+    # `v1.router`), which made this guard fail in CI even though the routes are
+    # registered. `include_router` preserves declaration order, so the router
+    # order below is exactly the order the app matches them in.
+    from api.v1 import commissions
 
-    paths = [getattr(r, "path", None) for r in app.routes]
-    pending = "/api/v1/companies/{company_id}/sales/pending"
-    dynamic = "/api/v1/companies/{company_id}/sales/{sale_id}"
-    assert pending in paths, "pending route not registered"
-    assert dynamic in paths, "sale detail route not registered"
+    paths = [getattr(r, "path", None) for r in commissions.router.routes]
+    pending = "/companies/{company_id}/sales/pending"
+    dynamic = "/companies/{company_id}/sales/{sale_id}"
+    assert pending in paths, "pending route not declared"
+    assert dynamic in paths, "sale detail route not declared"
     assert paths.index(pending) < paths.index(dynamic), (
         "GET /sales/pending is shadowed by /sales/{sale_id} — reorder the routes"
     )

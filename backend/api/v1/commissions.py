@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session, joinedload
 from core import config
 from core.dependencies import get_current_user, require_company_scope
 from core.model import Company, CommissionRun, PrivateUser, User
-from core.roles import is_company_admin_for
 from db_models.crud import field_sales as crud
 from db_models.crud.audit import create_audit_log
 from schema.field_sales_schema import (
@@ -660,8 +659,9 @@ def update_field_sales_settings(
 ):
     """Toggle segregation of duties. Enabling requires at least two active
     admins — otherwise nobody could ever activate a version they created."""
-    if not is_company_admin_for(current_user, company_id, db):
-        raise HTTPException(status_code=403, detail="Only company admins can change this setting.")
+    from core.permission_guards import assert_company_permission
+
+    assert_company_permission(current_user, company_id, 'manage_company_settings', db)
     if payload.maker_checker and not company.field_sales_maker_checker:
         if crud.count_company_admins(db, company_id) < 2:
             raise HTTPException(
