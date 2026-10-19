@@ -7,8 +7,9 @@
  */
 
 import { Palette, Type } from '@/app/constants/theme';
-import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -41,6 +42,7 @@ import useCurrency from '../hooks/useCurrency';
 import {
   isApiError,
   listCatalog,
+  listMySales,
   listOutlets,
   type CatalogProduct,
   type CatalogVariant,
@@ -79,8 +81,17 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): num
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+interface RepeatPayload {
+  lines?: { variant_id: number; quantity: number }[];
+  outlet_id?: number | null;
+  payment_method?: string | null;
+}
+
+const lastOutletKey = (companyId: number | null) => `field_sales:last_outlet:${companyId ?? 'none'}`;
+
 export default function NewFieldSaleScreen() {
   const router = useRouter();
+  const { repeat } = useLocalSearchParams<{ repeat?: string }>();
   const toast = useToast();
   const { user } = useAuth();
   const { baseCurrency } = useCurrency();
@@ -90,8 +101,10 @@ export default function NewFieldSaleScreen() {
 
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [outlets, setOutlets] = useState<FieldOutlet[]>([]);
+  const [recentVariantIds, setRecentVariantIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const appliedPrefill = useRef(false);
 
   const [selectedOutlet, setSelectedOutlet] = useState<FieldOutlet | null>(null);
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -110,21 +123,74 @@ export default function NewFieldSaleScreen() {
     [products],
   );
 
+  const recentVariants = useMemo(
+    () =>
+      recentVariantIds
+        .map((id) => allVariants.find((v) => v.variant.id === id))
+        .filter((v): v is { product: CatalogProduct; variant: CatalogVariant } => v != null),
+    [recentVariantIds, allVariants],
+  );
+
   useEffect(() => {
     (async () => {
       if (!companyId || !repId) {
         setLoading(false);
         return;
       }
-      const [catRes, outRes] = await Promise.all([
+      const [catRes, outRes, salesRes] = await Promise.all([
         listCatalog(companyId),
         listOutlets(companyId, repId),
+        listMySales(companyId, repId),
       ]);
-      if (!isApiError(catRes)) setProducts(catRes);
-      if (!isApiError(outRes)) setOutlets(outRes);
+      const catalog = isApiError(catRes) ? [] : catRes;
+      const repsOutlets = isApiError(outRes) ? [] : outRes;
+      setProducts(catalog);
+      setOutlets(repsOutlets);
+
+      if (!isApiError(salesRes)) {
+        const ids: number[] = [];
+        [...salesRes]
+          .filter((s) => s.status !== 'void')
+          .sort((a, b) => new Date(b.sold_at).getTime() - new Date(a.sold_at).getTime())
+          .forEach((s) => s.lines.forEach((l) => {
+            if (!ids.includes(l.variant_id)) ids.push(l.variant_id);
+          }));
+        setRecentVariantIds(ids.slice(0, 12));
+      }
+
+      if (!appliedPrefill.current) {
+        appliedPrefill.current = true;
+        const variants = catalog.flatMap((p) => p.variants);
+        let payload: RepeatPayload | null = null;
+        if (repeat) {
+          try {
+            payload = JSON.parse(String(repeat)) as RepeatPayload;
+          } catch {
+            payload = null;
+          }
+        }
+
+        if (payload?.lines?.length) {
+          const prefill = payload.lines
+            .map((l) => {
+              const variant = variants.find((v) => v.id === l.variant_id);
+              return variant ? { key: newClientUuid(), variant, quantity: String(Math.max(1, Number(l.quantity) || 1)) } : null;
+            })
+            .filter((l): l is DraftLine => l != null);
+          if (prefill.length) setLines(prefill);
+          if (payload.payment_method) setPaymentMethod(payload.payment_method);
+          const outlet = repsOutlets.find((o) => o.id === payload?.outlet_id);
+          if (outlet) setSelectedOutlet(outlet);
+        } else {
+          const stored = await AsyncStorage.getItem(lastOutletKey(companyId));
+          const outlet = stored ? repsOutlets.find((o) => String(o.id) === stored) : null;
+          if (outlet) setSelectedOutlet(outlet);
+        }
+      }
+
       setLoading(false);
     })();
-  }, [companyId, repId]);
+  }, [companyId, repId, repeat]);
 
   const captureLocation = useCallback(async () => {
     try {
@@ -146,6 +212,7 @@ export default function NewFieldSaleScreen() {
   const pickOutlet = useCallback(
     async (outlet: FieldOutlet) => {
       setSelectedOutlet(outlet);
+      AsyncStorage.setItem(lastOutletKey(companyId), String(outlet.id)).catch(() => {});
       const c = await captureLocation();
       if (c && outlet.latitude != null && outlet.longitude != null) {
         setVisitDistance(haversineM(c.latitude, c.longitude, outlet.latitude, outlet.longitude));
@@ -153,7 +220,7 @@ export default function NewFieldSaleScreen() {
         setVisitDistance(null);
       }
     },
-    [captureLocation],
+    [captureLocation, companyId],
   );
 
   const addVariant = useCallback((variant: CatalogVariant) => {
@@ -393,6 +460,28 @@ export default function NewFieldSaleScreen() {
           })}
         </ScrollView>
 
+        {recentVariants.length > 0 && (
+          <>
+            <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" mt="$5" mb="$2" ml="$1">
+              Recent
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4 }}>
+              {recentVariants.map(({ product, variant }) => (
+                <Pressable key={variant.id} onPress={() => addVariant(variant)}>
+                  <Box bg="white" px="$3" py="$2" rounded="$full" style={{ borderWidth: 1, borderColor: Palette.gray100 }}>
+                    <Text fontSize={Type.caption} fontWeight="700" color={Palette.ink} numberOfLines={1}>
+                      {product.name}
+                    </Text>
+                    <Text fontSize={Type.tiny} color={Palette.gray400}>
+                      {variant.sku}
+                    </Text>
+                  </Box>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </>
+        )}
+
         {/* Lines */}
         <HStack justifyContent="space-between" alignItems="center" mt="$5" mb="$2">
           <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" ml="$1">
@@ -433,8 +522,9 @@ export default function NewFieldSaleScreen() {
                       {l.variant.sku} · {l.variant.currency} {Number(l.variant.unit_price).toFixed(2)}
                     </Text>
                   </VStack>
-                  <HStack space="md" alignItems="center">
+                  <HStack space="sm" alignItems="center">
                     <Pressable
+                      accessibilityLabel={`Decrease quantity of ${l.variant.sku}`}
                       onPress={() =>
                         setLines((prev) =>
                           prev
@@ -442,23 +532,41 @@ export default function NewFieldSaleScreen() {
                             .filter((x) => Number(x.quantity) > 0),
                         )
                       }
-                      hitSlop={8}
+                      hitSlop={10}
                     >
-                      <Box bg={Palette.gray100} w="$8" h="$8" rounded="$full" alignItems="center" justifyContent="center">
-                        <Ionicons name="remove" size={16} color={Palette.ink} />
+                      <Box bg={Palette.gray100} w="$10" h="$10" rounded="$full" alignItems="center" justifyContent="center">
+                        <Ionicons name="remove" size={18} color={Palette.ink} />
                       </Box>
                     </Pressable>
-                    <Text fontWeight="900" color={Palette.ink} minWidth={28} textAlign="center">
-                      {l.quantity}
-                    </Text>
+                    <TextInput
+                      accessibilityLabel={`Quantity of ${l.variant.sku}`}
+                      value={l.quantity}
+                      onChangeText={(t) =>
+                        setLines((prev) => prev.map((x) => (x.key === l.key ? { ...x, quantity: t.replace(/[^0-9]/g, '') } : x)))
+                      }
+                      onBlur={() =>
+                        setLines((prev) =>
+                          prev.map((x) =>
+                            x.key === l.key ? { ...x, quantity: x.quantity === '' || Number(x.quantity) < 1 ? '1' : x.quantity } : x,
+                          ),
+                        )
+                      }
+                      keyboardType="number-pad"
+                      inputMode="numeric"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      maxLength={6}
+                      style={styles.qtyInput}
+                    />
                     <Pressable
+                      accessibilityLabel={`Increase quantity of ${l.variant.sku}`}
                       onPress={() =>
                         setLines((prev) => prev.map((x) => (x.key === l.key ? { ...x, quantity: String(Number(x.quantity) + 1) } : x)))
                       }
-                      hitSlop={8}
+                      hitSlop={10}
                     >
-                      <Box bg={Palette.ink} w="$8" h="$8" rounded="$full" alignItems="center" justifyContent="center">
-                        <Ionicons name="add" size={16} color="white" />
+                      <Box bg={Palette.ink} w="$10" h="$10" rounded="$full" alignItems="center" justifyContent="center">
+                        <Ionicons name="add" size={18} color="white" />
                       </Box>
                     </Pressable>
                   </HStack>
@@ -568,6 +676,15 @@ export default function NewFieldSaleScreen() {
 }
 
 const styles = StyleSheet.create({
+  qtyInput: {
+    minWidth: 48,
+    height: 40,
+    textAlign: 'center',
+    fontWeight: '900',
+    fontSize: 16,
+    color: Palette.ink,
+    paddingHorizontal: 4,
+  },
   headerShadow: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

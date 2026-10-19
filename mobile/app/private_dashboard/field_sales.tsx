@@ -9,7 +9,7 @@
 import { Palette, Type } from '@/app/constants/theme';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal as RNModal, RefreshControl, TextInput, TouchableOpacity } from 'react-native';
 import { Box, HStack, Pressable, ScrollView, Text, VStack } from '@gluestack-ui/themed';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -64,6 +64,9 @@ export default function FieldSalesScreen() {
   const [editMethod, setEditMethod] = useState<string>('cash');
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'submitted' | 'approved' | 'void'>('all');
+  const [period, setPeriod] = useState<'month' | 'all'>('month');
   // null = unknown (still checking); the entry is normally already hidden by
   // Settings, this is a defence-in-depth guard if the screen is reached anyway.
   const [moduleEnabled, setModuleEnabled] = useState<boolean | null>(null);
@@ -193,12 +196,44 @@ export default function FieldSalesScreen() {
     await load();
   }, [companyId, editing, editMethod, editNotes, load]);
 
+  const repeatSale = useCallback(
+    (s: RepSale) => {
+      const payload = {
+        outlet_id: s.outlet_id,
+        payment_method: s.payment_method ?? 'cash',
+        lines: s.lines.map((l) => ({ variant_id: l.variant_id, quantity: Number(l.quantity) || 1 })),
+      };
+      router.push({
+        pathname: '/private_dashboard/field_sale_new',
+        params: { repeat: JSON.stringify(payload) },
+      } as never);
+    },
+    [router],
+  );
+
   const monthKey = new Date().toISOString().slice(0, 7);
   const monthSales = sales.filter((s) => s.sold_at?.slice(0, 7) === monthKey);
   const monthTotal = monthSales.reduce(
     (acc, s) => acc + s.lines.reduce((a, l) => a + Number(l.line_total), 0),
     0,
   );
+
+  const visibleSales = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return sales.filter((s) => {
+      if (period === 'month' && s.sold_at?.slice(0, 7) !== monthKey) return false;
+      if (statusFilter !== 'all' && s.status !== statusFilter) return false;
+      if (!q) return true;
+      const haystack = [
+        s.notes ?? '',
+        s.payment_method ?? '',
+        ...s.lines.map((l) => `${l.product_name ?? ''} ${l.variant_sku ?? ''}`),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [sales, query, statusFilter, period, monthKey]);
 
   if (moduleEnabled === false) {
     return (
@@ -348,9 +383,71 @@ export default function FieldSalesScreen() {
           </HStack>
         </TouchableOpacity>
 
-        <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" mb="$2" ml="$1">
-          My recent sales
-        </Text>
+        <HStack justifyContent="space-between" alignItems="center" mb="$2">
+          <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" ml="$1">
+            My recent sales
+          </Text>
+          <Text fontSize={Type.tiny} fontWeight="700" color={Palette.gray400} mr="$1">
+            {visibleSales.length} of {sales.length}
+          </Text>
+        </HStack>
+
+        <Box bg="white" rounded="$xl" px="$3" py="$2" mb="$2" style={{ borderWidth: 1, borderColor: Palette.gray100 }}>
+          <HStack alignItems="center" space="sm">
+            <Ionicons name="search" size={16} color={Palette.gray400} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search product, SKU or notes"
+              placeholderTextColor={Palette.gray400}
+              style={{ flex: 1, fontSize: 14, color: Palette.ink, paddingVertical: 4 }}
+            />
+            {query.length > 0 && (
+              <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color={Palette.gray400} />
+              </Pressable>
+            )}
+          </HStack>
+        </Box>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
+          {([
+            { value: 'all', label: 'All' },
+            { value: 'submitted', label: 'Submitted' },
+            { value: 'approved', label: 'Approved' },
+            { value: 'void', label: 'Void' },
+          ] as const).map((f) => {
+            const active = statusFilter === f.value;
+            return (
+              <Pressable key={f.value} onPress={() => setStatusFilter(f.value)}>
+                <Box
+                  bg={active ? Palette.ink : 'white'}
+                  px="$3"
+                  py="$2"
+                  rounded="$full"
+                  style={{ borderWidth: 1, borderColor: active ? Palette.ink : Palette.gray100 }}
+                >
+                  <Text fontSize={Type.tiny} fontWeight="800" color={active ? 'white' : Palette.gray600}>
+                    {f.label}
+                  </Text>
+                </Box>
+              </Pressable>
+            );
+          })}
+          <Pressable onPress={() => setPeriod(period === 'month' ? 'all' : 'month')}>
+            <Box
+              bg={period === 'all' ? Palette.ink : 'white'}
+              px="$3"
+              py="$2"
+              rounded="$full"
+              style={{ borderWidth: 1, borderColor: period === 'all' ? Palette.ink : Palette.gray100 }}
+            >
+              <Text fontSize={Type.tiny} fontWeight="800" color={period === 'all' ? 'white' : Palette.gray600}>
+                {period === 'month' ? 'This month' : 'All time'}
+              </Text>
+            </Box>
+          </Pressable>
+        </ScrollView>
 
         {loading ? (
           <Box py="$10" alignItems="center">
@@ -366,9 +463,19 @@ export default function FieldSalesScreen() {
               Sales you log in the field will appear here.
             </Text>
           </Box>
+        ) : visibleSales.length === 0 ? (
+          <Box bg="white" p="$8" rounded="$2xl" alignItems="center">
+            <Ionicons name="search" size={32} color={Palette.gray300} />
+            <Text fontWeight="800" color={Palette.ink} mt="$3">
+              No matching sales
+            </Text>
+            <Text fontSize={Type.caption} color={Palette.gray400} textAlign="center" mt="$1">
+              Try a different search or widen the filters.
+            </Text>
+          </Box>
         ) : (
           <VStack space="sm">
-            {sales.slice(0, 30).map((s) => {
+            {visibleSales.slice(0, 100).map((s) => {
               const total = s.lines.reduce((acc, l) => acc + Number(l.line_total), 0);
               return (
                 <Box key={s.id} bg="white" p="$4" rounded="$xl" style={{ borderWidth: 1, borderColor: Palette.gray100 }}>
@@ -408,24 +515,6 @@ export default function FieldSalesScreen() {
                       <Text fontSize={Type.tiny} color={Palette.gray400} textTransform="capitalize">
                         {s.status}
                       </Text>
-                      {s.status !== 'void' && (
-                        <HStack space="md" alignItems="center">
-                          <Pressable onPress={() => openEdit(s)} hitSlop={8}>
-                            <HStack alignItems="center" space="xs">
-                              <Ionicons name="create-outline" size={14} color={Palette.blue} />
-                              <Text fontSize={Type.tiny} fontWeight="800" color={Palette.blue}>Edit</Text>
-                            </HStack>
-                          </Pressable>
-                          {s.status !== 'approved' && (
-                            <Pressable onPress={() => confirmVoid(s)} hitSlop={8}>
-                              <HStack alignItems="center" space="xs">
-                                <Ionicons name="close-circle-outline" size={14} color={Palette.error} />
-                                <Text fontSize={Type.tiny} fontWeight="800" color={Palette.error}>Void</Text>
-                              </HStack>
-                            </Pressable>
-                          )}
-                        </HStack>
-                      )}
                     </VStack>
                   </HStack>
                   <VStack mt="$2" space="xs" style={{ borderTopWidth: 1, borderTopColor: Palette.gray100, paddingTop: 8 }}>
@@ -441,6 +530,30 @@ export default function FieldSalesScreen() {
                       </HStack>
                     ))}
                   </VStack>
+                  <HStack mt="$2" justifyContent="flex-end" alignItems="center" space="lg">
+                    <Pressable onPress={() => repeatSale(s)} hitSlop={8}>
+                      <HStack alignItems="center" space="xs">
+                        <Ionicons name="repeat" size={14} color={Palette.ink} />
+                        <Text fontSize={Type.tiny} fontWeight="800" color={Palette.ink}>Repeat</Text>
+                      </HStack>
+                    </Pressable>
+                    {s.status !== 'void' && (
+                      <Pressable onPress={() => openEdit(s)} hitSlop={8}>
+                        <HStack alignItems="center" space="xs">
+                          <Ionicons name="create-outline" size={14} color={Palette.blue} />
+                          <Text fontSize={Type.tiny} fontWeight="800" color={Palette.blue}>Edit</Text>
+                        </HStack>
+                      </Pressable>
+                    )}
+                    {s.status !== 'void' && s.status !== 'approved' && (
+                      <Pressable onPress={() => confirmVoid(s)} hitSlop={8}>
+                        <HStack alignItems="center" space="xs">
+                          <Ionicons name="close-circle-outline" size={14} color={Palette.error} />
+                          <Text fontSize={Type.tiny} fontWeight="800" color={Palette.error}>Void</Text>
+                        </HStack>
+                      </Pressable>
+                    )}
+                  </HStack>
                 </Box>
               );
             })}
