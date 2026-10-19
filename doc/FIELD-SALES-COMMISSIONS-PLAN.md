@@ -239,7 +239,7 @@ Five items are buildable now, headless, with tests; two are deferred until a cli
 **Build now**
 1. ✅ **Verification tests (Bucket 2)** — **done.** `tests/test_field_sales_routes_smoke.py` now smokes the lower-risk read/report routes over HTTP: returns/credit-notes, clawbacks (negative COMMISSION earning), ERP reconcile (dry-run match → commit → idempotent replay → unknown-SKU), bulk review (reject-needs-reason + both decisions apply to the batch), leaderboard/liability, product import (template download → dry-run preview → commit) and a statement-PDF check (real `%PDF`). The fixture teardown now clears `sales_return_lines`/`sales_returns` before `sale_lines` (FK order). Full field-sales set: **110 tests green**.
 2. ✅ **Contractor manual-payout settlement** — **done (`0404f22`).** `payout_channel` is now **derived from the rep's `payroll_status`** at compute (off_payroll → `manual`), not hardcoded; new `settle_manual_payouts` service + `POST .../commission-runs/{id}/settle-manual` records an external reference (`commission_payables.settlement_reference`, migration `comm_settle_ref_20261018`) and settles off-payroll commission without a one-off/payslip. Tested (`test_field_sales_contractor.py`).
-3. **Maker-checker on plan/price** — an approval state + two-actor flow on plan and price changes, mirroring the existing `payroll_maker_checker` pattern. _Decision: which mutations require a second approver._
+3. 🟡 **Plan & price versioning + maker-checker** — **planned** (see *Plan & price versioning* below). Not a generic two-actor "pending changes" store: the standard pattern is to **version the controlled object** and gate activation. Versioning is a prerequisite, so this is a small phase, not a one-line flag.
 4. ✅ **Team / manager view-scoping** — **done (`e2cb096`).** `GET /sales` is now scoped: owner/admin → all; **manager → self + direct reports** (via `PrivateUser.manager_private_user_id`); rep → self; an out-of-scope rep filter is 403'd. `crud.list_sales/count_sales` gained an `IN` filter. Tested with a non-team third rep (admin 3 / manager 2 / rep 1). _Follow-ups: scope `list-pending` + `leaderboard` too._
 5. ✅ **Statutory-codes hardening** — **done (`0404f22`).** The `COMMISSION` component's `statutory_base_codes` now come from the shared resolver (`infer_statutory_base_codes`) — PAYE + CSG, no NSF — not a hardcoded literal.
 
@@ -251,6 +251,69 @@ Five items are buildable now, headless, with tests; two are deferred until a cli
 - Statutory PAYE/CSG/NSF (taxable earning), **EOY-bonus inclusion** (automatic via `bonus_provisioning` summing `payslip.gross`), and rounding.
 
 **Out of scope** — multi-invoice FIFO payment allocation (needs an invoice/payment subsystem; collides with the "not an ERP" non-goal).
+
+---
+
+## Plan & price versioning (plan — 2026-10-19)
+
+The remaining build (#3). Written this way after checking how ERP / payroll / incentive-comp systems actually do four-eyes control — they **version the controlled object** and gate its activation, they don't keep a separate table of deferred patches. The original one-line "#3" was too vague to build against; this replaces it.
+
+### Why this, and why not the obvious shortcut
+
+Three findings in the current code drive the shape:
+
+- **Plans can't be edited at all.** `commission_plans` has `status` (active|archived) and `archived_at` but no version — and the `CommissionPlanAssignment` model already says *"plan versioning land (later phases)."* So editing is the real missing capability, not just an approval step.
+- **The controlled price isn't controlled.** A sale snapshots `variant.unit_price` (`db_models/crud/field_sales.py:288`); the effective-dated `ProductPrice` table is **unused for pricing**. Editing `unit_price` in place is a silent change to what reps earn.
+- **No separation of duties.** Any single admin can change what every rep earns, with only an audit-log entry. `companies.payroll_maker_checker` is DB-only and only guards *finalize vs acknowledge* — it isn't a reusable approval mechanism.
+
+A generic `change_requests(payload_json)` table (my first instinct) is **not** the standard and is explicitly rejected: it duplicates validation, stores stale payloads, keeps no real version history, and fights effective dating. Approval is a **state on a version**.
+
+### The principle
+
+- **Version, never edit in place.** A used version is immutable; a change is a new version.
+- **Effective-date everything.** A new version activates on a date; the engine selects the version effective for the sale/period.
+- **Maker-checker = activation guard.** `draft → pending → active`, with `approved_by_user_id != created_by_user_id` when the policy is on.
+- **Safe by construction.** Sale lines and commission runs already freeze price/plan, so versioning can't rewrite a closed period — changes only affect future runs.
+- **RBAC + audit stay the default.** The maker-checker flag is opt-in; when off, behaviour is unchanged.
+
+### Step A — Version the plan (low risk, build first)
+
+- Add to `commission_plans`: `version` (int, default 1), `effective_from` (date), `effective_to` (date, nullable), `created_by_user_id`, `approved_by_user_id`, `approved_at`; widen `status` to `draft | pending | active | archived`.
+- **Edit = copy-on-write:** editing an active plan clones a new `draft` version; activating it sets the prior version's `effective_to` and makes the new one `active`.
+- **Compute selects by date:** the engine picks the version effective for the sale/period — the same effective-date selection already used for salary structures (not "latest row wins").
+- **Uniqueness** moves from `(company_id, name)` to `(company_id, name, version)`.
+- **Routes:** `PUT /commission-plans/{id}` → new draft version; `POST /commission-plans/{id}/activate`; `POST /commission-plans/{id}/archive`. `POST` stays as today (version 1, active) so nothing breaks.
+- **Backfill:** existing plans → `version=1`, `active`, `effective_from = created_at`.
+- **Tests:** edit creates a version; compute picks the right version by period; activate supersedes the prior (`effective_to` set); pre-existing plans unchanged.
+
+### Step B — Make the effective-dated price real (can change numbers — handle with care)
+
+- **Decision:** where the sale price comes from.
+  - **B1 (recommended):** `ProductPrice` is the controlled price — sale pricing resolves the row effective for `(variant, sold_at)`, **falling back to `variant.unit_price`** when none exists. Purely additive; no backfill; existing behaviour preserved where no price row is defined.
+  - **B2:** price versions on the variant itself; `ProductPrice` stays auxiliary. More invasive.
+- With B1, incoming prices no longer require editing `unit_price` — a correction is a new future-dated price row, not an in-place edit (which also makes Step C meaningful for prices).
+- Guard the raw lever: when maker-checker is on, an in-place `PATCH variant.unit_price` is refused in favour of a versioned price.
+- **Tests:** effective price by date; fallback to `unit_price`; already-created sale lines keep their snapshot.
+
+### Step C — Opt-in maker-checker (on top of A)
+
+- Add `companies.field_sales_maker_checker` (boolean, default **false**). **Not** `payroll_maker_checker` — different risk domain, and the payroll flag isn't even exposed in any API/UI.
+- When on: creating, editing, or activating a plan/price version requires a **different** admin — the object sits in `pending` until a second admin activates it (`approved_by ≠ created_by`).
+- **Enable-time guard:** the flag can only be switched on when the company has **≥2 active admins**, so it can't brick a one-admin company or be worked around by self-approval.
+- **Web UI:** a *Pending approvals* inbox in Field Sales; plans/prices show `draft` vs `active` with a diff; the approve/reject control lives there.
+- **Tests:** self-approval → 403; a second admin activates; flag off → identical to today.
+
+### Scope boundaries
+
+- **Controlled:** commission plans (create/edit/activate/archive) and prices (`ProductPrice` rows / `unit_price`).
+- **Not controlled:** catalog setup (creating products/variants), categories, outlets, notes — onboarding must stay frictionless.
+- **No generic workflow engine**; no payload-change table. Approval is a status on a version.
+
+### Delivery, effort and risk
+
+- **Order: A → B → C.** A is low-risk with no user-visible change for single-admin companies. B is the one that can move live payout numbers, so it ships with the fallback + tests and is announced. C is policy, off by default, so it can land quietly.
+- **Effort:** A ≈ 0.5–1 day; B ≈ 0.5–1 day; C ≈ 0.5–1 day; plus the web approval UI.
+- **Open question:** B1 vs B2 (where the controlled price lives) — B1 recommended.
 
 ---
 
@@ -288,7 +351,7 @@ Field-sales tools capture selling but can't pay. Payroll tools pay but can't see
 - **The cost** — 20 field-sales tables, all built & committed, in 3 clean layers. Stages D–L lean on the existing payroll spine — though several once-assumed reuses (geofence-for-visits, barcode OCR, the sector/rule/bonus/budget jobs) proved to be new work over existing *patterns*, not drop-in reuse.
 - **The revenue** — A natural paid B2B tier — the field-sales upgrade on top of the payroll base.
 
-_Status (2026-10-19): backend (Phases 0–3.2) is built and **committed**; the field-sales suite is **110 tests green** (`tests/test_field_sales_routes_smoke.py` now covers both buckets — the core loop, module gate, rep self-scoping 403s, idempotent sync, and the Bucket-2 read/report routes: returns, clawbacks, ERP reconcile, bulk review, leaderboard/liability, product import, statement PDF). Web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors); mobile client **typechecks clean** with offline-sync worker unit tests. Of the agreed next-build items, **#1 (Bucket-2 verification), #2 (contractor settlement), #4 (team view-scoping) and #5 (statutory codes) are done**; **#3 maker-checker on plan/price is the remaining build** (plus the deferred, demand-driven FX and net-of-discount items). Still to do: the mobile **UI screens have not been run in a simulator** and the SQLite queue persistence is mocked (not integration-tested)._
+_Status (2026-10-19): backend (Phases 0–3.2) is built and **committed**; the field-sales suite is **110 tests green** (`tests/test_field_sales_routes_smoke.py` now covers both buckets — the core loop, module gate, rep self-scoping 403s, idempotent sync, and the Bucket-2 read/report routes: returns, clawbacks, ERP reconcile, bulk review, leaderboard/liability, product import, statement PDF). Web admin UI **builds clean** (`next build` ✓, `tsc --noEmit` 0 errors); mobile client **typechecks clean** with offline-sync worker unit tests. Of the agreed next-build items, **#1 (Bucket-2 verification), #2 (contractor settlement), #4 (team view-scoping) and #5 (statutory codes) are done**; **#3 is the remaining build — re-scoped and detailed in *Plan & price versioning* above** (versioning first; the deferred, demand-driven FX and net-of-discount items below stay parked). Still to do: the mobile **UI screens have not been run in a simulator** and the SQLite queue persistence is mocked (not integration-tested)._
 
 > **Test-run note:** run the field-sales suite by **explicit file list**, not a whole-`tests/` `-k` selection. `main.py` calls `load_dotenv(override=True)`, so collecting every test module can load `backend/.env` (`POSTGRES_DB=ivor_activity_restored`) before the session bootstrap and trip conftest's non-test-DB guard. Per-file runs are unaffected.
 
