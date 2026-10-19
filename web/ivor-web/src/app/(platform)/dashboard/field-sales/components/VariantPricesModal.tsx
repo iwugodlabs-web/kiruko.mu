@@ -6,6 +6,8 @@ import { X, Tag, Loader2, Plus } from "lucide-react";
 import {
   listPrices,
   createPrice,
+  approvePrice,
+  rejectPrice,
   type ProductPrice,
   type ProductVariant,
 } from "@/services/fieldSales";
@@ -53,7 +55,7 @@ export default function VariantPricesModal({ companyId, productId, productName, 
     }
     setSaving(true);
     try {
-      await createPrice(companyId, {
+      const created = await createPrice(companyId, {
         variant_id: variant.id,
         amount: form.amount,
         currency: variant.currency,
@@ -61,7 +63,11 @@ export default function VariantPricesModal({ companyId, productId, productName, 
         effective_to: form.effective_to || null,
         territory: form.territory || null,
       });
-      toast.success("Price added.");
+      toast.success(
+        created.status === "pending"
+          ? "Price sent for approval by a second admin."
+          : "Price added.",
+      );
       setForm({ ...EMPTY, amount: variant.unit_price });
       load();
     } catch (e: unknown) {
@@ -69,6 +75,22 @@ export default function VariantPricesModal({ companyId, productId, productName, 
       toast.error(err.response?.data?.detail || "Could not add price.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDecision(priceId: number, action: "approve" | "reject") {
+    try {
+      if (action === "approve") {
+        await approvePrice(companyId, priceId);
+        toast.success("Price approved.");
+      } else {
+        await rejectPrice(companyId, priceId);
+        toast.success("Price rejected.");
+      }
+      load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || `Could not ${action} price.`);
     }
   }
 
@@ -105,13 +127,32 @@ export default function VariantPricesModal({ companyId, productId, productName, 
             ) : (
               <ul className="space-y-1.5">
                 {prices.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between rounded-md border border-zinc-100 dark:border-zinc-800 px-2.5 py-1.5 text-xs">
-                    <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                  <li key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-zinc-100 dark:border-zinc-800 px-2.5 py-1.5 text-xs">
+                    <span className="flex items-center gap-2 font-medium text-zinc-800 dark:text-zinc-200">
                       {p.currency} {p.amount}
+                      <StatusBadge status={p.status || "active"} />
                     </span>
-                    <span className="text-zinc-400">
-                      {p.territory ? `${p.territory} · ` : ""}
-                      {p.effective_from ?? "open"} → {p.effective_to ?? "open"}
+                    <span className="flex items-center gap-2 text-zinc-400">
+                      <span>
+                        {p.territory ? `${p.territory} · ` : ""}
+                        {p.effective_from ?? "open"} → {p.effective_to ?? "open"}
+                      </span>
+                      {p.status && p.status !== "active" && p.status !== "rejected" && (
+                        <>
+                          <button
+                            onClick={() => handleDecision(p.id, "approve")}
+                            className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleDecision(p.id, "reject")}
+                            className="rounded border border-zinc-300 dark:border-zinc-700 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-300"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -163,5 +204,19 @@ export default function VariantPricesModal({ companyId, productId, productName, 
         </div>
       </div>
     </div>
+  );
+}
+
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    active: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+    pending: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
+    rejected: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+  };
+  return (
+    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium capitalize ${styles[status] || styles.rejected}`}>
+      {status}
+    </span>
   );
 }

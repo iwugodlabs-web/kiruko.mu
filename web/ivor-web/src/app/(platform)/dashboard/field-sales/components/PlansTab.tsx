@@ -216,7 +216,11 @@ export default function PlansTab({ onNavigate }: { onNavigate: NavigateTab }) {
           trigger: draft.trigger,
           rules: draftRules(),
         });
-        toast.success(`Draft v${created.version} created — activate it to put it into effect.`);
+        toast.success(
+          created.status === "pending"
+            ? `v${created.version} sent for approval by a second admin.`
+            : `Draft v${created.version} created — activate it to put it into effect.`,
+        );
         openVersions(created);
       } else {
         await createPlan(companyId, {
@@ -225,7 +229,9 @@ export default function PlansTab({ onNavigate }: { onNavigate: NavigateTab }) {
           trigger: draft.trigger,
           rules: draftRules(),
         });
-        toast.success("Plan created — now assign it to reps so it starts paying.");
+        toast.success(
+          "Plan created — now assign it to reps so it starts paying.",
+        );
       }
       resetForm();
       load();
@@ -332,8 +338,8 @@ export default function PlansTab({ onNavigate }: { onNavigate: NavigateTab }) {
 
         {reviseFor && (
           <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-            Saving creates a <strong>new draft version</strong>. The live version keeps paying until
-            you activate the draft.{" "}
+            Saving creates a <strong>new version</strong> (draft, or pending approval when
+            maker-checker is on). The live version keeps paying until it is activated.{" "}
             <button onClick={resetForm} className="font-medium underline">
               Cancel
             </button>
@@ -559,7 +565,9 @@ export default function PlansTab({ onNavigate }: { onNavigate: NavigateTab }) {
                     className={
                       p.status === "active"
                         ? "whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-950/40 dark:text-green-300"
-                        : "whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium capitalize text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                        : p.status === "pending"
+                          ? "whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium capitalize text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                          : "whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium capitalize text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                     }
                   >
                     {p.status}
@@ -688,6 +696,12 @@ export default function PlansTab({ onNavigate }: { onNavigate: NavigateTab }) {
               ))}
               {versions.length === 0 && <li className="text-xs text-gray-500">No versions.</li>}
             </ul>
+            {versions.some((v) => v.status === "pending") && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                Pending versions need a <strong>different admin</strong> to activate them
+                (maker-checker).
+              </p>
+            )}
             <div className="flex items-center gap-2">
               <label className="text-[11px] text-gray-500 dark:text-gray-400">Activate drafts from</label>
               <input

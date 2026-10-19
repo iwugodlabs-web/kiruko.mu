@@ -325,6 +325,10 @@ export interface ProductPrice {
   effective_from?: string | null;
   effective_to?: string | null;
   reference?: string | null;
+  status?: string;
+  created_by_user_id?: number | null;
+  approved_by_user_id?: number | null;
+  approved_at?: string | null;
 }
 
 export async function listPrices(companyId: number, productId: number, variantId: number): Promise<ProductPrice[]> {
@@ -334,6 +338,37 @@ export async function listPrices(companyId: number, productId: number, variantId
 
 export async function createPrice(companyId: number, input: Record<string, unknown>): Promise<ProductPrice> {
   const res = await api.post(`/companies/${companyId}/product-prices`, input);
+  return res.data;
+}
+
+export async function approvePrice(companyId: number, priceId: number): Promise<ProductPrice> {
+  const res = await api.post(`/companies/${companyId}/product-prices/${priceId}/approve`);
+  return res.data;
+}
+
+export async function rejectPrice(companyId: number, priceId: number): Promise<ProductPrice> {
+  const res = await api.post(`/companies/${companyId}/product-prices/${priceId}/reject`);
+  return res.data;
+}
+
+export interface FieldSalesSettings {
+  company_id: number;
+  maker_checker: boolean;
+  admin_count: number;
+}
+
+export async function getFieldSalesSettings(companyId: number): Promise<FieldSalesSettings> {
+  const res = await api.get(`/companies/${companyId}/field-sales/settings`);
+  return res.data;
+}
+
+export async function updateFieldSalesSettings(
+  companyId: number,
+  makerChecker: boolean,
+): Promise<FieldSalesSettings> {
+  const res = await api.put(`/companies/${companyId}/field-sales/settings`, {
+    maker_checker: makerChecker,
+  });
   return res.data;
 }
 
