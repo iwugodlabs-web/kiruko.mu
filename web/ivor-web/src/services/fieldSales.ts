@@ -109,6 +109,13 @@ export interface CommissionPlan {
   description?: string | null;
   trigger: string;
   status: string;
+  version: number;
+  family_id?: number | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  created_by_user_id?: number | null;
+  approved_by_user_id?: number | null;
+  approved_at?: string | null;
   rules: CommissionRule[];
 }
 
@@ -490,6 +497,29 @@ export async function listAssignments(companyId: number, planId: number): Promis
 
 export async function assignPlan(companyId: number, planId: number, input: Record<string, unknown>): Promise<PlanAssignment> {
   const res = await api.post(`/companies/${companyId}/commission-plans/${planId}/assignments`, input);
+  return res.data;
+}
+
+export async function listPlanVersions(companyId: number, planId: number): Promise<CommissionPlan[]> {
+  const res = await api.get(`/companies/${companyId}/commission-plans/${planId}/versions`);
+  return res.data;
+}
+
+export async function revisePlan(companyId: number, planId: number, input: Record<string, unknown>): Promise<CommissionPlan> {
+  const res = await api.put(`/companies/${companyId}/commission-plans/${planId}`, input);
+  return res.data;
+}
+
+export async function activatePlan(companyId: number, planId: number, effectiveFrom?: string | null): Promise<CommissionPlan> {
+  const res = await api.post(
+    `/companies/${companyId}/commission-plans/${planId}/activate`,
+    effectiveFrom ? { effective_from: effectiveFrom } : {},
+  );
+  return res.data;
+}
+
+export async function archivePlan(companyId: number, planId: number): Promise<CommissionPlan> {
+  const res = await api.post(`/companies/${companyId}/commission-plans/${planId}/archive`);
   return res.data;
 }
 
