@@ -286,9 +286,16 @@ def create_sale(
 
     for line in payload.lines:
         variant = get_variant(db, company_id, line.variant_id)
-        unit_price = (
-            line.unit_price if line.unit_price is not None else Decimal(variant.unit_price)
-        )
+        if line.unit_price is not None:
+            unit_price = Decimal(line.unit_price)
+        else:
+            # Effective-dated price for the sale date, falling back to the
+            # variant's inline unit_price when no price row applies (Step B1).
+            unit_price = resolve_price(
+                db, company_id, variant.id, on_date=payload.sold_at.date()
+            )
+            if unit_price is None:
+                unit_price = Decimal(variant.unit_price)
         quantity = Decimal(line.quantity)
         db.add(
             SaleLine(
@@ -1629,7 +1636,11 @@ def reconcile_external_sales(db: Session, company_id: int, items: List, commit: 
             continue
         new += 1
         if commit:
-            price = Decimal(variant.unit_price or 0)
+            price = resolve_price(
+                db, company_id, variant.id, on_date=item.sold_at.date()
+            )
+            if price is None:
+                price = Decimal(variant.unit_price or 0)
             sale = Sale(
                 company_id=company_id,
                 rep_private_user_id=rep_id,
