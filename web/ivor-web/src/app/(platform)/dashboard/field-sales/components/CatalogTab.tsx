@@ -30,6 +30,7 @@ import SearchInput from "@/components/ui/SearchInput";
 import Hint from "./Hint";
 import CategoryCombobox from "./CategoryCombobox";
 import ProductImportModal from "./ProductImportModal";
+import VariantPricesModal from "./VariantPricesModal";
 import type { NavigateTab } from "./types";
 
 const PAGE_SIZE = 10;
@@ -79,6 +80,7 @@ export default function CatalogTab({ onNavigate }: { onNavigate: NavigateTab }) 
   const [editingCategory, setEditingCategory] = useState<number | null>(null);
   const [categoryNameEdits, setCategoryNameEdits] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pricesFor, setPricesFor] = useState<{ product: Product; variant: ProductVariant } | null>(null);
 
   async function load() {
     if (!companyId) return;
@@ -623,6 +625,9 @@ export default function CatalogTab({ onNavigate }: { onNavigate: NavigateTab }) 
                             <span key={v.id} className="inline-flex items-center gap-1 rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs">
                               {v.sku} · {v.currency} {v.unit_price}
                               {v.is_default && <span className="text-emerald-600">default</span>}
+                              <button onClick={() => setPricesFor({ product: p, variant: v })} title="Effective-dated prices" className="text-gray-400 hover:text-gray-700">
+                                <Tag className="h-3 w-3" />
+                              </button>
                               <button onClick={() => startVariantEdit(v)} title="Edit variant" className="text-gray-400 hover:text-gray-700">
                                 <Pencil className="h-3 w-3" />
                               </button>
@@ -811,6 +816,16 @@ export default function CatalogTab({ onNavigate }: { onNavigate: NavigateTab }) 
           open={importOpen}
           onClose={() => setImportOpen(false)}
           onImported={load}
+        />
+      )}
+
+      {companyId && pricesFor && (
+        <VariantPricesModal
+          companyId={companyId}
+          productId={pricesFor.product.id}
+          productName={pricesFor.product.name}
+          variant={pricesFor.variant}
+          onClose={() => setPricesFor(null)}
         />
       )}
     </div>

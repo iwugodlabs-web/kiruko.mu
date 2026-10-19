@@ -315,6 +315,28 @@ export async function deleteVariant(companyId: number, productId: number, varian
   await api.delete(`/companies/${companyId}/products/${productId}/variants/${variantId}`);
 }
 
+export interface ProductPrice {
+  id: number;
+  company_id: number;
+  variant_id: number;
+  amount: string;
+  currency: string;
+  territory?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  reference?: string | null;
+}
+
+export async function listPrices(companyId: number, productId: number, variantId: number): Promise<ProductPrice[]> {
+  const res = await api.get(`/companies/${companyId}/products/${productId}/variants/${variantId}/prices`);
+  return res.data;
+}
+
+export async function createPrice(companyId: number, input: Record<string, unknown>): Promise<ProductPrice> {
+  const res = await api.post(`/companies/${companyId}/product-prices`, input);
+  return res.data;
+}
+
 // ---------------------------------------------------------------------------
 // Outlets
 // ---------------------------------------------------------------------------
