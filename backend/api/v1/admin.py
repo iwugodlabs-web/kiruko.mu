@@ -10,6 +10,11 @@ from core import config
 from core.model import User, PrivateUser, Company
 from core.dependencies import get_current_user, get_token_payload
 from core.permission_guards import require_platform_permission
+from core.modules import (
+    list_company_modules as _list_company_modules,
+    set_company_module as _set_company_module,
+    is_known_module as _is_known_module,
+)
 from core.security import generate_passwd_hash
 from db_models.crud.user import get_user_by_email
 from db_models.crud.role import (
@@ -770,6 +775,9 @@ async def get_admin_company(
         # M9 — surface the ads master toggle so the admin UI can render the
         # /admin/employers/{id} toggle row without a second round-trip.
         'ads_enabled': bool(getattr(company, 'ads_enabled', False)),
+        # Per-company paid-module entitlements (e.g. field_sales) so the admin
+        # UI can render the module toggles without a second round-trip.
+        'modules': _list_company_modules(db, company_id),
         'status': getattr(company, 'status', 'active'),
         'deleted_at': company.deleted_at.isoformat() if getattr(company, 'deleted_at', None) else None,
         'created_at': company.created_at.isoformat() if getattr(company, 'created_at', None) else None,
@@ -1638,4 +1646,56 @@ def admin_set_company_ads_enabled(
     return {
         "company_id": co.company_id,
         "ads_enabled": co.ads_enabled,
+    }
+
+
+# ── Per-company paid-module entitlements ─────────────────────────────────
+class _ModuleToggleBody(BaseModel):
+    enabled: bool
+
+
+@router.put("/companies/{company_id}/modules/{module_key}", response_model=dict)
+def admin_set_company_module(
+    company_id: int,
+    module_key: str,
+    body: _ModuleToggleBody,
+    current_user: User = Depends(require_platform_permission("manage_companies")),
+    db: Session = Depends(config.get_db),
+):
+    """Activate or deactivate a paid module (e.g. 'field_sales') for one company.
+
+    Paid modules default to off; this is how sales switches one on after a deal
+    is signed, without affecting other tenants. Guards the whole module's API,
+    so a disabled module's routes return 403 for that company. AuditLog'd."""
+    from db_models.crud.company import log_audit
+
+    company = db.query(Company).filter(Company.company_id == company_id).first()
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if not _is_known_module(module_key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown module '{module_key}'",
+        )
+
+    row = _set_company_module(
+        db,
+        company_id=company_id,
+        module_key=module_key,
+        enabled=body.enabled,
+        actor_user_id=current_user.user_id,
+    )
+    log_audit(
+        company_id,
+        "company.module_toggled",
+        current_user.user_id,
+        f"company:{company_id}",
+        db,
+        metadata={"module_key": module_key, "enabled": bool(row.enabled)},
+    )
+    db.commit()
+    return {
+        "company_id": company_id,
+        "module_key": module_key,
+        "enabled": bool(row.enabled),
     }

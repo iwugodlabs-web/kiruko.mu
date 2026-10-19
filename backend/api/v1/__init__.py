@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from core.dependencies import require_module
 from . import (
     user, job, dashboard, financials, password_reset,
     sector, company, admin, invite, scan_receipt,
@@ -12,6 +13,8 @@ from . import (
     account_claim,
     country_assignments,
     geocode,
+    commissions,
+    modules,
 )
 
 router = APIRouter()
@@ -50,3 +53,10 @@ router.include_router(employee_import.router)
 router.include_router(account_claim.router)
 router.include_router(country_assignments.router)
 router.include_router(geocode.router)
+router.include_router(modules.router)
+# Field Sales & Commissions is a paid, per-company module: every route 403s
+# unless a platform admin has enabled it for the caller's company.
+router.include_router(
+    commissions.router,
+    dependencies=[Depends(require_module("field_sales"))],
+)

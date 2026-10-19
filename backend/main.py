@@ -286,6 +286,10 @@ def get_application():
                                 try:
                                     KioskService.purge_old_idempotency_rows(db)
                                 except Exception as ke:
+                                    # Recover the session so one failed sweep
+                                    # can't poison every later job in this tick
+                                    # (InFailedSqlTransaction cascade).
+                                    db.rollback()
                                     print(f"⚠️ Kiosk idempotency sweep failed: {ke}")
                                 # Clock-in / clock-out reminder pushes — also no
                                 # external cron, so it rides this same advisory-
@@ -298,6 +302,7 @@ def get_application():
                                     if reminded > 0:
                                         print(f"✅ Sent {reminded} clock-in/out reminder push(es)")
                                 except Exception as re:
+                                    db.rollback()
                                     print(f"⚠️ Clock reminder push failed: {re}")
                                 # Notification retention — delete read recipient rows
                                 # (and orphaned events) older than 90 days. No external
@@ -309,12 +314,22 @@ def get_application():
                                     if purged > 0:
                                         print(f"✅ Purged {purged} old read notification row(s)")
                                 except Exception as ne:
+                                    db.rollback()
                                     print(f"⚠️ Notification retention sweep failed: {ne}")
                         finally:
-                            db.execute(
-                                _sql_text("SELECT pg_advisory_unlock(:k)"),
-                                {"k": _CLEANUP_LOCK_KEY},
-                            )
+                            try:
+                                # Clear a poisoned transaction first — the
+                                # session-scoped advisory lock must always be
+                                # released (a pooled connection would otherwise
+                                # keep it held forever).
+                                db.rollback()
+                                db.execute(
+                                    _sql_text("SELECT pg_advisory_unlock(:k)"),
+                                    {"k": _CLEANUP_LOCK_KEY},
+                                )
+                                db.commit()
+                            except Exception:
+                                db.rollback()
                 finally:
                     db.close()
             except Exception as e:

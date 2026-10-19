@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { useCompanyModules } from "@/hooks/useCompanyModules";
 import { useRouter } from "next/navigation";
 import { ReactNode, useEffect } from "react";
 
@@ -12,6 +13,7 @@ interface RoleGuardProps {
     minCompanyRole?: 'company_admin' | string; // Relaxed type to allow custom sub-roles
     requiredPermissions?: string | string[]; // Platform permission(s); any match grants access
     companyPermissions?: string | string[]; // Company permission(s); any match grants access (owner/admin/superuser bypass)
+    requiredModules?: string | string[]; // Paid per-company module(s); all must be enabled
     fallbackPath?: string;
 }
 
@@ -21,10 +23,14 @@ export default function RoleGuard({
     minCompanyRole,
     requiredPermissions,
     companyPermissions,
+    requiredModules,
     fallbackPath = "/dashboard"
 }: RoleGuardProps) {
-    const { user, loading } = useAuth();
+    const { user, loading, companyId } = useAuth();
     const router = useRouter();
+    const { isEnabled: isModuleEnabled } = useCompanyModules(
+        user?.isPlatformAdmin ? null : companyId,
+    );
 
     // The "no props" case used to mean "logged-in is enough", which let a
     // company-admin browse to /admin/employers and trigger the Initialize
@@ -33,7 +39,7 @@ export default function RoleGuard({
     // require platform admin when no other constraint is given. Existing
     // callers that pass `requiredRole` / `minCompanyRole` / `requiredPermissions`
     // keep their behavior.
-    const defaultsToPlatformAdmin = !requiredRole && !minCompanyRole && !requiredPermissions && !companyPermissions;
+    const defaultsToPlatformAdmin = !requiredRole && !minCompanyRole && !requiredPermissions && !companyPermissions && !requiredModules;
 
     useEffect(() => {
         if (loading) return;
@@ -93,7 +99,17 @@ export default function RoleGuard({
                 return;
             }
         }
-    }, [user, loading, router, requiredRole, minCompanyRole, requiredPermissions, companyPermissions, fallbackPath, defaultsToPlatformAdmin]);
+
+        // 7. Check paid-module entitlement (e.g. field_sales). Platform admins
+        //    bypassed earlier; fail-open on lookup error (see useCompanyModules).
+        if (requiredModules) {
+            const mods = Array.isArray(requiredModules) ? requiredModules : [requiredModules];
+            if (!mods.every((m) => isModuleEnabled(m))) {
+                router.replace(fallbackPath);
+                return;
+            }
+        }
+    }, [user, loading, router, requiredRole, minCompanyRole, requiredPermissions, companyPermissions, requiredModules, isModuleEnabled, fallbackPath, defaultsToPlatformAdmin]);
 
     if (loading) {
         return (
@@ -128,6 +144,10 @@ export default function RoleGuard({
 
     if (requiredPermissions && !user.hasPermission(requiredPermissions)) return null;
     if (companyPermissions && !user.hasCompanyPermission(companyPermissions)) return null;
+    if (requiredModules) {
+        const mods = Array.isArray(requiredModules) ? requiredModules : [requiredModules];
+        if (!mods.every((m) => isModuleEnabled(m))) return null;
+    }
 
     return <>{children}</>;
 }

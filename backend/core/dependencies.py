@@ -419,3 +419,31 @@ def get_kiosk_context(
     )
     with with_tenant(device.company_id):
         yield ctx
+
+
+def require_module(module_key: str):
+    """FastAPI dependency factory: gate routes behind a per-company module.
+
+    Resolves the caller's company scope first (so we still 403/404 on bad
+    access before leaking module state), then asserts the module is enabled for
+    that company. Mount on a router via:
+
+        include_router(r, dependencies=[Depends(require_module("field_sales"))])
+
+    Returns the resolved `Company` so endpoints can reuse it.
+    """
+
+    def _dependency(
+        company: Any = Depends(require_company_scope),
+        db: Session = Depends(get_db),
+    ) -> Any:
+        from core.modules import is_module_enabled
+
+        if not is_module_enabled(db, company.company_id, module_key):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"'{module_key}' is not enabled for this company",
+            )
+        return company
+
+    return _dependency

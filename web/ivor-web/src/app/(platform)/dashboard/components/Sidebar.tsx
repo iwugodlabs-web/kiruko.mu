@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompanyModules } from '@/hooks/useCompanyModules';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
@@ -66,7 +67,7 @@ function TooltipPortal({ tip }: { tip: TooltipState }) {
     );
 }
 
-type DropdownItem = { id: string; label: string; href: string; icon: React.ReactNode; badge?: number; requiredCompanyPermissions?: string[]; requiredPermissions?: string[]; requiredRoles?: string[] };
+type DropdownItem = { id: string; label: string; href: string; icon: React.ReactNode; badge?: number; requiredCompanyPermissions?: string[]; requiredPermissions?: string[]; requiredRoles?: string[]; requiredModules?: string[] };
 type DropdownState = { tabId: string; label: string; items: DropdownItem[]; x: number; y: number } | null;
 
 function DropdownPortal({
@@ -125,7 +126,7 @@ function DropdownPortal({
 }
 
 export default function Sidebar() {
-    const { user, loading, logout } = useAuth();
+    const { user, loading, logout, companyId: authCompanyId } = useAuth();
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const currentTab = searchParams.get("tab");
@@ -150,6 +151,12 @@ export default function Sidebar() {
 
     const isPlatformAdmin = user?.isPlatformAdmin ?? false;
     const isCompanyAdmin = user?.isCompanyAdmin ?? false;
+
+    // Paid-module entitlements (e.g. field_sales). Only relevant for company
+    // users; platform admins see their own admin nav regardless.
+    const { isEnabled: isModuleEnabled } = useCompanyModules(
+        isPlatformAdmin ? null : authCompanyId,
+    );
 
     const [tooltip, setTooltip] = useState<TooltipState>(null);
     const [dropdown, setDropdown] = useState<DropdownState>(null);
@@ -336,6 +343,17 @@ export default function Sidebar() {
                 { id: "salaries", label: "Salary Configuration", sub: "Per-employee base salary & allowance", href: "/dashboard/salaries", icon: <DollarSign size={15} /> },
                 { id: "salary_structures", label: "Salary Structures", sub: "Reusable templates of components", href: "/dashboard/salary-structures", icon: <Settings size={15} /> },
             ],
+        },
+
+        {
+            id: "field_sales",
+            label: "Field Sales",
+            sub: "Catalog, plans, commissions",
+            href: "/dashboard/field-sales",
+            icon: <Target size={18} />,
+            showFor: 'company',
+            requiredCompanyPermissions: ['view_salary', 'view_payslip', 'manage_payroll'],
+            requiredModules: ['field_sales'],
         },
 
         { id: "sep_insights", type: "separator", label: "Insights" },
@@ -609,6 +627,13 @@ export default function Sidebar() {
                         // the API is the real gate.)
                         if (t.requiredCompanyPermissions && Array.isArray(t.requiredCompanyPermissions)) {
                             if (!user?.hasCompanyPermission?.(t.requiredCompanyPermissions)) return false;
+                        }
+                        // Paid-module entitlement (e.g. field_sales): hide the
+                        // item entirely for companies the platform hasn't
+                        // activated it for. Backend `require_module` is the
+                        // real gate; this is the matching UI.
+                        if (t.requiredModules && Array.isArray(t.requiredModules)) {
+                            if (!t.requiredModules.every((m: string) => isModuleEnabled(m))) return false;
                         }
                         return true;
                     };

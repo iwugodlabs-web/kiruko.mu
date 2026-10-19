@@ -109,6 +109,11 @@ class PrivateUser(Base):
     )
     # Role for company-level permissions: owner, admin, manager, employee
     role = Column(String(20), nullable=False, server_default='employee')
+    # Phase 3 (field sales) — reporting line, used by team-override commission
+    # rules so a manager can earn over their direct reports' commission.
+    manager_private_user_id = Column(
+        Integer, ForeignKey("private_users.private_user_id", ondelete="SET NULL"), nullable=True
+    )
     # Plan Phase 12.A — escape hatch for the "I have no current employer"
     # case. Without this, a user between jobs is permanently stuck on the
     # onboarding gate. Acknowledging it satisfies the employer-link check.
@@ -305,6 +310,9 @@ class Company(Base):
     # eyes on deliberate omissions. Off by default so single-admin companies can
     # still finalize; opt-in per company.
     payroll_maker_checker = Column(Boolean, nullable=False, server_default='false')
+    # Field Sales segregation of duties: when true, a plan/price version is
+    # created `pending` and must be activated by a different admin.
+    field_sales_maker_checker = Column(Boolean, nullable=False, server_default='false')
     # Review-by-exception (RBE) — % of *clean* sessions to surface into the
     # admin review queue as a random-sample audit (deterministic per timelog_id),
     # so "clean" is never a guaranteed skip. 0 = off. Stored as integer 0-100.
@@ -2691,3 +2699,611 @@ class KioskIdempotency(Base):
     idempotency_key = Column(String(64), primary_key=True)
     timelog_id = Column(Integer, ForeignKey("time_logs.timelog_id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Field Sales & Commissions — Phase 0 (catalog · sales · commission · ledger)
+#
+# Scope note: Phase 0 is deliberately minimal — a single default variant per
+# product (no option/UoM tables yet), admin-entered sales (auto-approved), and
+# a single `flat_percent` rule type. The `payment_status` / `collected_*` /
+# `credited_to` columns and `CommissionPlan.trigger` ship now (defaulted) so
+# on-collection commission and sale crediting are additive later, not a
+# retrofit. Commission reaches pay through the ledger seam (CommissionPayable)
+# whose `payout_channel` currently only implements 'payroll' (on-payroll reps);
+# the 'manual' channel for contractors is a Phase 2 add against the same seam.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class Product(Base):
+    """A sellable product in a company's catalog.
+
+    Phase 0 keeps `category` a plain string; the ProductCategory tree is a
+    later phase. Every product auto-gets one default ProductVariant so simple
+    SKUs carry no option machinery.
+    """
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    brand = Column(String(120), nullable=True)
+    category = Column(String(120), nullable=True)
+    status = Column(String(20), nullable=False, server_default="active")  # active|discontinued
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company")
+    variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_product_company_name"),
+    )
+
+
+class ProductVariant(Base):
+    """The real SKU — what a sale line points at. Price lives here, never on
+    the Product. Phase 0: one default variant per product, price inline."""
+    __tablename__ = "product_variants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    sku = Column(String(64), nullable=False)
+    barcode = Column(String(64), nullable=True, index=True)
+    unit_price = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    is_default = Column(Boolean, nullable=False, server_default="false")
+    # Phase 2 — the unit this variant is sold in (base unit when NULL).
+    sell_uom_id = Column(Integer, ForeignKey("units_of_measure.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), nullable=False, server_default="active")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    product = relationship("Product", back_populates="variants")
+    option_values = relationship("ProductVariantOptionValue", cascade="all, delete-orphan")
+    sell_uom = relationship("UnitOfMeasure")
+
+    __table_args__ = (
+        UniqueConstraint("product_id", "sku", name="uq_variant_product_sku"),
+    )
+
+
+class Sale(Base):
+    """A field sale (header). Phase 0 sales are admin-entered and land
+    `status='approved'` directly. `credited_to_private_user_id` defaults to the
+    rep but is explicit so territory/house-account crediting is additive."""
+    __tablename__ = "sales"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    rep_private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="RESTRICT"), nullable=False, index=True)
+    credited_to_private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="RESTRICT"), nullable=True)
+    outlet_id = Column(Integer, ForeignKey("outlets.id", ondelete="SET NULL"), nullable=True, index=True)
+    sold_at = Column(DateTime(timezone=True), nullable=False)  # the business event — never synced_at
+    status = Column(String(20), nullable=False, server_default="approved")  # draft|submitted|approved|rejected|void
+    payment_status = Column(String(20), nullable=False, server_default="paid")  # paid|pending|partial (feeds on-collection)
+    # How the sale was settled (cash/card/bank_transfer/mobile_money/cheque/
+    # credit/other). Country-agnostic on purpose: "mobile_money" covers M-Pesa,
+    # Orange Money, Juice, etc. Null = unrecorded (legacy/admin rows).
+    payment_method = Column(String(30), nullable=True)
+    collected_amount = Column(Numeric(14, 2), nullable=True)
+    collected_at = Column(DateTime(timezone=True), nullable=True)
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    source = Column(String(20), nullable=False, server_default="admin")  # admin|mobile|kiosk|import
+    client_uuid = Column(String(64), nullable=True)  # offline idempotency (Phase 1)
+    # Phase 1 — geo-verified visit: was the rep inside the outlet's geofence when
+    # the sale was captured? Null = unverified (no geo/outlet).
+    visit_verified = Column(Boolean, nullable=True)
+    visit_distance_m = Column(Float, nullable=True)
+    # Phase 3 — routing/credit context, matched by CreditAssignment when the
+    # sale has no explicit credited_to rep.
+    territory = Column(String(80), nullable=True)
+    account = Column(String(120), nullable=True)
+    notes = Column(String, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    # Phase 1 — approval queue (submitted -> approved/rejected).
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    lines = relationship("SaleLine", back_populates="sale", cascade="all, delete-orphan")
+    returns = relationship("SalesReturn", cascade="all, delete-orphan")
+    outlet = relationship("Outlet")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "client_uuid", name="uq_sale_company_client_uuid"),
+        Index("ix_sales_company_sold_at", "company_id", "sold_at"),
+    )
+
+
+class SaleLine(Base):
+    """One product line on a Sale. `unit_price_snapshot` freezes the price at
+    sale time so a later price change never rewrites history."""
+    __tablename__ = "sale_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sale_id = Column(Integer, ForeignKey("sales.id", ondelete="CASCADE"), nullable=False, index=True)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="RESTRICT"), nullable=False)
+    uom_id = Column(Integer, ForeignKey("units_of_measure.id", ondelete="SET NULL"), nullable=True)  # Phase 2
+    quantity = Column(Numeric(14, 3), nullable=False, server_default="0")
+    unit_price_snapshot = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+    line_total = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+
+    sale = relationship("Sale", back_populates="lines")
+    variant = relationship("ProductVariant")
+
+    # Read-through helpers so SaleLineRead can show *what* was sold without the
+    # serializer needing a join. Null-safe: a line always has a variant (FK is
+    # RESTRICT), but guard anyway so a half-loaded object never raises.
+    @property
+    def product_id(self):
+        return self.variant.product_id if self.variant else None
+
+    @property
+    def product_name(self):
+        v = self.variant
+        return v.product.name if v and v.product else None
+
+    @property
+    def variant_sku(self):
+        return self.variant.sku if self.variant else None
+
+    @property
+    def uom(self):
+        v = self.variant
+        return v.sell_uom.code if v and v.sell_uom else None
+
+
+class SalesReturn(Base):
+    """A return / credit-note against an approved Sale (Phase 3.1).
+
+    First-class so a partial return is recorded against a specific sale line and
+    flows forward as a **negative** commission in the period the return lands —
+    a finalized period is never rewritten.
+    """
+    __tablename__ = "sales_returns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    sale_id = Column(Integer, ForeignKey("sales.id", ondelete="RESTRICT"), nullable=False, index=True)
+    returned_at = Column(DateTime(timezone=True), nullable=False)
+    reason = Column(String(300), nullable=True)
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    company = relationship("Company")
+    sale = relationship("Sale", back_populates="returns")
+    lines = relationship("SalesReturnLine", back_populates="sales_return", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_sales_returns_company_returned_at", "company_id", "returned_at"),
+    )
+
+
+class SalesReturnLine(Base):
+    """One returned line: how many units of a sale line came back, and at the
+    price that was snapshotted on the original sale line (never re-priced)."""
+    __tablename__ = "sales_return_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    return_id = Column(Integer, ForeignKey("sales_returns.id", ondelete="CASCADE"), nullable=False, index=True)
+    sale_line_id = Column(Integer, ForeignKey("sale_lines.id", ondelete="RESTRICT"), nullable=False, index=True)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="RESTRICT"), nullable=False)
+    quantity = Column(Numeric(14, 3), nullable=False, server_default="0")
+    unit_price_snapshot = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+    line_total = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+
+    sales_return = relationship("SalesReturn", back_populates="lines")
+    sale_line = relationship("SaleLine")
+    variant = relationship("ProductVariant")
+
+
+class CommissionPlan(Base):
+    """A per-company named commission plan — the self-service unit admins build
+    rules under. `trigger` decides whether commission is earned when the order
+    is logged ('on_sale') or when the customer pays ('on_collection').
+
+    Versioned + effective-dated (standard four-eyes design): a used version is
+    never edited in place. `family_id` groups the versions of one logical plan
+    (the root row's `family_id` == its own id); assignments reference the root,
+    and the engine selects the version effective for the run period. `status`
+    is draft|pending|active|archived — a new version starts as a `draft` and
+    only affects pay once activated.
+    """
+    __tablename__ = "commission_plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    description = Column(String, nullable=True)
+    trigger = Column(String(20), nullable=False, server_default="on_sale")  # on_sale|on_collection
+    status = Column(String(20), nullable=False, server_default="active")  # draft|pending|active|archived
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    # --- versioning / effective dating (Step A) ---
+    version = Column(Integer, nullable=False, server_default="1")
+    family_id = Column(Integer, nullable=True, index=True)  # root plan id; == id for the root row
+    effective_from = Column(Date, nullable=True)  # NULL = open (effective since forever)
+    effective_to = Column(Date, nullable=True)    # NULL = open (still in effect)
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company")
+    rules = relationship("CommissionRule", back_populates="plan", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        # Unique plan name per company per version (a version is a new row).
+        UniqueConstraint("company_id", "name", "version", name="uq_commission_plan_company_name_version"),
+    )
+
+
+class CommissionRule(Base):
+    """A typed, parametric rule under a plan. Phase 0 implements only
+    `flat_percent` (params = {"percent": "3.00"}). Scope is nullable at every
+    level — a null scope means the whole catalog."""
+    __tablename__ = "commission_rules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("commission_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    rule_type = Column(String(30), nullable=False, server_default="flat_percent")  # flat_percent|per_unit|tiered|target|spiff
+    params = Column(JSONB, nullable=False, server_default="{}")
+    scope_category = Column(String(120), nullable=True)
+    scope_product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    scope_variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True)
+    # Phase 2 — attribute scope: match any variant carrying this option value
+    # (e.g. Flavour=Zero across every size).
+    scope_option_value_id = Column(Integer, ForeignKey("option_values.id", ondelete="SET NULL"), nullable=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    plan = relationship("CommissionPlan", back_populates="rules")
+
+
+class CommissionPlanAssignment(Base):
+    """Assigns a plan to a rep, effective-dated.
+
+    Phase 0 is intentionally thinner than EmployeeSalaryAssignment: it carries
+    no currency/snapshot/notes/created_by. Those are added when role/dept
+    assignment and plan versioning land (later phases)."""
+    __tablename__ = "commission_plan_assignments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("commission_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    plan = relationship("CommissionPlan")
+
+    __table_args__ = (
+        UniqueConstraint("plan_id", "private_user_id", name="uq_plan_assignment_plan_user"),
+    )
+
+
+class CommissionRun(Base):
+    """A per-company, per-period commission calculation — draft until approved,
+    mirroring PayrollRun's draft→finalize discipline."""
+    __tablename__ = "commission_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    status = Column(String(20), nullable=False, server_default="draft")  # draft|approved|cancelled
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    computed_at = Column(DateTime(timezone=True), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company")
+    line_items = relationship("CommissionLineItem", back_populates="run", cascade="all, delete-orphan")
+    payables = relationship("CommissionPayable", back_populates="run", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index(
+            "uq_commission_run_company_period",
+            "company_id", "period_start", "period_end",
+            unique=True,
+            postgresql_where=text("status <> 'cancelled'"),
+        ),
+    )
+
+
+class CommissionLineItem(Base):
+    """Per-rep, per-rule computed amount with a human-readable `trace` — the
+    'why' behind every figure."""
+    __tablename__ = "commission_line_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("commission_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="RESTRICT"), nullable=False, index=True)
+    rule_id = Column(Integer, ForeignKey("commission_rules.id", ondelete="SET NULL"), nullable=True)
+    amount = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    trace = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    run = relationship("CommissionRun", back_populates="line_items")
+
+
+class CommissionPayable(Base):
+    """The ledger seam: what a rep is OWED for a run, and how it will be paid.
+
+    This — not the payslip — is the source of truth for commission owed.
+    `payout_channel='payroll'` settles by writing an EmployeeOneOffAllowance
+    (on-payroll reps). `'manual'` is the contractor channel (Phase 2) that
+    settles off-payroll without touching a payslip.
+    """
+    __tablename__ = "commission_payables"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="RESTRICT"), nullable=False, index=True)
+    run_id = Column(Integer, ForeignKey("commission_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    payout_channel = Column(String(20), nullable=False, server_default="payroll")  # payroll|manual
+    status = Column(String(20), nullable=False, server_default="pending")  # pending|settled|void
+    one_off_allowance_id = Column(Integer, ForeignKey("employee_one_off_allowances.id", ondelete="SET NULL"), nullable=True)
+    settled_at = Column(DateTime(timezone=True), nullable=True)
+    # Manual (off-payroll) channel: the external payout reference an admin
+    # records when settling a contractor's commission outside payroll.
+    settlement_reference = Column(String(160), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    run = relationship("CommissionRun", back_populates="payables")
+    one_off_allowance = relationship("EmployeeOneOffAllowance")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "private_user_id", name="uq_payable_run_user"),
+    )
+
+
+class Outlet(Base):
+    """A point of sale (shop) a rep visits and sells to.
+
+    Phase 1. Carries its own geo + geofence (so a mobile sale can be verified as
+    having happened on-site) plus light commercial context (credit terms,
+    assigned rep, visit cadence). This is not a CRM account — it records where
+    field sales happen, not a prospect pipeline.
+    """
+    __tablename__ = "outlets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    code = Column(String(40), nullable=True)
+    address = Column(String(300), nullable=True)
+    contact_name = Column(String(120), nullable=True)
+    phone = Column(String(40), nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    radius_meters = Column(Integer, nullable=False, server_default="150")
+    assigned_rep_private_user_id = Column(
+        Integer, ForeignKey("private_users.private_user_id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    visit_cadence = Column(String(20), nullable=True)  # daily|weekly|biweekly|monthly
+    credit_terms_days = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, server_default="active")  # active|inactive
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_outlet_company_name"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — full catalog: categories, options/values, units, versioned prices
+# ---------------------------------------------------------------------------
+
+
+class ProductCategory(Base):
+    """Self-referential category tree (Phase 2). Phase 0 kept `Product.category`
+    a plain string; this is the structured replacement."""
+    __tablename__ = "product_categories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("product_categories.id", ondelete="CASCADE"), nullable=True)
+    name = Column(String(120), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    company = relationship("Company")
+
+
+class ProductOption(Base):
+    """An axis of variation (Size / Flavour / Pack)."""
+    __tablename__ = "product_options"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(80), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    values = relationship("OptionValue", back_populates="option", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_product_option_company_name"),
+    )
+
+
+class OptionValue(Base):
+    """A value on an option (e.g. Size: 330ml / 500ml; Flavour: Zero)."""
+    __tablename__ = "option_values"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    option_id = Column(Integer, ForeignKey("product_options.id", ondelete="CASCADE"), nullable=False, index=True)
+    value = Column(String(80), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    option = relationship("ProductOption", back_populates="values")
+
+    __table_args__ = (
+        UniqueConstraint("option_id", "value", name="uq_option_value_option_value"),
+    )
+
+
+class ProductVariantOptionValue(Base):
+    """Which option values a variant carries (variant ↔ option values)."""
+    __tablename__ = "product_variant_option_values"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=False, index=True)
+    option_value_id = Column(Integer, ForeignKey("option_values.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("variant_id", "option_value_id", name="uq_variant_option_value"),
+    )
+
+
+class UnitOfMeasure(Base):
+    """Base unit + pack conversions. `base_uom_id` NULL marks a base unit;
+    otherwise `factor` is how many base units one of this unit contains
+    (1 Case = 24 bottles → factor 24, base_uom = bottle)."""
+    __tablename__ = "units_of_measure"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    code = Column(String(20), nullable=False)
+    name = Column(String(60), nullable=False)
+    base_uom_id = Column(Integer, ForeignKey("units_of_measure.id", ondelete="SET NULL"), nullable=True)
+    factor = Column(Numeric(14, 4), nullable=False, server_default="1")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    company = relationship("Company")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_uom_company_code"),
+    )
+
+
+class ProductPrice(Base):
+    """Versioned, optionally per-territory price for a variant. A sale line
+    snapshots the resolved price, so editing/adding a version never rewrites
+    history."""
+    __tablename__ = "product_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Numeric(14, 2), nullable=False, server_default="0.00")
+    currency = Column(String(3), nullable=False, server_default="MUR")
+    territory = Column(String(80), nullable=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Maker-checker: `pending` rows do not resolve until approved by a second
+    # admin. Off (flag false) -> rows are created `active` immediately.
+    status = Column(String(20), nullable=False, server_default="active")
+    created_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Denormalized product link so sales catalogue API can fetch time-versioned data.
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=True)
+    reference = Column(String(200), nullable=True)  # optional source reference (e.g. supplier doc)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "variant_id", "territory", "effective_from", name="uq_product_price_version"
+        ),
+    )
+
+
+class SalesTarget(Base):
+    """A per-rep quota for a period, optionally scoped to a category. Drives the
+    target-attainment accelerator and target-aware dashboards."""
+    __tablename__ = "sales_targets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="CASCADE"), nullable=False, index=True)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    scope_category = Column(String(120), nullable=True)
+    target_amount = Column(Numeric(14, 2), nullable=True)  # revenue quota
+    target_units = Column(Numeric(14, 3), nullable=True)   # volume quota
+    # Phase 3.1 — accelerator bands: [{"attainment_pct": "100", "percent": "2"},
+    # {"attainment_pct": "120", "percent": "3"}] — the highest band met sets the
+    # target rule's payout percent. NULL falls back to the rule's own percent.
+    accelerators = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_sales_targets_company_period", "company_id", "period_start", "period_end"),
+    )
+
+
+class CreditAssignment(Base):
+    """Phase 3 — routes commission credit to the right rep by territory, outlet
+    or house account, independent of who entered the sale.
+
+    A sale with no explicit `credited_to_private_user_id` is credited to every
+    active assignment matching its outlet/territory/account, weighted by
+    `split_percent` (100 = sole credit; two 50s split a line equally).
+    """
+    __tablename__ = "credit_assignments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    private_user_id = Column(Integer, ForeignKey("private_users.private_user_id", ondelete="CASCADE"), nullable=False, index=True)
+    outlet_id = Column(Integer, ForeignKey("outlets.id", ondelete="CASCADE"), nullable=True, index=True)
+    territory = Column(String(80), nullable=True, index=True)
+    account = Column(String(120), nullable=True, index=True)
+    split_percent = Column(Numeric(5, 2), nullable=False, server_default="100")
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    company = relationship("Company")
+    private_user = relationship("PrivateUser")
+    outlet = relationship("Outlet")
+
+    __table_args__ = (
+        Index("ix_credit_assignments_company_outlet", "company_id", "outlet_id"),
+        Index("ix_credit_assignments_company_territory", "company_id", "territory"),
+    )
+
+
+class CompanyModule(Base):
+    """Per-company feature entitlement (paid module activation).
+
+    One row per (company, module_key). The absence of a row means the module
+    sits at its registry default — OFF for paid modules (see `core/modules.py`).
+    Platform admins flip these to activate a paid service for a single company
+    without touching any other tenant. Kept as a table (not a Company column)
+    so we can grow past one module and keep an auditable enable/disable trail.
+    """
+    __tablename__ = "company_modules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.company_id", ondelete="CASCADE"), nullable=False, index=True)
+    module_key = Column(String(64), nullable=False)
+    enabled = Column(Boolean, nullable=False, server_default=text("false"))
+    enabled_at = Column(DateTime(timezone=True), nullable=True)
+    disabled_at = Column(DateTime(timezone=True), nullable=True)
+    changed_by_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company")
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "module_key", name="uq_company_module"),
+    )

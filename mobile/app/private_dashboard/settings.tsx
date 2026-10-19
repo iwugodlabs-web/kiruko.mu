@@ -34,6 +34,7 @@ import { StyleSheet, ActivityIndicator, Platform, ScrollView as RNScrollView, Al
 import { LinearGradient } from 'expo-linear-gradient';
 import { PremiumHeader } from '@/components/PremiumHeader';
 import { deleteAccount, getCountries, updateUserProfile, type Country } from '@/services/api';
+import { isFieldSalesEnabled } from '@/api/fieldSales';
 
 const CURRENCY_FLAGS: Record<string, string> = {
   USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺',
@@ -57,6 +58,21 @@ export default function Settings() {
   const [showBaseCurrencyModal, setShowBaseCurrencyModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  // Field Sales is a paid, per-company module. Hide the row unless the
+  // company has it enabled (fail OPEN on lookup error — see isFieldSalesEnabled).
+  const settingsCompanyId = user?.private_user?.company_id;
+  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(true);
+  useEffect(() => {
+    if (!settingsCompanyId) return;
+    let alive = true;
+    isFieldSalesEnabled(settingsCompanyId).then((enabled) => {
+      if (alive) setFieldSalesEnabled(enabled);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [settingsCompanyId]);
 
   // Country — only meaningful for independent users (no company_id). A
   // company employee's own country is always their employer's, so this
@@ -273,6 +289,13 @@ export default function Settings() {
           color: Palette.success,
           onPress: () => router.push("/private_dashboard/payslips"),
         },
+        ...(fieldSalesEnabled ? [{
+          label: t('fieldSales.settingsRow', 'Field Sales'),
+          subtitle: t('fieldSales.settingsRowSubtitle', 'Log sales and track your commission'),
+          icon: 'point-of-sale',
+          color: Palette.gold,
+          onPress: () => router.push("/private_dashboard/field_sales" as any),
+        }] : []),
         {
           label: t('settings.yourRights'),
           subtitle: t('settings.yourRightsSubtitle'),

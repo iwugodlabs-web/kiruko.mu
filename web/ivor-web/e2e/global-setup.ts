@@ -8,15 +8,16 @@ import { dirname } from "path";
  * next-themes into dark mode. Authenticated specs reuse this (see the
  * "authed-dark" project in playwright.config.ts).
  *
- * Credentials come from env with a local-dev default (the seeded ABC PLC admin).
- * Provision with: UPDATE users SET password_hash=... (see scripts).
+ * Credentials come from env with a local-dev default: the seeded company-3
+ * owner, who has `company_web_access` and a field_sales-enabled company (the
+ * specs here target company 3). Override with E2E_USER/E2E_PASSWORD.
  */
 export const AUTH_DARK_STATE = "e2e/.auth/dark.json";
 
 export default async function globalSetup(_config: FullConfig) {
   const base = process.env.E2E_BASE_URL ?? "http://localhost:3000";
-  const identifier = process.env.E2E_USER ?? "iwugodjoshua+test2@gmail.com";
-  const password = process.env.E2E_PASSWORD ?? "e2e-Test-Pass-1234";
+  const identifier = process.env.E2E_USER ?? "ivortanyan@gmail.com";
+  const password = process.env.E2E_PASSWORD ?? "password";
 
   const ctx = await request.newContext({ baseURL: base });
   const res = await ctx.post("/api/v1/user/login", {
