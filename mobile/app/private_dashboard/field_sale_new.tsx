@@ -47,8 +47,10 @@ import {
   type CatalogProduct,
   type CatalogVariant,
   type FieldOutlet,
+  type RepSale,
   type SyncSaleItem,
 } from '@/api/fieldSales';
+import { catalogCache } from '@/services/offline/catalogCache';
 import { newClientUuid, salesQueueStore } from '@/services/offline/salesQueue';
 import { salesSyncWorker } from '@/services/offline/salesSync';
 
@@ -104,6 +106,7 @@ export default function NewFieldSaleScreen() {
   const [recentVariantIds, setRecentVariantIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [offline, setOffline] = useState(false);
   const appliedPrefill = useRef(false);
 
   const [selectedOutlet, setSelectedOutlet] = useState<FieldOutlet | null>(null);
@@ -137,28 +140,22 @@ export default function NewFieldSaleScreen() {
         setLoading(false);
         return;
       }
-      const [catRes, outRes, salesRes] = await Promise.all([
-        listCatalog(companyId),
-        listOutlets(companyId, repId),
-        listMySales(companyId, repId),
-      ]);
-      const catalog = isApiError(catRes) ? [] : catRes;
-      const repsOutlets = isApiError(outRes) ? [] : outRes;
-      setProducts(catalog);
-      setOutlets(repsOutlets);
 
-      if (!isApiError(salesRes)) {
+      const applyRecents = (sales: RepSale[]) => {
         const ids: number[] = [];
-        [...salesRes]
+        [...sales]
           .filter((s) => s.status !== 'void')
           .sort((a, b) => new Date(b.sold_at).getTime() - new Date(a.sold_at).getTime())
-          .forEach((s) => s.lines.forEach((l) => {
-            if (!ids.includes(l.variant_id)) ids.push(l.variant_id);
-          }));
+          .forEach((s) =>
+            s.lines.forEach((l) => {
+              if (!ids.includes(l.variant_id)) ids.push(l.variant_id);
+            }),
+          );
         setRecentVariantIds(ids.slice(0, 12));
-      }
+      };
 
-      if (!appliedPrefill.current) {
+      const applyPrefill = async (catalog: CatalogProduct[], repsOutlets: FieldOutlet[]) => {
+        if (appliedPrefill.current) return;
         appliedPrefill.current = true;
         const variants = catalog.flatMap((p) => p.variants);
         let payload: RepeatPayload | null = null;
@@ -186,8 +183,30 @@ export default function NewFieldSaleScreen() {
           const outlet = stored ? repsOutlets.find((o) => String(o.id) === stored) : null;
           if (outlet) setSelectedOutlet(outlet);
         }
+      };
+
+      const cached = await catalogCache.get(companyId, repId);
+      if (cached) {
+        setProducts(cached.products);
+        setOutlets(cached.outlets);
+        await applyPrefill(cached.products, cached.outlets);
+        setLoading(false);
       }
 
+      const [catRes, outRes, salesRes] = await Promise.all([
+        listCatalog(companyId),
+        listOutlets(companyId, repId),
+        listMySales(companyId, repId),
+      ]);
+      const catOk = !isApiError(catRes);
+      const outOk = !isApiError(outRes);
+      if (catOk) setProducts(catRes);
+      if (outOk) setOutlets(outRes);
+      if (catOk && outOk) void catalogCache.set(companyId, repId, catRes, outRes);
+      if (!isApiError(salesRes)) applyRecents(salesRes);
+
+      if (!cached) await applyPrefill(catOk ? catRes : [], outOk ? outRes : []);
+      setOffline(!catOk && !outOk);
       setLoading(false);
     })();
   }, [companyId, repId, repeat]);
@@ -372,6 +391,15 @@ export default function NewFieldSaleScreen() {
       </HStack>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 140 }}>
+        {offline && (
+          <HStack bg={Palette.gray100} px="$3" py="$2" rounded="$xl" mb="$3" alignItems="center" space="xs">
+            <Ionicons name="cloud-offline-outline" size={15} color={Palette.gray500} />
+            <Text fontSize={Type.tiny} color={Palette.gray600} fontWeight="700" flex={1}>
+              Offline — showing your saved catalog. Sales sync when you reconnect.
+            </Text>
+          </HStack>
+        )}
+
         {/* Outlet */}
         <Text fontSize={Type.small} fontWeight="800" color={Palette.gray400} textTransform="uppercase" mb="$2" ml="$1">
           Outlet
