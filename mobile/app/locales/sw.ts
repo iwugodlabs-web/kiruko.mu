@@ -836,6 +836,7 @@ const translationSW: ITranslationSchema = {
 		unlockFingerprint: "Fungua kwa Alama ya Kidole",
 		unlockPasscode: "Fungua kwa nambari ya siri",
 		signOutInstead: "Ondoka badala yake",
+		attemptsLeft: "Majaribio {{count}} yaliyoshindwa yamesalia kabla ya kuondoka kiotomatiki.",
 	},
 
 	profileErrorBoundary: {

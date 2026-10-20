@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Palette, Type } from '@/app/constants/theme';
 import {
   View,
@@ -18,11 +18,34 @@ interface IdleLockScreenProps {
   userName?: string;
 }
 
+// Brute-force escalation: this many failed biometric/passcode attempts ends
+// the session instead of letting retries continue indefinitely.
+const MAX_FAILED_ATTEMPTS = 5;
+
+// A real user needs at least this long to interact with the OS prompt
+// (dialog animation alone is hundreds of ms). Anything resolving faster had
+// no human interaction — OS lockout, busy hardware, auto-dismissed prompt —
+// and must not count as an attempt, or failures cascade with no breathing
+// room: dialogs flash in/out and the user can never reach the PIN entry.
+const MIN_HUMAN_AUTH_MS = 1000;
+
 export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLockScreenProps) {
   const { t } = useTranslation();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasBiometrics, setHasBiometrics] = useState(false);
+  // Attempt counting, in-flight state, and callbacks live in refs — NOT in
+  // triggerAuth's deps. A failedAttempts state dep re-fires the auto-prompt
+  // effect on every failure, reopening the system dialog before the user can
+  // read the error (flash loop); unstable parent callbacks would do the same
+  // on every re-render. Auto-prompt runs once on mount; retries are manual
+  // via the unlock button.
+  const failedAttemptsRef = useRef(0);
+  const authInFlightRef = useRef(false);
+  const callbacksRef = useRef({ onUnlock, onLogout });
+  useEffect(() => {
+    callbacksRef.current = { onUnlock, onLogout };
+  }, [onUnlock, onLogout]);
 
   useEffect(() => {
     LocalAuthentication.hasHardwareAsync().then(async (compatible) => {
@@ -32,20 +55,44 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
   }, []);
 
   const triggerAuth = useCallback(async () => {
-    // No device passcode/biometric to authenticate against. Previously we just
-    // called onUnlock() here, which made the idle lock a silent no-op on any
-    // unsecured device — the timeout would fire and instantly dismiss. For a
-    // payroll app that's a real gap, so end the session instead: the user must
-    // log back in. Devices WITH biometrics keep the fast unlock path below.
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!enrolled) {
-      onLogout();
-      return;
-    }
-
+    // Never stack prompts — a second call while one is open would layer
+    // system dialogs and produce the same flashing symptom. Flag is set
+    // synchronously (before any await) so concurrent calls — rapid taps,
+    // StrictMode double-effects — can't both slip through.
+    if (authInFlightRef.current) return;
+    authInFlightRef.current = true;
     setIsAuthenticating(true);
     setError(null);
+    const startedAt = Date.now();
+    // Counts one genuine (human-driven) failure toward escalation. Defined
+    // before try: a const inside try is block-scoped and invisible in catch.
+    const registerFailure = (): void => {
+      if (Date.now() - startedAt < MIN_HUMAN_AUTH_MS) {
+        setError(t('idleLock.authFailed'));
+        return;
+      }
+      failedAttemptsRef.current += 1;
+      const remaining = MAX_FAILED_ATTEMPTS - failedAttemptsRef.current;
+      if (remaining <= 0) {
+        callbacksRef.current.onLogout();
+        return;
+      }
+      setError(
+        `${t('idleLock.authFailed')} ${t('idleLock.attemptsLeft', { count: remaining })}`,
+      );
+    };
     try {
+      // No device passcode/biometric to authenticate against. Previously we just
+      // called onUnlock() here, which made the idle lock a silent no-op on any
+      // unsecured device — the timeout would fire and instantly dismiss. For a
+      // payroll app that's a real gap, so end the session instead: the user must
+      // log back in. Devices WITH biometrics keep the fast unlock path below.
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!enrolled) {
+        callbacksRef.current.onLogout();
+        return;
+      }
+
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: t('idleLock.promptMessage'),
         fallbackLabel: t('idleLock.fallbackLabel'),
@@ -53,26 +100,29 @@ export default function IdleLockScreen({ onUnlock, onLogout, userName }: IdleLoc
         disableDeviceFallback: false,
       });
       if (result.success) {
-        onUnlock();
-      } else {
-        // Silently ignore cancellations and "no lock configured" errors
-        const silentErrors = [
-          'user_cancel',
-          'system_cancel',
-          'not_enrolled',
-          'passcode_not_set',
-          'PasscodeNotSet',
-        ];
-        if (!silentErrors.includes(result.error as string)) {
-          setError(t('idleLock.authFailed'));
-        }
+        callbacksRef.current.onUnlock();
+        return;
+      }
+      // Silently ignore cancellations and "no lock configured" errors
+      const silentErrors = [
+        'user_cancel',
+        'system_cancel',
+        'not_enrolled',
+        'passcode_not_set',
+        'PasscodeNotSet',
+      ];
+      if (!silentErrors.includes(result.error as string)) {
+        // Escalation: repeated biometric failures end the session instead
+        // of letting an attacker retry indefinitely against the lock.
+        registerFailure();
       }
     } catch {
-      setError(t('idleLock.authFailed'));
+      registerFailure();
     } finally {
+      authInFlightRef.current = false;
       setIsAuthenticating(false);
     }
-  }, [onUnlock, onLogout, t]);
+  }, [t]);
 
   useEffect(() => {
     triggerAuth();

@@ -836,6 +836,7 @@ const translationEN: ITranslationSchema = {
 		unlockFingerprint: "Unlock with Fingerprint",
 		unlockPasscode: "Unlock with Passcode",
 		signOutInstead: "Sign out instead",
+		attemptsLeft: "{{count}} more failed attempts before automatic sign-out.",
 	},
 
 	profileErrorBoundary: {

@@ -821,6 +821,7 @@ const translationES: ITranslationSchema = {
 		unlockFingerprint: "Desbloquear con huella",
 		unlockPasscode: "Desbloquear con código",
 		signOutInstead: "Cerrar sesión en su lugar",
+		attemptsLeft: "Quedan {{count}} intentos fallidos antes del cierre automático.",
 	},
 
 	profileErrorBoundary: {
