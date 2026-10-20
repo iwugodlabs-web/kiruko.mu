@@ -13,6 +13,7 @@ from core.dependencies import get_current_user, require_company_read_access, req
 from core.idempotency import require_idempotency_key
 from core.model import Salary as SalaryORM, User
 from db_models.crud.audit import create_audit_log
+from services.notification_service import NotificationService
 from schema.job_schema import  CreateJob, CreateTimeLog, Job, CreateSalary, Salary, ShowJob, ShowTimeLog, TimeLog, ShowJobHistory, ShowSalary, CreateSchedule, ShowSchedule, UpdateSchedule, UpdateMyTaskStatus, VerifyCompletionResult, ShowBreakLog, PendingEmployee, ClockOutPayload, ClockOutResult
 from sqlalchemy.orm import Session
 from core.exceptions import EnrollmentException as onbording_exceptions
@@ -1942,6 +1943,14 @@ async def create_schedule_endpoint(schedule_data: CreateSchedule, db: Session = 
     """Create a new job schedule and assign employees."""
     try:
         new_schedule = await create_schedule(schedule_data, db)
+        # Recipients should hear about the task, not just find it later in the
+        # app. Drafts stay silent until published.
+        if (new_schedule.status or 'pending') != 'draft':
+            NotificationService.notify_schedule_assigned(
+                db,
+                new_schedule,
+                [e.private_user_id for e in (new_schedule.assigned_employees or [])],
+            )
         return new_schedule
     except HTTPException as e:
         # Re-raise HTTPException to preserve status code and detail
@@ -1992,11 +2001,25 @@ async def get_company_schedules_endpoint(
 @router.put('/schedule/{schedule_id}', status_code=status.HTTP_200_OK, response_model=ShowSchedule)
 async def update_schedule_endpoint(schedule_id: int, schedule_data: UpdateSchedule, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Update an existing schedule. Scoped to the schedule's company."""
-    _assert_schedule_access(schedule_id, current_user, db)
+    prior = _assert_schedule_access(schedule_id, current_user, db)
     try:
+        prior_ids = {e.private_user_id for e in (prior.assigned_employees or [])}
+        was_draft = (prior.status or '') == 'draft'
         updated_schedule = await update_schedule(schedule_id, schedule_data, db)
         if not updated_schedule:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+        # Notify only the people who are newly on the task (or everyone when a
+        # draft is published) so routine edits don't spam the whole team.
+        current_ids = {e.private_user_id for e in (updated_schedule.assigned_employees or [])}
+        if updated_schedule.status != 'draft':
+            recipients = current_ids if was_draft else (current_ids - prior_ids)
+            if recipients:
+                NotificationService.notify_schedule_assigned(
+                    db,
+                    updated_schedule,
+                    recipients,
+                    actor_name=getattr(current_user, 'user_name', None),
+                )
         return updated_schedule
     except HTTPException as e:
         # Re-raise HTTPException to preserve status code and detail

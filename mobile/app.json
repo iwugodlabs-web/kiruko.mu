@@ -18,7 +18,8 @@
           "NSAllowsLocalNetworking": true
         }
       },
-      "appleTeamId": "U29MDGMN4R"
+      "appleTeamId": "U29MDGMN4R",
+      "buildNumber": "23"
     },
     "android": {
       "adaptiveIcon": {

@@ -79,6 +79,8 @@ class NotificationService:
             return "leave"
         if "overtime" in t:
             return "overtime"
+        if "schedule" in t or "task" in t or "shift" in t:
+            return "schedule"
         if "dispute" in t:
             return "disputes"
         if "concern" in t or "user_right" in t or "compliance" in t:
@@ -374,6 +376,56 @@ class NotificationService:
             )
         except Exception as e:
             logger.error(f"Failed to notify leave status change: {e}")
+
+    @staticmethod
+    def notify_schedule_assigned(
+        db: Session,
+        schedule,
+        private_user_ids,
+        *,
+        actor_name: Optional[str] = None,
+    ) -> bool:
+        """Notify employees that a task/shift has been assigned to them.
+
+        Called when a task is created (unless it is a draft) and when new
+        assignees are added or a draft is published. Resolves private-user ids
+        to the notification recipients' user ids. Never raises — a failed
+        notification must not roll back the task itself.
+        """
+        try:
+            from core.model import PrivateUser
+            ids = [int(v) for v in (private_user_ids or []) if v]
+            if not ids:
+                return False
+            rows = db.query(PrivateUser).filter(
+                PrivateUser.private_user_id.in_(ids)
+            ).all()
+            user_ids = [r.user_id for r in rows if r.user_id]
+            if not user_ids:
+                return False
+
+            when = schedule.start_time.strftime('%d %b %Y %H:%M') if schedule.start_time else ''
+            details = f" - {when}" if when else ''
+            if schedule.location:
+                details += f" - {schedule.location}"
+            pay = schedule.additional_remuneration_amount
+            if pay is not None and Decimal(pay) > 0:
+                details += f" - Extra pay {pay}"
+            by = f" (assigned by {actor_name})" if actor_name else ''
+
+            NotificationService.create_notification_fanout(
+                db=db,
+                user_ids=user_ids,
+                title=f"New task assigned: {schedule.title}",
+                message=f"You have been assigned \"{schedule.title}\"{details}.{by}",
+                notification_type="schedule_assigned",
+                meta={"schedule_id": schedule.schedule_id, "task": "schedule"},
+                company_id=schedule.company_id,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to notify schedule assignment: {e}")
+            return False
 
     @staticmethod
     def notify_employee_payslip_corrected(

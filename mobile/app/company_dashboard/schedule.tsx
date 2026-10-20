@@ -38,6 +38,12 @@ import { Calendar, Clock, MapPin, Users, Plus } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { useTranslation } from 'react-i18next';
 
+// Schedules are stored as naive wall-clock datetimes (the backend column has no
+// timezone). `Date.toISOString()` converted them to UTC, so every save shifted
+// the time by the device offset (e.g. 07:00 -> 03:00 in Mauritius). Send the
+// wall-clock value instead so it round-trips unchanged.
+const toWallClock = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm:ss");
+
 // ─── Status helpers ──────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
   draft: Palette.gray500,
@@ -599,8 +605,8 @@ function ScheduleFormModal({ visible, companyId, schedule, prefillDate, pastLoca
         company_id: companyId,
         location: location.trim(),
         notes: notes.trim() || undefined,
-        start_time: startDate.toISOString(),
-        end_time: endDate.toISOString(),
+        start_time: toWallClock(startDate),
+        end_time: toWallClock(endDate),
         status,
         assigned_employee_ids: Array.from(selectedIds),
       };
