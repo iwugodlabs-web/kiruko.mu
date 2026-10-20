@@ -304,12 +304,18 @@ export default function TasksSection() {
       try {
         const assigned = (data?.assigned_employees as Array<Record<string, unknown>> | undefined) || [];
         const assignedIds = assigned.map(a => Number(a.private_user_id ?? a.user_id ?? a.id)).filter(Boolean);
-        const withIds = { ...(data || {}), assigned_employee_ids: assignedIds } as Record<string, unknown>;
+        // Seed the UI-only checkbox flag from the saved amount so the form opens
+        // in the same state that was persisted.
+        const hasAdditionalDuty = Number(data?.additional_remuneration_amount) > 0;
+        const withIds = { ...(data || {}), assigned_employee_ids: assignedIds, additional_duty_enabled: hasAdditionalDuty } as Record<string, unknown>;
         setEditData(withIds);
         try { setOriginalEditData(withIds ? JSON.parse(JSON.stringify(withIds)) : null); } catch { setOriginalEditData(withIds); }
       } catch {
-        setEditData(data);
-        try { setOriginalEditData(data ? JSON.parse(JSON.stringify(data)) : null); } catch { setOriginalEditData(data); }
+        const withIds = data
+          ? { ...data, additional_duty_enabled: Number(data?.additional_remuneration_amount) > 0 }
+          : data;
+        setEditData(withIds);
+        try { setOriginalEditData(withIds ? JSON.parse(JSON.stringify(withIds)) : null); } catch { setOriginalEditData(withIds); }
       }
       // If we weren't able to load the full company list earlier, merge assigned_employees from the schedule so we can show names
       try {
@@ -381,6 +387,7 @@ export default function TasksSection() {
     if (!iso) return '';
     try {
       const d = new Date(String(iso));
+      if (isNaN(d.getTime())) return '';
       // local tz ISO for datetime-local: YYYY-MM-DDTHH:mm
       const pad = (n: number) => n.toString().padStart(2, '0');
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -388,22 +395,30 @@ export default function TasksSection() {
       return '';
     }
   };
+  // Schedules are stored as naive wall-clock datetimes (the backend column has
+  // no timezone). Converting the picked value to a UTC ISO string here made the
+  // backend store UTC wall time, so every save shifted the time by the browser's
+  // offset (e.g. 07:00 -> 03:00 in Mauritius) and it drifted on each edit.
+  // Send the local wall-clock value as-is instead.
   const parseDateFromInput = (val: string) => {
     if (!val) return null;
-    const d = new Date(val);
-    return d.toISOString();
+    return val.length === 16 ? `${val}:00` : val;
   };
 
   const saveEdit = async (payload: Record<string, unknown>) => {
-    const p = payload as Record<string, unknown>;
+    // Copy: the payload is the live editData state object. Mutating it used to
+    // wipe the additional-duty flag / convert times even when validation failed,
+    // so the form visibly changed after a failed save.
+    const p = { ...(payload || {}) } as Record<string, unknown>;
     const id = String(p.schedule_id ?? p.id ?? '');
     if (!id) return;
 
-    // ensure times are ISO strings if user provided datetime-local
+    // ensure times are wall-clock strings if user provided datetime-local
     if ((p.start_time as unknown as string)?.length === 16) p.start_time = parseDateFromInput(p.start_time as string);
     if ((p.end_time as unknown as string)?.length === 16) p.end_time = parseDateFromInput(p.end_time as string);
 
     // #22 — additional pay: normalize blank → null (clears it), else a string.
+    const additionalChecked = p.additional_duty_enabled === true || Number(p.additional_remuneration_amount) > 0;
     if ('additional_remuneration_amount' in p) {
       const amt = p.additional_remuneration_amount;
       p.additional_remuneration_amount = (amt === '' || amt == null || isNaN(Number(amt)) || Number(amt) <= 0) ? null : String(amt);
@@ -415,22 +430,20 @@ export default function TasksSection() {
     if (!p.company_id && !companyIdState) errs.company_id = 'Company is required';
     if (!p.start_time) errs.start_time = 'Start time is required';
     if (!p.end_time) errs.end_time = 'End time is required';
+    if (additionalChecked && (p.additional_remuneration_amount == null)) {
+      errs.additional_remuneration_amount = 'Enter an amount for additional duty';
+    }
     if (Object.keys(errs).length > 0) {
       setEditErrors(errs);
       toast.error('Please fill required fields');
       return;
     }
 
-    // sanitize assigned_employee_ids: send empty array when none selected
-    p.assigned_employee_ids = (Array.isArray(p.assigned_employee_ids) ? p.assigned_employee_ids : []).filter(id => {
-      const uidStr = String(id);
-      const found = (companyUsers || assigneeCandidates || []).find(c => {
-        const rec = c as Record<string, any>;
-        const cid = String(rec.private_user?.private_user_id ?? rec.private_user_id ?? rec.user_id ?? rec.id ?? '');
-        return cid === uidStr;
-      });
-      return found ? isVerifiedUser(found) : false;
-    });
+    // Sanitize ids, but never drop people just because the roster failed to
+    // load — that silently unassigned everyone (so recipients lost the task).
+    p.assigned_employee_ids = (Array.isArray(p.assigned_employee_ids) ? p.assigned_employee_ids : [])
+      .map(v => Number(v))
+      .filter(v => Number.isFinite(v) && v > 0);
 
     try {
       // Only send changed fields to backend to avoid unnecessary writes
@@ -471,6 +484,7 @@ export default function TasksSection() {
     if ((p.end_time as unknown as string)?.length === 16) p.end_time = parseDateFromInput(p.end_time as string);
 
     // #22 — additional pay: omit when blank/invalid (empty string fails Decimal).
+    const additionalChecked = p.additional_duty_enabled === true || Number(p.additional_remuneration_amount) > 0;
     const amt = p.additional_remuneration_amount;
     if (amt === '' || amt == null || isNaN(Number(amt)) || Number(amt) <= 0) {
       delete p.additional_remuneration_amount;
@@ -487,22 +501,19 @@ export default function TasksSection() {
     if (!p.company_id) errs.company_id = 'Company is required';
     if (!p.start_time) errs.start_time = 'Start time is required';
     if (!p.end_time) errs.end_time = 'End time is required';
+    if (additionalChecked && p.additional_remuneration_amount == null) {
+      errs.additional_remuneration_amount = 'Enter an amount for additional duty';
+    }
     if (Object.keys(errs).length > 0) {
       setCreateErrors(errs);
       toast.error('Please fill required fields');
       return;
     }
 
-    // sanitize assigned_employee_ids: send empty array when none selected
-    p.assigned_employee_ids = (Array.isArray(p.assigned_employee_ids) ? p.assigned_employee_ids : []).filter(id => {
-      const uidStr = String(id);
-      const found = (companyUsers || assigneeCandidates || []).find(c => {
-        const rec = c as Record<string, any>;
-        const cid = String(rec.private_user?.private_user_id ?? rec.private_user_id ?? rec.user_id ?? rec.id ?? '');
-        return cid === uidStr;
-      });
-      return found ? isVerifiedUser(found) : false;
-    });
+    // sanitize ids without requiring the roster to be loaded
+    p.assigned_employee_ids = (Array.isArray(p.assigned_employee_ids) ? p.assigned_employee_ids : [])
+      .map(v => Number(v))
+      .filter(v => Number.isFinite(v) && v > 0);
 
     try {
       await api.post(`/job/schedule`, p);
@@ -519,14 +530,33 @@ export default function TasksSection() {
   // #22 — "Additional duty" is an explicit checkbox; the amount field only
   // appears once it's ticked, so paid tasks are a conscious choice (matches PO).
   // Derived: ticked if the flag is set, or (for an existing task) an amount > 0.
+  // Deliberately OR (not `??`): an explicit `false` used to hide a saved amount,
+  // so a task that already had extra pay reopened unchecked.
   const isAdditionalDutyChecked = (d: Record<string, unknown> | null) =>
-    Boolean((d?.additional_duty_enabled as boolean | undefined) ?? (Number(d?.additional_remuneration_amount) > 0));
-  const toggleAdditionalDuty = (checked: boolean) =>
+    d?.additional_duty_enabled === true || Number(d?.additional_remuneration_amount) > 0;
+  const clearAdditionalDutyError = () => {
+    const clear = (e: Record<string, string>) => {
+      if (!e.additional_remuneration_amount) return e;
+      const next = { ...e };
+      delete next.additional_remuneration_amount;
+      return next;
+    };
+    setEditErrors(clear);
+    setCreateErrors(clear);
+  };
+  const toggleAdditionalDuty = (checked: boolean) => {
+    clearAdditionalDutyError();
     setEditData(d => ({
       ...(d || {}),
       additional_duty_enabled: checked,
-      ...(checked ? {} : { additional_remuneration_amount: '' }),  // unticking clears the amount
+      // unticking clears the amount; ticking keeps any previously-saved one
+      ...(checked ? {} : { additional_remuneration_amount: '' }),
     }));
+  };
+  const changeAdditionalDutyAmount = (val: string) => {
+    clearAdditionalDutyError();
+    setEditData(d => ({ ...(d || {}), additional_remuneration_amount: val }));
+  };
 
   // #22 — employer verifies a completed task → books additional remuneration
   // for each completed assignee (idempotent). Verify-before-pay gate.
@@ -1298,7 +1328,8 @@ export default function TasksSection() {
                   </label>
                   {isAdditionalDutyChecked(editData) && (
                     <div className="mt-2">
-                      <input type="text" inputMode="decimal" autoFocus className="w-full px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 text-sm tabular-nums transition-colors" value={String(editData?.additional_remuneration_amount ?? '')} onChange={(e) => setEditData(d => ({ ...(d || {}), additional_remuneration_amount: e.target.value }))} placeholder="Amount per assignee, e.g. 500.00" />
+                      <input type="text" inputMode="decimal" autoFocus className="w-full px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 text-sm tabular-nums transition-colors" value={String(editData?.additional_remuneration_amount ?? '')} onChange={(e) => changeAdditionalDutyAmount(e.target.value)} placeholder="Amount per assignee, e.g. 500.00" />
+                      {editErrors.additional_remuneration_amount && <div className="text-xs text-red-600 mt-1">{editErrors.additional_remuneration_amount}</div>}
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Each assignee earns this once you verify their completion. It lands on that month&apos;s payroll.</p>
                     </div>
                   )}
@@ -1385,7 +1416,8 @@ export default function TasksSection() {
                   </label>
                   {isAdditionalDutyChecked(editData) && (
                     <div className="mt-2">
-                      <input type="text" inputMode="decimal" autoFocus className="w-full px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 text-sm tabular-nums transition-colors" value={String(editData?.additional_remuneration_amount ?? '')} onChange={(e) => setEditData(d => ({ ...(d || {}), additional_remuneration_amount: e.target.value }))} placeholder="Amount per assignee, e.g. 500.00" />
+                      <input type="text" inputMode="decimal" autoFocus className="w-full px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 text-sm tabular-nums transition-colors" value={String(editData?.additional_remuneration_amount ?? '')} onChange={(e) => changeAdditionalDutyAmount(e.target.value)} placeholder="Amount per assignee, e.g. 500.00" />
+                      {createErrors.additional_remuneration_amount && <div className="text-xs text-red-600 mt-1">{createErrors.additional_remuneration_amount}</div>}
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Each assignee earns this once you verify their completion. It lands on that month&apos;s payroll.</p>
                     </div>
                   )}
