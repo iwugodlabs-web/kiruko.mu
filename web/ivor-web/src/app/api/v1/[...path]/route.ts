@@ -59,6 +59,10 @@ async function proxyRequest(
       const lower = key.toLowerCase();
       // Skip hop-by-hop headers, and Set-Cookie (handled separately below).
       if (['content-encoding', 'transfer-encoding', 'set-cookie'].includes(lower)) return;
+      // Security headers the backend also emits are re-applied by next.config.ts
+      // `headers()` on this response — drop the backend's copies so web clients
+      // don't receive duplicate (comma-joined) values.
+      if (['x-content-type-options', 'referrer-policy'].includes(lower)) return;
       responseHeaders.append(key, value);
     });
     for (const cookie of backendResponse.headers.getSetCookie()) {

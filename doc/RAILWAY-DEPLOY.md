@@ -59,15 +59,20 @@ FRONTEND_URL=https://your-web.up.railway.app
 APP_NAME=Kiruko
 TIME_ZONE_LOCAL=Indian/Mauritius
 STORAGE_TYPE=local
+ENVIRONMENT=production
+COOKIE_SECURE=true
 ```
 
 Critical notes:
 
-- ⚠️ **Do NOT set `ENVIRONMENT=production`.** `backend/core/settings.py` sends
-  `production` down the Google Cloud SQL path, which requires
-  `CLOUD_SQL_CONNECTION_NAME` (no default) and crashes on Railway. Leaving it
-  unset (defaults to `development`) uses the plain `POSTGRES_*` vars — correct
-  for Railway.
+- **Set `ENVIRONMENT=production`.** It engages the JWT fail-closed check and
+  disables `/docs`, `/redoc`, and `/openapi.json` (set `ENABLE_API_DOCS=true`
+  only if you explicitly need them). `core/settings.py` only takes the Google
+  Cloud SQL socket path when `CLOUD_SQL_CONNECTION_NAME` is also set; on Railway
+  it falls through to the plain `POSTGRES_*` vars, so this is safe.
+- **Set `COOKIE_SECURE=true`.** Without it the auth cookies are issued without
+  the `Secure` flag even though the site is served over HTTPS. Combine with the
+  HSTS header the web app now sends.
 - `${{Postgres.*}}` are Railway variable references. Replace `Postgres` if the DB
   service has another name.
 - `RAILWAY_PRIVATE_DOMAIN` + `POSTGRES_SSLMODE=disable` uses Railway's internal

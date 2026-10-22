@@ -15,8 +15,12 @@ def get_db_credentials():
     environment = config("ENVIRONMENT", default="development")
     
     if environment == "production":
-        # Cloud Run with Cloud SQL connection
-        connection_name = config("CLOUD_SQL_CONNECTION_NAME")
+        # Cloud Run with Cloud SQL connection. Default to None so that setting
+        # ENVIRONMENT=production WITHOUT a Cloud SQL socket (e.g. on Railway,
+        # where we use the plain POSTGRES_* vars) does NOT raise
+        # UndefinedValueError — python-decouple's config() raises on a missing
+        # key when no default is given. With None we cleanly fall through.
+        connection_name = config("CLOUD_SQL_CONNECTION_NAME", default=None)
         if connection_name:
             # Use Unix socket connection for Cloud SQL
             db_socket_dir = "/cloudsql"
