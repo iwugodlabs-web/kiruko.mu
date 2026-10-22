@@ -68,7 +68,7 @@ router = APIRouter(
 
 # --- Subscription CRUD Routes ---
 @router.post('/subscription', status_code=201)
-async def create_subscription_route(subscription_data: CreateSubscription, db: Session = Depends(config.get_db)):
+async def create_subscription_route(subscription_data: CreateSubscription, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         subscription = create_subscription(subscription_data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(subscription)})
@@ -77,26 +77,26 @@ async def create_subscription_route(subscription_data: CreateSubscription, db: S
         raise HTTPException(status_code=500, detail="Failed to create subscription")
 
 @router.get('/subscription/{subscription_id}', status_code=200)
-async def get_subscription_route(subscription_id: int, db: Session = Depends(config.get_db)):
+async def get_subscription_route(subscription_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     subscription = get_subscription_by_id(subscription_id, db)
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(subscription)})
 
 @router.get('/subscriptions', status_code=200)
-async def get_all_subscriptions_route(db: Session = Depends(config.get_db)):
+async def get_all_subscriptions_route(current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     subscriptions = get_all_subscriptions(db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(subscriptions)})
 
 @router.put('/subscription/{subscription_id}', status_code=200)
-async def update_subscription_route(subscription_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_subscription_route(subscription_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     subscription = update_subscription(subscription_id, update_data, db)
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(subscription)})
 
 @router.delete('/subscription/{subscription_id}', status_code=204)
-async def delete_subscription_route(subscription_id: int, db: Session = Depends(config.get_db)):
+async def delete_subscription_route(subscription_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     success = delete_subscription(subscription_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Subscription not found")
@@ -105,7 +105,7 @@ async def delete_subscription_route(subscription_id: int, db: Session = Depends(
 
 # --- Transfer CRUD Routes ---
 @router.post('/transfer', status_code=201)
-async def create_transfer_route(transfer_data: CreateTransfer, db: Session = Depends(config.get_db)):
+async def create_transfer_route(transfer_data: CreateTransfer, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         transfer = create_transfer_transaction(transfer_data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(transfer)})
@@ -114,7 +114,7 @@ async def create_transfer_route(transfer_data: CreateTransfer, db: Session = Dep
         raise HTTPException(status_code=500, detail="Failed to create transfer")
 
 @router.get('/transfer/{transfer_id}', status_code=200)
-async def get_transfer_route(transfer_id: int, db: Session = Depends(config.get_db)):
+async def get_transfer_route(transfer_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     transfer = get_transfer_by_id(transfer_id, db)
     if not transfer:
         raise HTTPException(status_code=404, detail="Transfer not found")
@@ -134,14 +134,14 @@ async def get_all_transfers_route(
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(transfers)})
 
 @router.put('/transfer/{transfer_id}', status_code=200)
-async def update_transfer_route(transfer_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_transfer_route(transfer_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     transfer = update_transfer(transfer_id, update_data, db)
     if not transfer:
         raise HTTPException(status_code=404, detail="Transfer not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(transfer)})
 
 @router.delete('/transfer/{transfer_id}', status_code=204)
-async def delete_transfer_route(transfer_id: int, db: Session = Depends(config.get_db)):
+async def delete_transfer_route(transfer_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     success = delete_transfer(transfer_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Transfer not found")
@@ -149,7 +149,7 @@ async def delete_transfer_route(transfer_id: int, db: Session = Depends(config.g
 
 # --- Loan CRUD Routes ---
 @router.post('/loan', status_code=201)
-async def create_loan_route(loan_data: CreateLoan, db: Session = Depends(config.get_db)):
+async def create_loan_route(loan_data: CreateLoan, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         loan = create_loan(loan_data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(loan)})
@@ -158,7 +158,7 @@ async def create_loan_route(loan_data: CreateLoan, db: Session = Depends(config.
         raise HTTPException(status_code=500, detail="Failed to create loan")
 
 @router.get('/loan/{loan_id}', status_code=200)
-async def get_loan_route(loan_id: int, db: Session = Depends(config.get_db)):
+async def get_loan_route(loan_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     loan = get_loan_by_id(loan_id, db)
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
@@ -187,14 +187,14 @@ async def get_all_loans_route(
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(result)})
 
 @router.put('/loan/{loan_id}', status_code=200)
-async def update_loan_route(loan_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_loan_route(loan_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     loan = update_loan(loan_id, update_data, db)
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(loan)})
 
 @router.delete('/loan/{loan_id}', status_code=204)
-async def delete_loan_route(loan_id: int, db: Session = Depends(config.get_db)):
+async def delete_loan_route(loan_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     success = delete_loan(loan_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Loan not found")
@@ -203,7 +203,7 @@ async def delete_loan_route(loan_id: int, db: Session = Depends(config.get_db)):
 
 # --- Leave CRUD Routes ---
 @router.post('/leave', status_code=201, response_model=ShowLeave)
-async def create_leave_route(leave_data: CreateLeave, db: Session = Depends(config.get_db)):
+async def create_leave_route(leave_data: CreateLeave, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         leave = create_leave(leave_data, db)
         # Notify company admin about the new leave request (fire-and-forget)
@@ -218,14 +218,14 @@ async def create_leave_route(leave_data: CreateLeave, db: Session = Depends(conf
         raise HTTPException(status_code=500, detail="Failed to create leave request")
 
 @router.get('/leave/{leave_id}', status_code=200, response_model=ShowLeave)
-async def get_leave_route(leave_id: int, db: Session = Depends(config.get_db)):
+async def get_leave_route(leave_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     leave = get_leave_by_id(leave_id, db)
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(leave)})
 
 @router.get('/leaves/user/{private_user_id}', status_code=200, response_model=List[ShowLeave])
-async def get_user_leaves_route(private_user_id: int, db: Session = Depends(config.get_db)):
+async def get_user_leaves_route(private_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     leaves = get_leaves_by_user(private_user_id, db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(leaves)})
 
@@ -339,7 +339,7 @@ async def approve_or_reject_leave_route(leave_id: int, approval_data: ApproveLea
 
 # --- Rent CRUD Routes ---
 @router.post('/rent', status_code=201)
-async def create_rent_route(rent_data: CreateRent, db: Session = Depends(config.get_db)):
+async def create_rent_route(rent_data: CreateRent, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         rent = create_rent(rent_data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(rent)})
@@ -348,26 +348,26 @@ async def create_rent_route(rent_data: CreateRent, db: Session = Depends(config.
         raise HTTPException(status_code=500, detail="Failed to create rent")
 
 @router.get('/rent/{rent_id}', status_code=200)
-async def get_rent_route(rent_id: int, db: Session = Depends(config.get_db)):
+async def get_rent_route(rent_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     rent = get_rent_by_id(rent_id, db)
     if not rent:
         raise HTTPException(status_code=404, detail="Rent not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(rent)})
 
 @router.get('/rents/{private_user_id}', status_code=200)
-async def get_user_rents_route(private_user_id: int, db: Session = Depends(config.get_db)):
+async def get_user_rents_route(private_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     rents = get_rents_by_user(private_user_id, db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(rents)})
 
 @router.put('/rent/{rent_id}', status_code=200)
-async def update_rent_route(rent_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_rent_route(rent_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     rent = update_rent(rent_id, update_data, db)
     if not rent:
         raise HTTPException(status_code=404, detail="Rent not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(rent)})
 
 @router.delete('/rent/{rent_id}', status_code=204)
-async def delete_rent_route(rent_id: int, db: Session = Depends(config.get_db)):
+async def delete_rent_route(rent_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     success = delete_rent(rent_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Rent not found")
@@ -375,7 +375,7 @@ async def delete_rent_route(rent_id: int, db: Session = Depends(config.get_db)):
 
 # --- Budget Goal CRUD Routes ---
 @router.post('/budget', status_code=201)
-async def create_budget_goal_route(data: CreateBudgetGoal, db: Session = Depends(config.get_db)):
+async def create_budget_goal_route(data: CreateBudgetGoal, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         goal = create_budget_goal(data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(goal)})
@@ -384,19 +384,19 @@ async def create_budget_goal_route(data: CreateBudgetGoal, db: Session = Depends
         raise HTTPException(status_code=500, detail="Failed to create budget goal")
 
 @router.get('/budgets/{private_user_id}', status_code=200)
-async def get_user_budget_goals_route(private_user_id: int, db: Session = Depends(config.get_db)):
+async def get_user_budget_goals_route(private_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     goals = get_budget_goals_by_user(private_user_id, db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(goals)})
 
 @router.put('/budget/{budget_id}', status_code=200)
-async def update_budget_goal_route(budget_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_budget_goal_route(budget_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     goal = update_budget_goal(budget_id, update_data, db)
     if not goal:
         raise HTTPException(status_code=404, detail="Budget goal not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(goal)})
 
 @router.delete('/budget/{budget_id}', status_code=204)
-async def delete_budget_goal_route(budget_id: int, db: Session = Depends(config.get_db)):
+async def delete_budget_goal_route(budget_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     success = delete_budget_goal(budget_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Budget goal not found")
@@ -404,7 +404,7 @@ async def delete_budget_goal_route(budget_id: int, db: Session = Depends(config.
 
 # --- Leave Quota Routes ---
 @router.post('/leave-quota', status_code=201)
-async def create_leave_quota_route(data: CreateLeaveQuota, db: Session = Depends(config.get_db)):
+async def create_leave_quota_route(data: CreateLeaveQuota, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         quota = create_leave_quota(data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(quota)})
@@ -413,14 +413,14 @@ async def create_leave_quota_route(data: CreateLeaveQuota, db: Session = Depends
         raise HTTPException(status_code=500, detail="Failed to create leave quota")
 
 @router.get('/leave-quotas/{private_user_id}', status_code=200)
-async def get_user_leave_quotas_route(private_user_id: int, year: int = None, db: Session = Depends(config.get_db)):
+async def get_user_leave_quotas_route(private_user_id: int, year: int = None, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     if year is None:
         year = datetime.now().year
     quotas = get_leave_quotas_by_user(private_user_id, year, db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(quotas)})
 
 @router.put('/leave-quota/{quota_id}', status_code=200)
-async def update_leave_quota_route(quota_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_leave_quota_route(quota_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     quota = update_leave_quota(quota_id, update_data, db)
     if not quota:
         raise HTTPException(status_code=404, detail="Leave quota not found")
@@ -428,7 +428,7 @@ async def update_leave_quota_route(quota_id: int, update_data: dict, db: Session
 
 # --- Public Holidays Routes ---
 @router.post('/holiday', status_code=201)
-async def create_holiday_route(data: CreatePublicHoliday, db: Session = Depends(config.get_db)):
+async def create_holiday_route(data: CreatePublicHoliday, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         from core.model import PublicHoliday
         holiday = PublicHoliday(
@@ -2031,7 +2031,7 @@ async def delete_user_by_id(user_id: int, current_user: User = Depends(get_curre
 @router.get('/user-rights/user/{private_user_id}', status_code=200)
 async def get_user_complaints_endpoint(
     private_user_id: int,
-    db: Session = Depends(config.get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)
 ) -> dict:
     """Get all complaints for a specific user."""
     try:
@@ -2085,7 +2085,7 @@ async def get_all_complaints_endpoint(
 @router.get('/user-right/{complaint_id}', status_code=200)
 async def get_complaint_by_id_endpoint(
     complaint_id: int,
-    db: Session = Depends(config.get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)
 ) -> dict:
     """Get a specific complaint by ID."""
     try:
@@ -2149,7 +2149,7 @@ async def create_user_right(
     payroll_run_id: Optional[int] = Form(None),
     payslip_id: Optional[int] = Form(None),
     attachment: Optional[UploadFile] = File(None),
-    db: Session = Depends(config.get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)
 ) -> dict:
     # IDOR guard (kept OUT of the try below, whose `except Exception` would mask
     # a 403 as a 500): a payslip/run link must belong to the REPORTER — else a
@@ -3579,7 +3579,7 @@ async def post_dispute_message(
 
 
 @router.post("/create-transfer", status_code=status.HTTP_201_CREATED)
-async def create_transfer(transfer_data: CreateTransfer, db: Session = Depends(config.get_db)):
+async def create_transfer(transfer_data: CreateTransfer, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         transfer = create_transfer_transaction(transfer_data, db)
         return JSONResponse(status_code=status.HTTP_201_CREATED, content=jsonable_encoder(transfer))
@@ -3593,7 +3593,7 @@ async def create_transfer(transfer_data: CreateTransfer, db: Session = Depends(c
     
 # revisit this function
 # @router.post("/upload")
-# async def upload_file(file: UploadFile, db: Session = Depends(config.get_db)):
+# async def upload_file(file: UploadFile, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
 #     # TODO: Implement S3/file storage logic. The following is placeholder.
 #     # The s3_client, S3_BUCKET, and S3_ENDPOINT variables need to be configured.
 #     raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="File upload not implemented")
@@ -3841,7 +3841,7 @@ async def echo_cookies(request: Request):
         return JSONResponse(status_code=500, content={"error": "failed to read cookies"})
     
 @router.post('/purchase', status_code=201)
-async def create_purchase_route(purchase_data: CreatePurchase, db: Session = Depends(config.get_db)):
+async def create_purchase_route(purchase_data: CreatePurchase, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         purchase = create_purchase(purchase_data, db)
         return JSONResponse(status_code=201, content={"status": "success", "data": jsonable_encoder(purchase)})
@@ -3850,26 +3850,26 @@ async def create_purchase_route(purchase_data: CreatePurchase, db: Session = Dep
         raise HTTPException(status_code=500, detail="Failed to create purchase")
 
 @router.get('/purchase/{purchase_id}', status_code=200)
-async def get_purchase_route(purchase_id: int, db: Session = Depends(config.get_db)):
+async def get_purchase_route(purchase_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     purchase = get_purchase_by_id(purchase_id, db)
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(purchase)})
 
 @router.get('/purchases', status_code=200)
-async def get_all_purchases_route(db: Session = Depends(config.get_db)):
+async def get_all_purchases_route(current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     purchases = get_all_purchases(db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(purchases)})
 
 @router.put('/purchase/{purchase_id}', status_code=200)
-async def update_purchase_route(purchase_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_purchase_route(purchase_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     purchase = update_purchase(purchase_id, update_data, db)
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(purchase)})
 
 @router.delete('/purchase/{purchase_id}', status_code=204)
-async def delete_purchase_route(purchase_id: int, db: Session = Depends(config.get_db)):
+async def delete_purchase_route(purchase_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     success = delete_purchase(purchase_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Purchase not found")
@@ -3877,7 +3877,7 @@ async def delete_purchase_route(purchase_id: int, db: Session = Depends(config.g
 
 # --- Repayment CRUD Routes ---
 @router.post('/repayment', status_code=201)
-async def create_repayment_route(repayment_data: Repayment, db: Session = Depends(config.get_db)):
+async def create_repayment_route(repayment_data: Repayment, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     try:
         from db_models.crud.repayment import create_repayment
         repayment = create_repayment(repayment_data, db)
@@ -3887,7 +3887,7 @@ async def create_repayment_route(repayment_data: Repayment, db: Session = Depend
         raise HTTPException(status_code=500, detail="Failed to create repayment")
 
 @router.get('/repayment/{repayment_id}', status_code=200)
-async def get_repayment_route(repayment_id: int, db: Session = Depends(config.get_db)):
+async def get_repayment_route(repayment_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     from db_models.crud.repayment import get_repayment_by_id
     repayment = get_repayment_by_id(repayment_id, db)
     if not repayment:
@@ -3895,13 +3895,13 @@ async def get_repayment_route(repayment_id: int, db: Session = Depends(config.ge
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(repayment)})
 
 @router.get('/repayments/{loan_id}', status_code=200)
-async def get_repayments_by_loan_route(loan_id: int, db: Session = Depends(config.get_db)):
+async def get_repayments_by_loan_route(loan_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     from db_models.crud.repayment import get_repayments_by_loan
     repayments = get_repayments_by_loan(loan_id, db)
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(repayments)})
 
 @router.put('/repayment/{repayment_id}', status_code=200)
-async def update_repayment_route(repayment_id: int, update_data: dict, db: Session = Depends(config.get_db)):
+async def update_repayment_route(repayment_id: int, update_data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     from db_models.crud.repayment import update_repayment
     repayment = update_repayment(repayment_id, update_data, db)
     if not repayment:
@@ -3909,7 +3909,7 @@ async def update_repayment_route(repayment_id: int, update_data: dict, db: Sessi
     return JSONResponse(status_code=200, content={"status": "success", "data": jsonable_encoder(repayment)})
 
 @router.delete('/repayment/{repayment_id}', status_code=204)
-async def delete_repayment_route(repayment_id: int, db: Session = Depends(config.get_db)):
+async def delete_repayment_route(repayment_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     from db_models.crud.repayment import delete_repayment
     success = delete_repayment(repayment_id, db)
     if not success:
