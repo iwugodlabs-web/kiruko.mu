@@ -1027,7 +1027,7 @@ async def get_jobs_by_company_endpoint(company_id: int, db: Session = Depends(co
     return jobs
 
 @router.get('/{private_user_id}', status_code=200, response_model=Optional[ShowJob])
-async def get_user_job_by_id(private_user_id: int, db: Session = Depends(config.get_db)):
+async def get_user_job_by_id(private_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Return the user's job, or null when they have no job linked yet.
 
     A user who just signed up but hasn't been added to a company has no Job

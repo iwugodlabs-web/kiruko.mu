@@ -2010,7 +2010,12 @@ async def finalize_onboarding(
     }
 
 @router.delete('/{user_id}', status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user_by_id(user_id: int, db: Session = Depends(config.get_db)):
+async def delete_user_by_id(user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
+    # Destructive, cross-tenant op — restrict to platform admins. (If company
+    # admins must remove their own employees, that belongs on a company-scoped
+    # endpoint, not this raw delete-by-id.) Previously unauthenticated.
+    if not getattr(current_user, 'is_superuser', False):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
     try:
         delete_user(user_id, db)
     except SQLAlchemyError as e:
@@ -3826,6 +3831,9 @@ async def refresh_access_token(request: Request, token_data: Optional[RefreshTok
 @router.get('/debug/echo-cookies')
 async def echo_cookies(request: Request):
     """Debug endpoint: returns cookies received on the request. Useful for verifying whether the browser sent the auth cookie."""
+    # Debug-only — never expose request-reflection endpoints in production.
+    if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     try:
         return JSONResponse(status_code=200, content={"cookies": dict(request.cookies)})
     except Exception as e:
@@ -3909,7 +3917,7 @@ async def delete_repayment_route(repayment_id: int, db: Session = Depends(config
     return JSONResponse(status_code=204, content={"status": "success"})
 
 @router.get('/{private_user_id}/schedules', status_code=status.HTTP_200_OK, response_model=List[ShowSchedule])
-async def get_schedules_for_user_endpoint(private_user_id: int, db: Session = Depends(config.get_db)):
+async def get_schedules_for_user_endpoint(private_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """
     Get all schedules assigned to a specific user.
     """
