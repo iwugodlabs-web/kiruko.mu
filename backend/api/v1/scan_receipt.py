@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 try:
     import pytesseract
 except ImportError:
@@ -16,6 +16,9 @@ import os
 from dotenv import load_dotenv
 
 from services import document_ai_service
+from core.dependencies import get_current_user
+from core.model import User
+from core.limiter import limiter, RATE_LIMITING_ENABLED
 
 # Load environment variables
 load_dotenv()
@@ -902,7 +905,8 @@ def _persist_receipt(contents: bytes, mime_type: str) -> Optional[str]:
 
 
 @router.post("/purchases/scan", response_model=ScannedReceipt)
-async def scan_receipt(file: UploadFile = File(...)):
+@(limiter.limit("20/minute") if RATE_LIMITING_ENABLED else lambda f: f)
+async def scan_receipt(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     """Scan receipt image and extract merchant, date, amount, and items.
 
     Side effect: the uploaded image is persisted via storage_service so the

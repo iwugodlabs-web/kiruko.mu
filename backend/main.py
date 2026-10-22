@@ -19,9 +19,73 @@ from fastapi import Request, Response
 from core.model import RequestLog
 from core.config import get_session_local, get_db
 from core.security import decode_token
+import queue as _queue
+import threading as _threading
+
+# Request-audit logging is off the hot path. A bounded queue + a single daemon
+# writer replaces the old "spawn a thread and a DB session per request" design,
+# which let an unauthenticated flood (scanners do this constantly) exhaust
+# threads and the DB connection pool. When the queue is full we DROP audit rows
+# rather than apply backpressure to the request.
+_REQUEST_LOG_QUEUE: "_queue.Queue[tuple]" = _queue.Queue(maxsize=1000)
+_REQUEST_LOG_WORKER_STARTED = False
+_REQUEST_LOG_LOCK = _threading.Lock()
+
+
+def _write_request_log(method, path, ip_address, user_agent, platform, user_id=None):
+    session_factory = get_session_local()
+    if not session_factory:
+        return
+    db = session_factory()
+    try:
+        db.add(RequestLog(
+            user_id=user_id,
+            platform=platform,
+            user_agent=user_agent,
+            ip_address=ip_address,
+            method=method,
+            path=path,
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error logging request metadata: {e}")
+    finally:
+        db.close()
+
+
+def _request_log_worker():
+    while True:
+        args = _REQUEST_LOG_QUEUE.get()
+        try:
+            _write_request_log(*args)
+        except Exception as e:
+            print(f"Error writing request log: {e}")
+        finally:
+            _REQUEST_LOG_QUEUE.task_done()
+
+
+def _enqueue_request_log(*args) -> None:
+    try:
+        _REQUEST_LOG_QUEUE.put_nowait(args)
+    except _queue.Full:
+        pass
+
+
+def _ensure_request_log_worker() -> None:
+    global _REQUEST_LOG_WORKER_STARTED
+    with _REQUEST_LOG_LOCK:
+        if _REQUEST_LOG_WORKER_STARTED:
+            return
+        _threading.Thread(
+            target=_request_log_worker,
+            daemon=True,
+            name="request-log-writer",
+        ).start()
+        _REQUEST_LOG_WORKER_STARTED = True
 
 # Rate limiting — single shared Limiter so all routers use the same state
-from core.limiter import limiter, RATE_LIMITING_ENABLED
+from core.limiter import limiter, RATE_LIMITING_ENABLED, client_ip
 try:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
@@ -45,7 +109,29 @@ except Exception as e:
 
 
 def get_application():
-    app = FastAPI(title=config.PROJECT_NAME, version=config.VERSION)
+    # Interactive API docs enumerate every endpoint and schema — useful in dev,
+    # free reconnaissance in production. Default them off when ENVIRONMENT is
+    # "production"; ENABLE_API_DOCS=true re-enables them if an operator needs to.
+    _docs_env = _os.getenv("ENABLE_API_DOCS")
+    if _docs_env is None:
+        _docs_enabled = _os.getenv("ENVIRONMENT", "development").strip().lower() != "production"
+    else:
+        _docs_enabled = _docs_env.strip().lower() in ("1", "true", "yes")
+
+    app = FastAPI(
+        title=config.PROJECT_NAME,
+        version=config.VERSION,
+        docs_url="/docs" if _docs_enabled else None,
+        redoc_url="/redoc" if _docs_enabled else None,
+        openapi_url="/openapi.json" if _docs_enabled else None,
+    )
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 
     # ── Rate limiter state ──────────────────────────────────────────────────
     if RATE_LIMITING_ENABLED:
@@ -107,32 +193,7 @@ def get_application():
     except Exception as _e:
         print(f"⚠️ /uploads static mount failed: {_e}")
 
-    def log_request_metadata(
-        method: str,
-        path: str,
-        ip_address: str,
-        user_agent: str,
-        platform: str,
-        user_id: int = None
-    ):
-        session_factory = get_session_local()
-        if session_factory:
-            db = session_factory()
-            try:
-                log_entry = RequestLog(
-                    user_id=user_id,
-                    platform=platform,
-                    user_agent=user_agent,
-                    ip_address=ip_address,
-                    method=method,
-                    path=path
-                )
-                db.add(log_entry)
-                db.commit()
-            except Exception as e:
-                print(f"Error logging request metadata: {e}")
-            finally:
-                db.close()
+    _ensure_request_log_worker()
 
     @app.middleware("http")
     async def add_request_metadata_logging(request: Request, call_next):
@@ -172,7 +233,11 @@ def get_application():
             else:
                 platform = platform or "web"
 
-        ip_address = request.client.host if request.client else "unknown"
+        # Resolve the real client IP, not the Next.js proxy's private address
+        # (which request.client.host returns for every web user). Shares the
+        # reverse-proxy logic with the rate limiter so the audit trail actually
+        # attributes requests to real clients.
+        ip_address = client_ip(request)
         method = request.method
         
         # Try to extract user_id if token is present
@@ -205,11 +270,12 @@ def get_application():
         # Process the request
         response = await call_next(request)
         
-        # Save to DB asynchronously (basic version)
-        import threading
-        t = threading.Thread(target=log_request_metadata, args=(method, path, ip_address, user_agent, platform, user_id))
-        t.start()
-            
+        # Save to DB asynchronously via the bounded writer queue. 404s are
+        # scanner noise with no audit value — skip them so probing cannot fill
+        # the queue and starve real traffic.
+        if response.status_code != 404:
+            _enqueue_request_log(method, path, ip_address, user_agent, platform, user_id)
+
         return response
 
     def cleanup_old_logs():

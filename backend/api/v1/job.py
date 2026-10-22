@@ -118,7 +118,7 @@ def _gate_company_attendance(current_user, company_id: int, db, permission: str 
 
 # --- Salary Endpoints ---
 @router.post('/salary', status_code=201, response_model=ShowSalary)
-async def create_salary_endpoint(salary: Salary, db: Session = Depends(config.get_db)):
+async def create_salary_endpoint(salary: Salary, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Create a salary record for a job"""
     try:
         created_salary = await create_salary(salary, db)
@@ -958,7 +958,7 @@ async def get_company_compliance(
 
 
 @router.post('/create', status_code=201, response_model=ShowJob)
-async def register_job(job: CreateJob, db: Session = Depends(config.get_db)):
+async def register_job(job: CreateJob, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Create a new job profile for a user"""
     try:
         created_job = await create_job(job, db)
@@ -1027,7 +1027,7 @@ async def get_jobs_by_company_endpoint(company_id: int, db: Session = Depends(co
     return jobs
 
 @router.get('/{private_user_id}', status_code=200, response_model=Optional[ShowJob])
-async def get_user_job_by_id(private_user_id: int, db: Session = Depends(config.get_db)):
+async def get_user_job_by_id(private_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Return the user's job, or null when they have no job linked yet.
 
     A user who just signed up but hasn't been added to a company has no Job
@@ -1939,7 +1939,7 @@ async def get_job_history_route(job_id: int, current_user: User = Depends(get_cu
 # --- Schedule Endpoints ---
 
 @router.post('/schedule', status_code=status.HTTP_201_CREATED, response_model=ShowSchedule)
-async def create_schedule_endpoint(schedule_data: CreateSchedule, db: Session = Depends(config.get_db)):
+async def create_schedule_endpoint(schedule_data: CreateSchedule, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Create a new job schedule and assign employees."""
     try:
         new_schedule = await create_schedule(schedule_data, db)
@@ -2546,7 +2546,7 @@ async def patch_job_details(job_id: int, payload: dict = _fastapi.Body(...), cur
 
 
 @router.get('/verified/{company_brn}', status_code=status.HTTP_200_OK)
-async def get_verified_employees_by_brn(company_brn: str, db: Session = Depends(config.get_db)):
+async def get_verified_employees_by_brn(company_brn: str, current_user: User = Depends(get_current_user), db: Session = Depends(config.get_db)):
     """Get all verified employees for a company (by BRN)"""
     try:
         from core.model import Job, PrivateUser, User
