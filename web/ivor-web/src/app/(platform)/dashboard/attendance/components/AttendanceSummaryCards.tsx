@@ -11,6 +11,10 @@ interface Props {
   // When provided, drives "Clocked In Now" so it reflects reality rather than
   // only active sessions that happen to fall inside the selected window.
   activeCount?: number;
+  // Forgotten-clock-out count (open sessions past the stale cap), also fetched
+  // independently of the date range. Drives "Incomplete Sessions" so it agrees
+  // with the dashboard's anomaly count instead of depending on the window.
+  incompleteCount?: number;
   loading: boolean;
 }
 
@@ -22,10 +26,10 @@ interface Card {
   pulse?: boolean;
 }
 
-export default function AttendanceSummaryCards({ logs, activeCount, loading }: Props) {
+export default function AttendanceSummaryCards({ logs, activeCount, incompleteCount, loading }: Props) {
   const active = activeCount ?? logs.filter((l) => l.status === "active").length;
   const complete = logs.filter((l) => l.status === "complete").length;
-  const incomplete = logs.filter((l) => l.status === "incomplete").length;
+  const incomplete = incompleteCount ?? logs.filter((l) => l.status === "incomplete").length;
   const overtime = logs.filter((l) => l.status === "overtime").length;
 
   const totalHoursToday = logs

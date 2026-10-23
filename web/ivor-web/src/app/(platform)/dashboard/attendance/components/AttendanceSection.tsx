@@ -396,7 +396,12 @@ export default function AttendanceSection() {
 
       {/* Summary cards — range-based stats from allLogs, but "Clocked In Now"
           comes from the date-independent active fetch. */}
-      <AttendanceSummaryCards logs={allLogs} activeCount={activeLogs.length} loading={summaryLoading} />
+      <AttendanceSummaryCards
+        logs={allLogs}
+        activeCount={activeLogs.filter((l) => l.status === "active").length}
+        incompleteCount={activeLogs.filter((l) => l.status === "incomplete").length}
+        loading={summaryLoading}
+      />
 
       {/* Tab switcher */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">

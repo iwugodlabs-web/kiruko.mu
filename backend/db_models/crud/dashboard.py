@@ -188,10 +188,10 @@ def get_dashboard_stats_from_db(db: Session, company_id: int, period: str = None
             .filter(*base_schedule_filters)\
             .distinct().count()
 
-        clocked_in_employees = db.query(TimeLog.private_user_id)\
-            .join(Job, Job.job_id == TimeLog.job_id)\
-            .filter(Job.company_id == company_id, TimeLog.end_time == None)\
-            .distinct().count()
+        # clocked_in_employees is derived below from the staleness-filtered
+        # active_sessions (distinct users), so forgotten clock-outs don't inflate
+        # it — consistent with "Clocked In Now" on the attendance screen and the
+        # activeSessions list the dashboard UI actually renders.
 
         # UPDATED: Use all_user_ids for leave count to catch all employees + period filter
         pending_leave_filters = [Leave.private_user_id.in_(all_user_ids), Leave.status == 'pending']
@@ -225,10 +225,25 @@ def get_dashboard_stats_from_db(db: Session, company_id: int, period: str = None
         #   • activeSessions    — who's clocked in now (worked = elapsed − breaks)
         #   • clockInAnomalies  — forgotten clock-outs (open past a sane cap)
         #   • activeOvertime    — overtime genuinely awaiting employer approval
-        STALE_SHIFT_HOURS = 16.0  # an open session longer than this = forgotten clock-out
+        # "Forgotten clock-out" threshold is the employer's configured max-shift
+        # (M27 resolver: Job → PrivateUser → Company.default_max_shift_hours →
+        # 12h) — the SAME cap the auto-close cron and the attendance screen use,
+        # so the two screens can't disagree. Resolved per session below.
+        from core.model import Company as _Company
+        from services.time_log_service import TimeLogService
+        from types import SimpleNamespace
+        _company_row = db.query(_Company.default_max_shift_hours).filter(
+            _Company.company_id == company_id
+        ).first()
+        _company_default_max_shift = (
+            float(_company_row[0]) if _company_row and _company_row[0] is not None else None
+        )
 
         open_logs_query = (
-            db.query(TimeLog, PrivateUser.first_name, PrivateUser.last_name, Job.job_title)
+            db.query(
+                TimeLog, PrivateUser.first_name, PrivateUser.last_name, Job.job_title,
+                Job.max_shift_hours, PrivateUser.max_shift_hours,
+            )
             .join(Job, Job.job_id == TimeLog.job_id)
             .join(PrivateUser, PrivateUser.private_user_id == Job.private_user_id)
             .filter(Job.company_id == company_id)
@@ -258,7 +273,7 @@ def get_dashboard_stats_from_db(db: Session, company_id: int, period: str = None
 
         active_sessions = []
         clockin_anomaly_details = []  # forgotten clock-outs → "Attendance Gaps"
-        for log, first, last, job_title in open_logs:
+        for log, first, last, job_title, _job_max, _user_max in open_logs:
             start = _to_utc(log.start_time)
             if start is None:
                 continue
@@ -271,13 +286,21 @@ def get_dashboard_stats_from_db(db: Session, company_id: int, period: str = None
                 "start_time": log.start_time,
                 "duration_hours": round(worked, 1),
             }
-            if elapsed > STALE_SHIFT_HOURS:
+            max_shift = TimeLogService.resolve_max_shift_hours(
+                SimpleNamespace(max_shift_hours=_job_max),
+                SimpleNamespace(max_shift_hours=_user_max),
+                _company_default_max_shift,
+            )
+            if elapsed > max_shift:
                 # Forgotten clock-out — a real attendance anomaly, not live work.
                 clockin_anomaly_details.append({**info, "elapsed_hours": round(elapsed, 1)})
             else:
                 active_sessions.append(info)
 
         clockin_anomaly_count = len(clockin_anomaly_details)
+        # Distinct employees genuinely clocked in now — stale/forgotten sessions
+        # were split into clockin_anomaly_details above, so they don't inflate it.
+        clocked_in_employees = len({s["user_id"] for s in active_sessions})
 
         # Overtime genuinely awaiting employer approval — matches the dashboard's
         # "Overtime Pending — awaiting approval" alert + Approve action. NULLs in

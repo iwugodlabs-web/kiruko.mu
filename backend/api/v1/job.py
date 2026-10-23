@@ -1317,6 +1317,18 @@ async def get_company_time_logs_dashboard(
             .all()
         )
 
+        # A session open past the employer's configured max-shift (M27 resolver:
+        # Job → PrivateUser → Company.default_max_shift_hours → 12h) is a
+        # forgotten clock-out, not live work — the same cap the auto-close cron
+        # uses. Resolving it here (vs a hardcoded constant) keeps "Clocked In
+        # Now" / "Incomplete Sessions" aligned with the dashboard and auto-close.
+        from services.time_log_service import TimeLogService
+        _company_default_max_shift = (
+            float(_co.default_max_shift_hours)
+            if _co and _co.default_max_shift_hours is not None else None
+        )
+        _now_utc = datetime.now(tz.utc)
+
         results = []
         for log in logs:
             job = log.job
@@ -1352,9 +1364,16 @@ async def get_company_time_logs_dashboard(
             auto_overtime = (not log.is_overtime) and _hw > daily_ot_threshold
             overtime_hours = round(_hw - daily_ot_threshold, 2) if _hw > daily_ot_threshold else 0.0
 
-            # Derive status
+            # Derive status. An open session (no end_time) is "active" only
+            # while within the employer's max-shift; past it, it's a forgotten
+            # clock-out → "incomplete" (pending auto-close), not live. (The
+            # trailing "incomplete" branch was dead code — every end_time-None
+            # row was already caught as "active".)
             if log.start_time and not log.end_time:
-                log_status = "active"
+                _st = log.start_time if log.start_time.tzinfo else log.start_time.replace(tzinfo=tz.utc)
+                _elapsed_h = (_now_utc - _st).total_seconds() / 3600
+                _max_shift = TimeLogService.resolve_max_shift_hours(job, pu, _company_default_max_shift)
+                log_status = "incomplete" if _elapsed_h > _max_shift else "active"
             elif log.is_overtime or auto_overtime:
                 log_status = "overtime"
             elif log.end_time is None:
