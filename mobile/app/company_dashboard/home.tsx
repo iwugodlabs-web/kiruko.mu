@@ -375,7 +375,7 @@ const HomeScreen = () => {
     // "open within 24h" window over-counted forgotten clock-outs (a 16h session
     // showed as live). Fall back to the local window only if stats are offline.
     const backendSessions = (data as any)?.activeSessions as
-      | Array<{ user_id: number; name: string; job_title?: string }>
+      | Array<{ user_id: number; name: string; job_title?: string; start_time?: string }>
       | undefined;
 
     const localActive = allTimeLogs.filter(
@@ -389,12 +389,13 @@ const HomeScreen = () => {
     // when available, else the local fallback. Normalised to { displayName } so
     // the avatar strip renders the same way for both sources.
     const clockedInUsers = (backendSessions
-      ? backendSessions.map(s => ({ private_user_id: s.user_id, displayName: s.name }))
+      ? backendSessions.map(s => ({ private_user_id: s.user_id, displayName: s.name, startTime: s.start_time }))
       : localActive.map(log => {
           const user = usersById.get(log.private_user_id);
           return {
             private_user_id: log.private_user_id,
             displayName: `${user?.private_user?.first_name || ''} ${user?.private_user?.last_name || ''}`.trim(),
+            startTime: log.start_time,
           };
         })
     ).filter(u => u.private_user_id != null);
@@ -1232,19 +1233,21 @@ const HomeScreen = () => {
                             <HStack alignItems="center" space="sm">
                               <Box w={40} h={40} rounded="$full" bg={Palette.teal} alignItems="center" justifyContent="center">
                                 <Text fontSize={Type.body} fontWeight="800" color="white">
-                                  {getInitials(`${u.private_user?.first_name || ''} ${u.private_user?.last_name || ''}`)}
+                                  {getInitials(u.displayName || '')}
                                 </Text>
                               </Box>
                               <VStack flex={1}>
                                 <Text fontWeight="700" color={Palette.ink} fontSize={Type.body}>
-                                  {u.private_user?.first_name} {u.private_user?.last_name}
+                                  {u.displayName || t('companyHome.statusActive')}
                                 </Text>
-                                <HStack space="xs" alignItems="center">
-                                  <MaterialIcons name="access-time" size={12} color={Palette.success} />
-                                  <Text fontSize={Type.small} color={Palette.success} fontWeight="600">
-                                    Since {new Date(u.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </Text>
-                                </HStack>
+                                {u.startTime ? (
+                                  <HStack space="xs" alignItems="center">
+                                    <MaterialIcons name="access-time" size={12} color={Palette.success} />
+                                    <Text fontSize={Type.small} color={Palette.success} fontWeight="600">
+                                      Since {new Date(u.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </Text>
+                                  </HStack>
+                                ) : null}
                               </VStack>
                               <Box bg={Palette.successTint} px="$2.5" py="$1" rounded="$full">
                                 <Text fontSize={Type.tiny} fontWeight="700" color={Palette.success}>{t('companyHome.statusActive')}</Text>
