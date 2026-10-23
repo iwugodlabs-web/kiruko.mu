@@ -368,30 +368,37 @@ const HomeScreen = () => {
     const threshold = getDateThreshold();
 
     // Real clocked in employees (active time logs without end_time)
-    const activeTimeLogs = allTimeLogs.filter(log => {
-      if (!log.start_time || log.end_time) return false;
+    // "Clocked in now" comes from the backend dashboard stats, which classify a
+    // session as live vs a forgotten clock-out via the employer-configured
+    // max-shift (Job → PrivateUser → Company → 12h) — the same rule the web
+    // dashboard/attendance and the auto-close sweep use. The old client-side
+    // "open within 24h" window over-counted forgotten clock-outs (a 16h session
+    // showed as live). Fall back to the local window only if stats are offline.
+    const backendSessions = (data as any)?.activeSessions as
+      | Array<{ user_id: number; name: string; job_title?: string; start_time?: string }>
+      | undefined;
 
-      // Check if the time log is from today or recent (within last 24 hours)
-      const logDate = new Date(log.start_time);
-      const now = new Date();
-      const timeDiff = now.getTime() - logDate.getTime();
-      const hoursDiff = timeDiff / (1000 * 3600);
+    const localActive = allTimeLogs.filter(
+      log => log.start_time && !log.end_time &&
+        (Date.now() - new Date(log.start_time).getTime()) / 3600000 <= 24,
+    );
 
-      // Only consider logs from last 24 hours as active
-      return hoursDiff <= 24;
-    });
+    const clockedInEmployees = data?.overview?.clockedInEmployees ?? localActive.length;
 
-    const clockedInEmployees = activeTimeLogs.length;
-
-    // Get actual users who are clocked in with their details
-    const clockedInUsers = activeTimeLogs.map(log => {
-      const user = usersById.get(log.private_user_id);
-      return {
-        ...user,
-        timeLog: log,
-        startTime: new Date(log.start_time)
-      };
-    }).filter(Boolean);
+    // Users shown as live — from the backend's staleness-filtered session list
+    // when available, else the local fallback. Normalised to { displayName } so
+    // the avatar strip renders the same way for both sources.
+    const clockedInUsers = (backendSessions
+      ? backendSessions.map(s => ({ private_user_id: s.user_id, displayName: s.name, startTime: s.start_time }))
+      : localActive.map(log => {
+          const user = usersById.get(log.private_user_id);
+          return {
+            private_user_id: log.private_user_id,
+            displayName: `${user?.private_user?.first_name || ''} ${user?.private_user?.last_name || ''}`.trim(),
+            startTime: log.start_time,
+          };
+        })
+    ).filter(u => u.private_user_id != null);
 
     // Time logs in selected period
     const periodTimeLogs = allTimeLogs.filter(log => {
@@ -482,7 +489,7 @@ const HomeScreen = () => {
       scheduledEmployees,
       scheduledEmployeeIds: Array.from(scheduledEmployeeIds),
       todaySchedules,
-      activeTimeLogs: activeTimeLogs.length,
+      activeTimeLogs: clockedInEmployees,
       periodTimeLogs: periodTimeLogs.length,
       totalJobs: companyJobs.length,
       pendingLeaves: periodLeaves.filter(l => l.status === 'pending').length,
@@ -543,7 +550,7 @@ const HomeScreen = () => {
         return acc;
       }, {} as Record<string, any[]>)
     };
-  }, [usersById, allUsers, allTimeLogs, allJobs, allLeaves, allSchedules, selectedPeriod, user]);
+  }, [data, usersById, allUsers, allTimeLogs, allJobs, allLeaves, allSchedules, selectedPeriod, user]);
 
 
   const realTimeStats = getRealTimeStats;
@@ -841,7 +848,7 @@ const HomeScreen = () => {
                                 <HStack mt="$2.5" alignItems="center">
                                   {realTimeStats.clockedInUsers.slice(0, 5).map((u: any, idx: number) => (
                                     <Avatar key={idx} size="xs" bgColor="rgba(255,255,255,0.3)" borderWidth={2} borderColor={Palette.white} ml={idx === 0 ? '$0' : '-$2'}>
-                                      <AvatarFallbackText color={Palette.white} fontSize={Type.tiny}>{getInitials(`${u.private_user?.first_name || ''} ${u.private_user?.last_name || ''}`)}</AvatarFallbackText>
+                                      <AvatarFallbackText color={Palette.white} fontSize={Type.tiny}>{getInitials(u.displayName || '')}</AvatarFallbackText>
                                     </Avatar>
                                   ))}
                                   {realTimeStats.clockedInUsers.length > 5 && (
@@ -1226,19 +1233,21 @@ const HomeScreen = () => {
                             <HStack alignItems="center" space="sm">
                               <Box w={40} h={40} rounded="$full" bg={Palette.teal} alignItems="center" justifyContent="center">
                                 <Text fontSize={Type.body} fontWeight="800" color="white">
-                                  {getInitials(`${u.private_user?.first_name || ''} ${u.private_user?.last_name || ''}`)}
+                                  {getInitials(u.displayName || '')}
                                 </Text>
                               </Box>
                               <VStack flex={1}>
                                 <Text fontWeight="700" color={Palette.ink} fontSize={Type.body}>
-                                  {u.private_user?.first_name} {u.private_user?.last_name}
+                                  {u.displayName || t('companyHome.statusActive')}
                                 </Text>
-                                <HStack space="xs" alignItems="center">
-                                  <MaterialIcons name="access-time" size={12} color={Palette.success} />
-                                  <Text fontSize={Type.small} color={Palette.success} fontWeight="600">
-                                    Since {new Date(u.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </Text>
-                                </HStack>
+                                {u.startTime ? (
+                                  <HStack space="xs" alignItems="center">
+                                    <MaterialIcons name="access-time" size={12} color={Palette.success} />
+                                    <Text fontSize={Type.small} color={Palette.success} fontWeight="600">
+                                      Since {new Date(u.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </Text>
+                                  </HStack>
+                                ) : null}
                               </VStack>
                               <Box bg={Palette.successTint} px="$2.5" py="$1" rounded="$full">
                                 <Text fontSize={Type.tiny} fontWeight="700" color={Palette.success}>{t('companyHome.statusActive')}</Text>
