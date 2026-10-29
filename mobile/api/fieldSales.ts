@@ -15,6 +15,11 @@
 
 import { api } from "../services/apiClient";
 
+// Field Sales is still under development — hard-off everywhere until released.
+// Every mobile entry point gates on isFieldSalesEnabled(), so flipping this to
+// true (and letting per-company module entitlement decide) releases it.
+export const FIELD_SALES_ENABLED = false;
+
 export type ApiError = { error: string; status?: number };
 
 export function isApiError(r: unknown): r is ApiError {
@@ -222,6 +227,7 @@ export async function getCompanyModules(
 }
 
 export async function isFieldSalesEnabled(companyId: number): Promise<boolean> {
+  if (!FIELD_SALES_ENABLED) return false; // WIP — hidden everywhere until released
   const mods = await getCompanyModules(companyId);
   if (!mods) return true; // fail open
   const m = mods.find((x) => x.module_key === "field_sales");

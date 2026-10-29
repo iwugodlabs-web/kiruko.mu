@@ -62,7 +62,7 @@ export default function Settings() {
   // Field Sales is a paid, per-company module. Hide the row unless the
   // company has it enabled (fail OPEN on lookup error — see isFieldSalesEnabled).
   const settingsCompanyId = user?.private_user?.company_id;
-  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(true);
+  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(false);
   useEffect(() => {
     if (!settingsCompanyId) return;
     let alive = true;

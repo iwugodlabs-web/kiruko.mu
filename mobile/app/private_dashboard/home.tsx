@@ -720,7 +720,7 @@ const Dashboard = () => {
 
   // Field Sales is a paid, per-company module. Show its quick-action tile
   // unless the company is known to have it disabled (fail OPEN on lookup error).
-  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(true);
+  const [fieldSalesEnabled, setFieldSalesEnabled] = useState(false);
   const homeCompanyId = user?.private_user?.company_id ?? null;
   useEffect(() => {
     if (!homeCompanyId) return;
