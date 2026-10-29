@@ -47,6 +47,16 @@ class BaseStorage(ABC):
         """
         return None
 
+    def presigned_url(self, file_url: Optional[str], expires_in: int = 900) -> Optional[str]:
+        """A short-lived, authenticated URL for a previously-stored object.
+
+        Lets an authenticated endpoint 302 a client to a PRIVATE object-store
+        object without ever exposing the raw public URL (which 403s
+        AccessDenied on a private bucket). Default None (no signing
+        available); S3-compatible backends override.
+        """
+        return None
+
     def delete_file(self, file_url: Optional[str]) -> bool:
         """Best-effort deletion of a previously-stored file (used by account
         deletion to scrub uploaded documents/receipts). Returns True on success.
@@ -244,6 +254,22 @@ class S3Storage(BaseStorage):
             return resp["Body"].read()
         except Exception as e:
             logger.error(f"S3Storage download error for {file_url}: {e}")
+            return None
+
+    def presigned_url(self, file_url: Optional[str], expires_in: int = 900) -> Optional[str]:
+        if not self.s3_client:
+            return None
+        key = self._key_from_url(file_url or "")
+        if not key:
+            return None
+        try:
+            return self.s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket_name, "Key": key},
+                ExpiresIn=expires_in,
+            )
+        except Exception as e:
+            logger.error(f"S3Storage presigned_url error for {file_url}: {e}")
             return None
 
     def delete_file(self, file_url: Optional[str]) -> bool:

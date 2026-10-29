@@ -1614,11 +1614,22 @@ def stream_payslip_pdf(
     # Falls back to the 302 only when the proxy can't fetch the object.
     if ps.pdf_url.startswith("http://") or ps.pdf_url.startswith("https://"):
         from services.storage_service import get_storage_service
+        from fastapi.responses import Response
 
-        data = get_storage_service().download_bytes(ps.pdf_url)
-        if data is not None:
-            from fastapi.responses import Response
+        storage = get_storage_service()
 
+        def _is_pdf(b: Optional[bytes]) -> bool:
+            return bool(b) and b[:5] == b"%PDF-"
+
+        data = storage.download_bytes(ps.pdf_url)
+        # Self-heal a stale/corrupt object. A rotated bucket, a missing key,
+        # or an error page previously saved as the "PDF" all surface as
+        # non-PDF bytes (or None) — regenerate rather than streaming garbage
+        # (e.g. an S3 AccessDenied XML) to the client as application/pdf.
+        if not _is_pdf(data):
+            _regen_and_reload()
+            data = storage.download_bytes(ps.pdf_url)
+        if _is_pdf(data):
             return Response(
                 content=data,
                 media_type="application/pdf",
@@ -1627,7 +1638,17 @@ def stream_payslip_pdf(
                     "Cache-Control": "private, max-age=86400",
                 },
             )
-        return RedirectResponse(url=ps.pdf_url, status_code=302)
+        # Can't proxy the bytes even after regen. 302 to a short-lived
+        # PRESIGNED URL (authenticated → works for a PRIVATE bucket). NEVER
+        # redirect to the raw public pdf_url: that 403s AccessDenied and the
+        # client saves the error page as the "PDF".
+        signed = storage.presigned_url(ps.pdf_url)
+        if signed:
+            return RedirectResponse(url=signed, status_code=302)
+        raise HTTPException(
+            status_code=503,
+            detail="Payslip PDF could not be served. Check backend S3 access / logs.",
+        )
 
     # Local storage — pdf_url is a path like "/uploads/payslips/.../X.pdf".
     # Translate to the on-disk path under the backend's working dir.
