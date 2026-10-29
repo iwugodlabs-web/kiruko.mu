@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { getCompanyModules, type CompanyModule } from "@/services/modules";
 
+// Modules still under development — hard-disabled EVERYWHERE regardless of a
+// company's entitlement (overrides the fail-open logic below). Keeps the code
+// shippable while the feature is built; remove a key here to release it.
+const UNDER_DEVELOPMENT_MODULES = new Set<string>(["field_sales"]);
+
 // Cache resolved entitlements per company so the sidebar, page guards and any
 // other consumer share one request. Cleared on toggle (see the admin panel).
 const cache = new Map<number, CompanyModule[]>();
@@ -66,6 +71,8 @@ export function useCompanyModules(companyId?: number | null) {
 
   const isEnabled = useCallback(
     (moduleKey: string): boolean => {
+      // WIP modules are off for everyone, overriding any entitlement/fail-open.
+      if (UNDER_DEVELOPMENT_MODULES.has(moduleKey)) return false;
       if (modules == null) return true; // unknown → optimistic
       const found = modules.find((m) => m.module_key === moduleKey);
       return found ? found.enabled : true; // unregistered key → don't hide
