@@ -114,7 +114,7 @@ const translationEN: ITranslationSchema = {
 	},
 
 	yourRightsForm: {
-		pageTitle: "New Report",
+		pageTitle: "Report",
 		stepEssentials: "Essentials",
 		stepTimeline: "Timeline",
 		stepResponse: "Response",
@@ -722,7 +722,7 @@ const translationEN: ITranslationSchema = {
 		transfersSubtitle: "Track money sent & received",
 		documentVault: "Document Vault",
 		documentVaultSubtitle: "Passport, permit & important docs",
-		yourRights: "Make a Report",
+		yourRights: "Report",
 		yourRightsSubtitle: "Report a workplace issue",
 		payslips: "Payslips",
 		payslipsSubtitle: "View and download your payslips",

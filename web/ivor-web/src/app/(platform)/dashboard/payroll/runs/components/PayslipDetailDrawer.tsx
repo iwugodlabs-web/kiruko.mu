@@ -142,9 +142,15 @@ export default function PayslipDetailDrawer({ payslipId, onClose }: Props) {
                   <Lock className="h-4 w-4" />
                   Download available after the run is finalized.
                 </div>
-              ) : payslip.pdf_url ? (
+              ) : (
+                // Link to the same-origin, auth-gated stream endpoint — NOT the
+                // raw pdf_url. The raw value is a backend/local path ("/uploads/…",
+                // served by the API, not Next.js → 404 here) or a private S3 URL
+                // (→ 403). The stream endpoint also regenerates on demand when the
+                // PDF is missing, so a finalized payslip always has a working
+                // download even if pdf_url is still null.
                 <a
-                  href={payslip.pdf_url}
+                  href={payroll.payslipPdfUrl(payslip.id)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -152,10 +158,6 @@ export default function PayslipDetailDrawer({ payslipId, onClose }: Props) {
                   <Download className="h-4 w-4" />
                   {payslip.is_adjustment ? "Download correction note" : "Download PDF"}
                 </a>
-              ) : (
-                <div className="text-xs text-zinc-400 dark:text-zinc-500 italic">
-                  PDF not yet generated for this payslip.
-                </div>
               )}
             </div>
           )}
