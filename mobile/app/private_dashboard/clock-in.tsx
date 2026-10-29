@@ -2879,9 +2879,14 @@ export default function ClockInPage() {
               onClose={handleOvertimeDismiss}
             >
               <ModalBackdrop />
+              {/* Keyboard avoidance: 'padding' on both (NOT 'height' — Android
+                  window resize doesn't reach inside an RN Modal, so 'height' left
+                  the input + Save button hidden behind the keyboard). On Android
+                  anchor the sheet to the bottom so it lifts clear of the keyboard;
+                  iOS keeps its original centered position (it already worked). */}
               <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 0 }}
+                behavior="padding"
+                style={{ flex: 1, width: '100%', justifyContent: Platform.OS === 'android' ? 'flex-end' : 'center', alignItems: 'center', paddingHorizontal: 0 }}
               >
                 <ModalContent maxHeight="85%" bg="white" rounded="$3xl" mx="$0" width="100%" overflow="hidden">
 

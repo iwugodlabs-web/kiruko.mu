@@ -13,7 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Alert, TouchableOpacity as RNTouchableOpacity, ScrollView, StyleSheet, Platform, Modal, View, Pressable, KeyboardAvoidingView } from 'react-native';
 import Animated, { FadeInUp, FadeIn, FadeOut, SlideInRight, SlideOutLeft, useSharedValue, useAnimatedStyle, withTiming } from '@/app/utils/animated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { z } from 'zod';
 import { submitUserRightReport, getUsersByCompany, getCompanyManagers, getJobById } from '../../services/api';
 import useAuth from '../hooks/useAuth';
@@ -84,6 +84,11 @@ const KnowYourRight = () => {
 
   const { user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // Android: the Select actionsheet hugs its content, so on devices with a
+  // gesture/nav bar the last option renders behind it and isn't tappable.
+  // Pad the sheet by the bottom inset so every option clears the nav bar.
+  const selectContentPb = insets.bottom + 16;
   // Optional prefill (e.g. "Raise a query" from a payslip seeds title/category/
   // description so the employee lands on a partly-filled concern form).
   const prefill = useLocalSearchParams<{ prefillTitle?: string; prefillCategory?: string; prefillDescription?: string; prefillRunId?: string; prefillPayslipId?: string }>();
@@ -520,7 +525,7 @@ const KnowYourRight = () => {
                     <Controller control={control} name="category" render={({ field: { onChange, value } }) => (
                       <Select selectedValue={value} onValueChange={onChange}>
                         <SelectTrigger size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}><SelectInput placeholder={t('yourRightsForm.placeholderSelectCategory')} /></SelectTrigger>
-                        <SelectPortal><SelectBackdrop /><SelectContent>
+                        <SelectPortal><SelectBackdrop /><SelectContent style={{ paddingBottom: selectContentPb }}>
                           <SelectItem label={t('yourRightsForm.categoryPayroll')} value="payroll" />
                           <SelectItem label={t('yourRightsForm.categoryAttendance')} value="attendance" />
                           <SelectItem label={t('yourRightsForm.categoryExpense')} value="expense" />
@@ -809,7 +814,7 @@ const KnowYourRight = () => {
                     <Controller control={control} name="preferredContact" render={({ field: { onChange, value } }) => (
                       <Select selectedValue={value} onValueChange={onChange}>
                         <SelectTrigger size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}><SelectInput placeholder={t('yourRightsForm.placeholderSelectMethod')} /></SelectTrigger>
-                        <SelectPortal><SelectBackdrop /><SelectContent>
+                        <SelectPortal><SelectBackdrop /><SelectContent style={{ paddingBottom: selectContentPb }}>
                           <SelectItem label={t('yourRightsForm.contactEmail')} value="email" /><SelectItem label={t('yourRightsForm.contactPhone')} value="phone" /><SelectItem label={t('yourRightsForm.contactInApp')} value="in-app" />
                         </SelectContent></SelectPortal>
                       </Select>
@@ -822,7 +827,7 @@ const KnowYourRight = () => {
                     <Controller control={control} name="resolutionMethod" render={({ field: { onChange, value } }) => (
                       <Select selectedValue={value} onValueChange={onChange}>
                         <SelectTrigger size="xl" variant="outline" rounded="$xl" bg={Palette.gray50}><SelectInput placeholder={t('yourRightsForm.placeholderSelectMethod')} /></SelectTrigger>
-                        <SelectPortal><SelectBackdrop /><SelectContent>
+                        <SelectPortal><SelectBackdrop /><SelectContent style={{ paddingBottom: selectContentPb }}>
                           <SelectItem label={t('yourRightsForm.contactEmail')} value="email" /><SelectItem label={t('yourRightsForm.contactPhoneCall')} value="phone" /><SelectItem label={t('yourRightsForm.contactInAppNotification')} value="in-app" />
                         </SelectContent></SelectPortal>
                       </Select>

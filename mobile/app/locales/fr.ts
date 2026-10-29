@@ -114,7 +114,7 @@ const translationFR: ITranslationSchema = {
 	},
 
 	yourRightsForm: {
-		pageTitle: "Nouveau signalement",
+		pageTitle: "Report",
 		stepEssentials: "Essentiels",
 		stepTimeline: "Chronologie",
 		stepResponse: "Réponse",
@@ -712,7 +712,7 @@ const translationFR: ITranslationSchema = {
 		transfersSubtitle: "Suivre les transferts envoyés et reçus",
 		documentVault: "Coffre-fort de documents",
 		documentVaultSubtitle: "Passeport, permis et documents importants",
-		yourRights: "Signaler un problème",
+		yourRights: "Report",
 		yourRightsSubtitle: "Soumettre une préoccupation liée au travail",
 		payslips: "Bulletins de paie",
 		payslipsSubtitle: "Consultez et téléchargez vos bulletins",

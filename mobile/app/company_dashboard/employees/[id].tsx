@@ -149,6 +149,7 @@ function EmployeeDetailPageInner() {
                 monthly_hours: number;
                 payType: 'monthly' | 'hourly' | 'daily';
                 rate?: number | null;
+                currency?: string | null;
               } | null = null;
               if (hasCompanyPermission(currentUser, 'view_salary')) {
                 const structRes = await salaryStructures.preview(emp.private_user.private_user_id);
@@ -174,6 +175,10 @@ function EmployeeDetailPageInner() {
                       rate: isDaily
                         ? parseFloat(String((basicComponent.meta as any)?.rate)) || null
                         : null,
+                      // Carry the resolved salary's own currency so the display
+                      // doesn't silently fall back to the company default / 'MUR'
+                      // when an employee is paid in a different currency.
+                      currency: structRes.currency ?? null,
                     };
                   }
                 }

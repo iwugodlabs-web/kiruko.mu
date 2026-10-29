@@ -43,7 +43,7 @@ import { format } from 'date-fns';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, TextInput } from 'react-native';
 import Animated, { FadeInUp, SlideInRight } from '@/app/utils/animated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getSchedulesForUser, Schedule, updateMyScheduleStatus, isPermissionDeniedError } from '../../services/api';
 import useAuth from '@/app/hooks/useAuth';
 import { useTranslation } from 'react-i18next';
@@ -58,6 +58,11 @@ const TasksScreen = () => {
   const { user } = useAuth();
   const toast = useToast();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  // Android: the Select actionsheet hugs its content, so on devices with a
+  // gesture/nav bar the last option renders behind it and isn't tappable.
+  // Pad the sheet by the bottom inset so every option clears the nav bar.
+  const selectContentPb = insets.bottom + 16;
 
   const statusLabel = (status?: string) => {
     switch ((status || 'pending').toLowerCase()) {
@@ -433,7 +438,7 @@ const TasksScreen = () => {
                         </SelectTrigger>
                         <SelectPortal>
                           <SelectBackdrop />
-                          <SelectContent>
+                          <SelectContent style={{ paddingBottom: selectContentPb }}>
                             <SelectItem label={t('tasksScreen.optAllTasks')} value="all" />
                             <SelectItem label={t('tasksScreen.optActiveTasks')} value="active" />
                             <SelectItem label={t('tasksScreen.optPending')} value="pending" />
@@ -455,7 +460,7 @@ const TasksScreen = () => {
                         </SelectTrigger>
                         <SelectPortal>
                           <SelectBackdrop />
-                          <SelectContent>
+                          <SelectContent style={{ paddingBottom: selectContentPb }}>
                             <SelectItem label={t('tasksScreen.optDate')} value="date" />
                             <SelectItem label={t('tasksScreen.optStatus')} value="status" />
                             <SelectItem label={t('tasksScreen.optTitle')} value="title" />
@@ -747,7 +752,7 @@ const TasksScreen = () => {
                     </SelectTrigger>
                     <SelectPortal>
                       <SelectBackdrop />
-                      <SelectContent>
+                      <SelectContent style={{ paddingBottom: selectContentPb }}>
                         <SelectItem label={t('tasksScreen.selectPending')} value="pending" />
                         <SelectItem label={t('tasksScreen.selectStarted')} value="started" />
                         <SelectItem label={t('tasksScreen.selectCompleted')} value="completed" />
