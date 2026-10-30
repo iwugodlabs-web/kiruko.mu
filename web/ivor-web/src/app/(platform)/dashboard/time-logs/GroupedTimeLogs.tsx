@@ -308,6 +308,12 @@ function GroupBlock({
                             {l.late_reason || "No reason given"}
                           </div>
                         )}
+                        {l.left_early && (
+                          <div className="mt-1.5 ml-7 rounded-md bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 px-2.5 py-1.5 text-xs text-yellow-800 dark:text-yellow-400">
+                            <span className="font-semibold">Left early:</span>{" "}
+                            {l.early_out_reason || "No reason given"}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

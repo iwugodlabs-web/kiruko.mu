@@ -788,6 +788,11 @@ class TimeLog(Base):
     # employee's optional explanation captured at clock-in.
     is_late = Column(Boolean, nullable=False, server_default='false')
     late_reason = Column(String, nullable=True)
+    # Schedule-aware clock-OUT: left_early = clocked out BEFORE the shift end
+    # (beyond grace) on a scheduled day — the mirror of is_late. early_out_reason
+    # is the employee's optional free-text explanation captured at clock-out.
+    left_early = Column(Boolean, nullable=False, server_default='false')
+    early_out_reason = Column(String, nullable=True)
 
     # Geofencing v3 — location-based enforcement result. out_of_geofence is
     # true when the punch was recorded while the device position fell outside

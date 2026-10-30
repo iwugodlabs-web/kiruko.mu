@@ -430,8 +430,12 @@ export default function ClockInPage() {
   const [workEndTime, setWorkEndTime] = useState<string | null>(null);
   const [workDays, setWorkDays] = useState<Record<string, string> | null>(null);
   const [overtimeAlertShown, setOvertimeAlertShown] = useState(false);
-  // Which prompt the shared modal shows: off-hours → "overtime", late start → "late".
-  const [modalMode, setModalMode] = useState<'overtime' | 'late'>('overtime');
+  // Which prompt the shared modal shows: off-hours → "overtime", late start →
+  // "late", clocking out before the scheduled end → "early_out".
+  const [modalMode, setModalMode] = useState<'overtime' | 'late' | 'early_out'>('overtime');
+  // The just-closed time log an early-clock-out reason attaches to (activeTimeLogId
+  // is cleared on clock-out, so we stash the id for the modal's submit).
+  const [earlyOutTimeLogId, setEarlyOutTimeLogId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Leave tab state (harmonised with leave.tsx design)
@@ -1079,6 +1083,32 @@ export default function ClockInPage() {
   }, []);
 
   const handleOvertimeSubmit = async () => {
+    // Early clock-out: save the (free-text) reason on the just-closed session.
+    // left_early is sent for the review flag; the backend also records it.
+    if (modalMode === 'early_out') {
+      const id = earlyOutTimeLogId;
+      if (!id) { setIsOvertimeModalOpen(false); setOvertimeReason(""); setEarlyOutTimeLogId(null); return; }
+      setIsLoading(true);
+      try {
+        const res = await updateTimeLog(id, { early_out_reason: overtimeReason, left_early: true } as any);
+        if (!(res as any)?.error) {
+          Alert.alert(t('clockIn.successTitle'), t('clockIn.earlyOutReasonSavedBody', { defaultValue: 'Early clock-out reason saved.' }));
+          setIsOvertimeModalOpen(false);
+          setOvertimeReason("");
+          setEarlyOutTimeLogId(null);
+          await loadTimeLogsFromDatabase();
+        } else {
+          Alert.alert(t('clockIn.errorTitle'), (res as any).error || t('clockIn.overtimeFailedBody'));
+        }
+      } catch (error) {
+        console.error('Early-out reason submission failed:', error);
+        Alert.alert(t('clockIn.errorTitle'), t('clockIn.overtimeUnexpectedBody'));
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     const timeLogId = activeOvertimeNotification?.related_entity_id ?? activeTimeLogId;
     if (!timeLogId) return;
     
@@ -1133,6 +1163,7 @@ export default function ClockInPage() {
       }
       setIsOvertimeModalOpen(false);
       setOvertimeReason("");
+      setEarlyOutTimeLogId(null);
     } catch (error) {
       console.error("Error dismissing notification:", error);
       setIsOvertimeModalOpen(false);
@@ -1494,11 +1525,22 @@ export default function ClockInPage() {
           throw new Error("No active clock-in session found to clock out.");
         }
 
+        // Schedule-aware early clock-out: is this before the scheduled end
+        // (same 30-min grace as the backend) on a scheduled work day? Flag it
+        // on the punch itself so an early departure is ALWAYS recorded for the
+        // employer, even if the employee skips the optional reason prompt below.
+        const GRACE = 30;
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const endMin = workEndTime ? (() => { const [h, m] = workEndTime.split(':').map(Number); return h * 60 + m; })() : null;
+        const onScheduledDay = workDays ? isScheduledWorkDay(now) : true;
+        const isEarlyOut = endMin !== null && onScheduledDay && nowMinutes < endMin - GRACE;
+
         const timeLogData: Partial<TimeLog> = {
           end_time: nowISO,
           location: locationData,
           geo_check,
-        };
+          ...(isEarlyOut ? { left_early: true } : {}),
+        } as Partial<TimeLog>;
 
         if (activeTimeLogId) {
           const response = await updateTimeLog(activeTimeLogId, timeLogData);
@@ -1515,7 +1557,7 @@ export default function ClockInPage() {
               await punchQueueStore.enqueue({
                 action: 'clock_out',
                 timelogId: activeTimeLogId,
-                payload: { end_time: nowISO, location: locationData, geo_check },
+                payload: { end_time: nowISO, location: locationData, geo_check, ...(isEarlyOut ? { left_early: true } : {}) },
                 idempotencyKey: newIdempotencyKey(),
               });
               console.log('Clock-out queued for offline sync (network down).');
@@ -1533,11 +1575,15 @@ export default function ClockInPage() {
             action: 'clock_out',
             timelogId: null,
             dependsOnKey: pendingClockInKey ?? undefined,
-            payload: { end_time: nowISO, location: locationData, geo_check },
+            payload: { end_time: nowISO, location: locationData, geo_check, ...(isEarlyOut ? { left_early: true } : {}) },
             idempotencyKey: newIdempotencyKey(),
           });
           console.log('Clock-out queued against pending clock-in (offline).');
         }
+
+        // Capture the closed session id BEFORE clearing state so an early-out
+        // reason (prompted below) can be attached to it.
+        const closedTimeLogId = activeTimeLogId;
 
         setIsClockedIn(false);
         setCurrentClockInTime(null);
@@ -1550,6 +1596,17 @@ export default function ClockInPage() {
         await AsyncStorage.removeItem('breakStart');
         await AsyncStorage.removeItem('breakDurations');
         await AsyncStorage.removeItem('isBreaking');
+
+        // Early clock-out: the punch is already flagged (left_early above).
+        // Now prompt for an optional reason so the employer knows WHY — only
+        // when there's a real server timelog id to attach it to (not an
+        // offline-queued punch, which has no id yet).
+        if (closedTimeLogId && isEarlyOut) {
+          setEarlyOutTimeLogId(closedTimeLogId);
+          setOvertimeReason("");
+          setModalMode('early_out');
+          setIsOvertimeModalOpen(true);
+        }
       }
 
       // Refresh data from database
@@ -2910,10 +2967,18 @@ export default function ClockInPage() {
                       </Box>
                       <VStack>
                         <Text color="white" fontSize={Type.h3} fontWeight="800" letterSpacing={-0.3}>
-                          {modalMode === 'late' ? t('clockIn.lateSessionTitle', { defaultValue: 'Late clock-in' }) : t('clockIn.overtimeSessionTitle')}
+                          {modalMode === 'late'
+                            ? t('clockIn.lateSessionTitle', { defaultValue: 'Late clock-in' })
+                            : modalMode === 'early_out'
+                              ? t('clockIn.earlyOutSessionTitle', { defaultValue: 'Early clock-out' })
+                              : t('clockIn.overtimeSessionTitle')}
                         </Text>
                         <Text color="rgba(255,255,255,0.85)" fontSize={Type.small} mt="$0.5">
-                          {modalMode === 'late' ? t('clockIn.lateSessionSubtitle', { defaultValue: 'You started after your scheduled time' }) : t('clockIn.overtimeSessionSubtitle')}
+                          {modalMode === 'late'
+                            ? t('clockIn.lateSessionSubtitle', { defaultValue: 'You started after your scheduled time' })
+                            : modalMode === 'early_out'
+                              ? t('clockIn.earlyOutSessionSubtitle', { defaultValue: 'You left before your scheduled end time' })
+                              : t('clockIn.overtimeSessionSubtitle')}
                         </Text>
                       </VStack>
                     </HStack>
@@ -2924,7 +2989,11 @@ export default function ClockInPage() {
                     <HStack space="sm" alignItems="flex-start" bg={Palette.warningTint} p="$3" rounded="$xl">
                       <MaterialIcons name="info-outline" size={16} color={Palette.gold} style={{ marginTop: 1 }} />
                       <Text color={Palette.gold} fontSize={Type.label} lineHeight={20} flex={1}>
-                        {modalMode === 'late' ? t('clockIn.lateSessionInfo', { defaultValue: 'Add a reason for starting late (optional). This is recorded for your employer — it does not change your pay.' }) : t('clockIn.overtimeSessionInfo')}
+                        {modalMode === 'late'
+                          ? t('clockIn.lateSessionInfo', { defaultValue: 'Add a reason for starting late (optional). This is recorded for your employer — it does not change your pay.' })
+                          : modalMode === 'early_out'
+                            ? t('clockIn.earlyOutSessionInfo', { defaultValue: 'Add a reason for clocking out early (optional). This is recorded for your employer — it does not change your pay.' })
+                            : t('clockIn.overtimeSessionInfo')}
                       </Text>
                     </HStack>
 
@@ -2982,7 +3051,7 @@ export default function ClockInPage() {
                           ? <Spinner color="white" size="small" />
                           : <>
                               <MaterialIcons name="check-circle" size={18} color="white" />
-                              <Text color="white" fontSize={Type.body} fontWeight="700">{modalMode === 'late' ? t('clockIn.submitLateReason', { defaultValue: 'Save reason' }) : t('clockIn.markAsOvertime')}</Text>
+                              <Text color="white" fontSize={Type.body} fontWeight="700">{modalMode === 'late' || modalMode === 'early_out' ? t('clockIn.submitLateReason', { defaultValue: 'Save reason' }) : t('clockIn.markAsOvertime')}</Text>
                             </>
                         }
                       </LinearGradient>
