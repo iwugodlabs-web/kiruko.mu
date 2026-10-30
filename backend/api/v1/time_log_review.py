@@ -102,6 +102,11 @@ class TimeLogReviewItem(BaseModel):
     # clock-ins (no text-entry step on a shared tablet).
     is_late: bool = False
     late_reason: Optional[str] = None
+    # Early clock-OUT (before scheduled end + grace) — the mirror of is_late.
+    # early_out_reason is the employee's own free-text explanation, collected
+    # via a mobile prompt at clock-out (always None for kiosk clock-outs).
+    left_early: bool = False
+    early_out_reason: Optional[str] = None
     # Geofencing v3 — true when the punch was recorded outside every active
     # fence (or with an unverifiable fix) in flag mode. Surfaces a badge in
     # the review UI so admins decide whether to approve/reject.
@@ -219,6 +224,8 @@ def _to_review_item(tl: TimeLog, employee_name: str, employee_code: Optional[str
         out_of_schedule=bool(getattr(tl, "out_of_schedule", False)),
         is_late=bool(getattr(tl, "is_late", False)),
         late_reason=getattr(tl, "late_reason", None),
+        left_early=bool(getattr(tl, "left_early", False)),
+        early_out_reason=getattr(tl, "early_out_reason", None),
         out_of_geofence=bool(getattr(tl, "out_of_geofence", False)),
         scheduled_start=sched_start,
         scheduled_end=sched_end,

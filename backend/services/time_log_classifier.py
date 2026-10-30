@@ -21,6 +21,7 @@ REASON_KEYS = {
     "out_of_geofence",
     "out_of_schedule",
     "late",
+    "left_early",
     "overtime_unconfirmed",
     "mock_location",
     "low_accuracy",
@@ -64,6 +65,8 @@ def classify_exceptions(tl) -> List[str]:
         reasons.append("out_of_schedule")
     if getattr(tl, "is_late", False):
         reasons.append("late")
+    if getattr(tl, "left_early", False):
+        reasons.append("left_early")
     if getattr(tl, "is_overtime", False) and not getattr(
         tl, "overtime_confirmed_by_employer", False
     ):
