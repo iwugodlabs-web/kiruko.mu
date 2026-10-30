@@ -54,6 +54,7 @@ const REASON_LABELS: Record<string, string> = {
   out_of_geofence: "Out of geofence",
   out_of_schedule: "Off-schedule",
   late: "Late",
+  left_early: "Left early",
   overtime_unconfirmed: "OT unconfirmed",
   mock_location: "Mock GPS",
   low_accuracy: "Low accuracy",
@@ -910,6 +911,11 @@ export default function TimeLogsPage() {
                     {l.is_late && (
                       <div className="mt-1 rounded bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 px-2 py-1 text-[11px] text-yellow-800 dark:text-yellow-400 max-w-[220px]">
                         <span className="font-semibold">Reason:</span> {l.late_reason || "No reason given"}
+                      </div>
+                    )}
+                    {l.left_early && (
+                      <div className="mt-1 rounded bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 px-2 py-1 text-[11px] text-yellow-800 dark:text-yellow-400 max-w-[220px]">
+                        <span className="font-semibold">Left early:</span> {l.early_out_reason || "No reason given"}
                       </div>
                     )}
                   </td>

@@ -993,6 +993,10 @@ export interface TimeLogReviewItem {
   // collected via a mobile prompt; null for kiosk clock-ins.
   is_late?: boolean;
   late_reason?: string | null;
+  // Early clock-OUT (before scheduled end + grace) — mirror of is_late.
+  // early_out_reason is the employee's own explanation from the mobile prompt.
+  left_early?: boolean;
+  early_out_reason?: string | null;
   // #21 (light) — the employee's scheduled shift window (HH:MM), for the
   // "scheduled 09:00–17:00" annotation beside beyond-shift sessions.
   scheduled_start?: string | null;
