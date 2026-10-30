@@ -416,6 +416,10 @@ export interface TimeLog {
     is_holiday?: boolean;
     is_weekend?: boolean;
     marked_as_overtime_at?: string;
+    // Schedule-aware clock-out: set when the employee leaves before their
+    // scheduled end (+grace); early_out_reason is their optional explanation.
+    left_early?: boolean;
+    early_out_reason?: string;
     created_at: string;
     updated_at?: string;
 }
