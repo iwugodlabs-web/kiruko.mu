@@ -77,18 +77,80 @@ function makeKey(): string {
 type AnyError = { error: string; status?: number };
 
 
+/**
+ * FastAPI can return `detail` as a plain string OR as a structured object
+ * (e.g. `{ code, message, remediation, ... }` — see NO_OVERTIME_RULE_FOR_COUNTRY).
+ * Reduce either shape to a displayable string. Returning the object itself
+ * would blow up React when it is rendered in a toast ("Objects are not valid
+ * as a React child") and hide the real backend message behind a blank app.
+ */
+function messageFromDetail(detail: unknown): string | undefined {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object') {
+    const d = detail as { message?: unknown; error?: unknown };
+    if (typeof d.message === 'string' && d.message.trim()) return d.message;
+    if (typeof d.error === 'string' && d.error.trim()) return d.error;
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+
 function normalizeError(err: unknown): AnyError {
   // Use unknown + type-narrowing — eslint will be happier than `any`.
-  const e = err as { response?: { status?: number; data?: { detail?: string; message?: string } | string }; message?: string };
+  const e = err as { response?: { status?: number; data?: unknown }; message?: string };
   const status = e.response?.status ?? 500;
   const data = e.response?.data;
   let detail: string;
   if (typeof data === 'string') {
     detail = data;
+  } else if (data && typeof data === 'object') {
+    const d = data as { detail?: unknown; message?: unknown };
+    detail =
+      messageFromDetail(d.detail) ??
+      messageFromDetail(d.message) ??
+      e.message ??
+      'Unexpected error';
   } else {
-    detail = data?.detail ?? data?.message ?? e.message ?? 'Unexpected error';
+    detail = e.message ?? 'Unexpected error';
   }
   return { error: detail, status };
+}
+
+
+/**
+ * Normalize an error from a `responseType: 'blob'` request. Axios still wraps
+ * the (JSON) error body as a Blob, so `normalizeError` can't read `detail`
+ * and the caller only sees the generic `Request failed with status code N`.
+ * This reads the blob text and surfaces the real backend message.
+ */
+async function normalizeBlobError(err: unknown): Promise<AnyError> {
+  const e = err as { response?: { status?: number; data?: unknown }; message?: string };
+  const status = e.response?.status ?? 500;
+  const data = e.response?.data;
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    try {
+      const text = await data.text();
+      try {
+        const parsed = JSON.parse(text) as { detail?: unknown; message?: string };
+        const detail = parsed.detail;
+        if (typeof detail === 'string') return { error: detail, status };
+        if (detail && typeof detail === 'object') {
+          return { error: (detail as { message?: string }).message ?? text, status };
+        }
+        return { error: parsed.message ?? text, status };
+      } catch {
+        return { error: text, status };
+      }
+    } catch {
+      return { error: e.message ?? 'Download failed', status };
+    }
+  }
+  return normalizeError(err);
 }
 
 
@@ -500,17 +562,20 @@ export const payroll = {
   /** Download a finalized run as CSV (blob). Requires the `export_payroll` permission. */
   runCsvExport: async (runId: number): Promise<Blob | { error: string; status?: number }> => {
     try {
-      const r = await api.get(`/payroll/runs/${runId}/export.csv`, { responseType: 'blob' });
+      // Long timeout: large runs build the CSV synchronously server-side.
+      const r = await api.get(`/payroll/runs/${runId}/export.csv`, { responseType: 'blob', timeout: 120000 });
       return r.data as Blob;
-    } catch (e) { return normalizeError(e); }
+    } catch (e) { return normalizeBlobError(e); }
   },
 
   /** Download all payslip PDFs for a finalized run as a ZIP (blob). Requires `export_payroll`. */
   runPayslipsZip: async (runId: number): Promise<Blob | { error: string; status?: number }> => {
     try {
-      const r = await api.get(`/payroll/runs/${runId}/payslips.zip`, { responseType: 'blob' });
+      // Long timeout: each payslip PDF is fetched (or regenerated) before the
+      // archive is returned, so a 47-pay run can easily exceed the 15s default.
+      const r = await api.get(`/payroll/runs/${runId}/payslips.zip`, { responseType: 'blob', timeout: 120000 });
       return r.data as Blob;
-    } catch (e) { return normalizeError(e); }
+    } catch (e) { return normalizeBlobError(e); }
   },
 };
 

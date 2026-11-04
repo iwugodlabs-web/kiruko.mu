@@ -67,6 +67,7 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
   const [month, setMonth] = useState(defaultMonth);
   const [draftRun, setDraftRun] = useState<PayrollRun | null>(null);
   const [loading, setLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Map of private_user_id → display name, so the review table shows employee
   // names instead of raw #ids on the last check before locking pay. Populated
@@ -85,6 +86,7 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
       setOtpRequested(false);
       setOtpCode("");
       setLoading(false);
+      setCreateError(null);
     }
   }, [open]);
 
@@ -183,6 +185,7 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
 
   async function handleCreateDraft() {
     setLoading(true);
+    setCreateError(null);
     const r = await payroll.createDraft({
       company_id: companyId,
       period_start: firstDayOfMonth(year, month),
@@ -190,6 +193,7 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
     });
     setLoading(false);
     if (isError(r)) {
+      setCreateError(r.error);
       toast.error(r.error);
       return;
     }
@@ -290,6 +294,7 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
                     const [y, m] = e.target.value.split("-").map(Number);
                     setYear(y);
                     setMonth(m);
+                    setCreateError(null);
                   }}
                   className="w-full rounded-md border border-zinc-200 dark:border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
@@ -300,6 +305,15 @@ export default function StartRunWizard({ open, companyId, resumeDraftId, onClose
                   ))}
                 </select>
               </div>
+              {createError && (
+                <div
+                  role="alert"
+                  className="rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-4 py-3 flex items-start gap-3"
+                >
+                  <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-300 mt-0.5 shrink-0" />
+                  <p className="text-sm text-red-800 dark:text-red-200">{createError}</p>
+                </div>
+              )}
             </div>
           )}
 
