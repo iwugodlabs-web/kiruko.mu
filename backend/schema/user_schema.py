@@ -4,7 +4,7 @@ from typing import Optional, Any
 from datetime import datetime
 from schema.job_schema import ShowJob, ShowProfileJob, ShowTimeLog, TimeLog
 from schema.department_schema import ShowDepartment
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 from typing import Dict, Optional, Union, List, Any
@@ -342,6 +342,17 @@ class Job(BaseModel):
     doubts_about_compensation: Optional[bool] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator('first_date_of_employment', mode='before')
+    @classmethod
+    def _employment_date_only(cls, v):
+        # jobs.first_date_of_employment is a DateTime column written with
+        # datetime.utcnow(); coerce to a date so nested ShowCompany.jobs
+        # serialization can't 500 on date_from_datetime_inexact.
+        if isinstance(v, datetime):
+            return v.date()
+        return v
+
     model_config = {"from_attributes": True, "arbitrary_types_allowed": True}
 
 class Salary(BaseModel) :

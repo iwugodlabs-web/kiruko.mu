@@ -44,3 +44,18 @@ def test_input_schemas_still_reject_bad_email():
     from schema.user_schema import CompanySignupRequest
     with pytest.raises(ValidationError):
         CompanySignupRequest(company_name="X", email="not-an-email", password="x")
+
+
+def test_show_job_accepts_non_midnight_datetime_employment_date():
+    """jobs.first_date_of_employment is a DateTime column written with
+    datetime.utcnow(); ShowJob types it as `date`. Pydantic rejects a datetime
+    with non-zero time (date_from_datetime_inexact), which 500'd login for any
+    employee whose row was written that way."""
+    from datetime import date, datetime
+
+    j = ShowJob(
+        job_id=1, private_user_id=1, job_title="Cashier",
+        first_date_of_employment=datetime(2026, 11, 12, 4, 38, 22, 28898),
+    )
+    assert j.first_date_of_employment == date(2026, 11, 12)
+

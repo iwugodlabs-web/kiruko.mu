@@ -60,6 +60,17 @@ class Job(BaseModel) :
                 return f"{int(m.group(1)):02d}:{m.group(2)}"
         return v
 
+    @field_validator('first_date_of_employment', mode='before')
+    @classmethod
+    def _employment_date_only(cls, v):
+        """jobs.first_date_of_employment is a DateTime column, historically
+        written with datetime.utcnow() (non-midnight). Coerce it to a date
+        for this OUTPUT schema instead of 500-ing login with
+        date_from_datetime_inexact."""
+        if isinstance(v, datetime):
+            return v.date()
+        return v
+
 class CreateJob(Job):
    pass
 
@@ -259,7 +270,14 @@ class JobHistory(BaseModel):
     change_timestamp: datetime
     original_created_at: Optional[datetime] = None
     original_updated_at: Optional[datetime] = None
-    
+
+    @field_validator('first_date_of_employment', mode='before')
+    @classmethod
+    def _employment_date_only(cls, v):
+        if isinstance(v, datetime):
+            return v.date()
+        return v
+
     class Config:
         from_attributes = True
 
