@@ -387,6 +387,7 @@ def supersede(
     actor_user_id: Optional[int],
     *,
     bracket_lines: Optional[List[Any]] = None,
+    overtime_tiers: Optional[List[Any]] = None,
     expected_latest_version: Optional[int] = None,
 ) -> T:
     """Insert a new version of a rule, closing the prior active row.
@@ -398,6 +399,12 @@ def supersede(
 
     `bracket_lines` is only used when `model` is `TaxBracketSet` — pass the
     list of TaxBracketLine objects to attach to the new set.
+
+    `overtime_tiers` is only used when `model` is `CountryOvertimeRule` — pass
+    the list of weekday-tier dicts/objects to attach to the new rule. If
+    omitted, tiers are read from `new_payload["weekday_tiers"]`. This is
+    required for overtime updates: a version with zero tiers silently drops
+    all weekday OT hours in the bucketer.
 
     `expected_latest_version` enables optimistic concurrency: if provided,
     the caller is asserting they last saw version=N. When the live prior is
@@ -435,7 +442,7 @@ def supersede(
     new_row_kwargs = {
         k: v
         for k, v in payload.items()
-        if k not in ("brackets",)  # bracket lines handled separately
+        if k not in ("brackets", "weekday_tiers")  # child rows handled separately
     }
     # Force version + temporal columns
     new_row_kwargs["version"] = (prior.version + 1) if prior is not None else 1
@@ -463,6 +470,38 @@ def supersede(
                 )
             )
 
+    # Attach weekday tiers if this is a CountryOvertimeRule supersede. Without
+    # them the new version would silently drop every weekday OT hour.
+    new_tier_snapshot: Optional[List[Dict[str, Any]]] = None
+    if model is CountryOvertimeRule:
+        tiers_source = overtime_tiers if overtime_tiers is not None else payload.get("weekday_tiers") or []
+        new_tier_snapshot = []
+        for tier in tiers_source:
+            if isinstance(tier, dict):
+                tier_data = dict(tier)
+            elif hasattr(tier, "model_dump"):
+                tier_data = tier.model_dump()
+            else:
+                tier_data = {
+                    "tier_order": getattr(tier, "tier_order"),
+                    "up_to_hours": getattr(tier, "up_to_hours"),
+                    "multiplier": getattr(tier, "multiplier"),
+                }
+            db.add(
+                CountryOvertimeWeekdayTier(
+                    overtime_rule_id=new_row.id,
+                    tier_order=tier_data["tier_order"],
+                    up_to_hours=tier_data.get("up_to_hours"),
+                    multiplier=tier_data["multiplier"],
+                )
+            )
+            new_tier_snapshot.append({
+                "tier_order": tier_data["tier_order"],
+                "up_to_hours": _jsonable(tier_data.get("up_to_hours")),
+                "multiplier": _jsonable(tier_data["multiplier"]),
+            })
+        new_tier_snapshot.sort(key=lambda t: t["tier_order"])
+
     # Close prior row by updating only the two trigger-allowed columns.
     if prior is not None:
         prior.effective_to = new_effective_from
@@ -485,6 +524,19 @@ def supersede(
         "change_reason": payload.get("change_reason"),
         "diff": diff,
     }
+    if model is CountryOvertimeRule:
+        prior_tiers = [
+            {
+                "tier_order": t.tier_order,
+                "up_to_hours": _jsonable(t.up_to_hours),
+                "multiplier": _jsonable(t.multiplier),
+            }
+            for t in (prior.weekday_tiers if prior is not None else [])
+        ]
+        audit_meta["weekday_tiers"] = {
+            "prior": sorted(prior_tiers, key=lambda t: t["tier_order"]),
+            "new": new_tier_snapshot or [],
+        }
     action = "payroll_rule.created" if prior is None else "payroll_rule.superseded"
     db.add(
         AuditLog(

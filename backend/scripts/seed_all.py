@@ -17,6 +17,9 @@ Steps:
                            effective_from, so only seed when absent)
   5. MU overtime rule    — required by M2 payroll-run creation (self-skips)
   6. TZ public holidays  — full 2026 Tanzania holiday list (idempotent)
+  7. Country overtime rules for configured countries — unverified placeholder
+                           configs are skipped unless ALLOW_PLACEHOLDER_OVERTIME=true.
+                           Existing active rules are never modified (self-skips).
 
 Usage:  cd /app && python3 scripts/seed_all.py
 """
@@ -96,6 +99,16 @@ def main() -> None:
     print("[seed_all] TZ public holidays ...")
     from scripts import seed_tz_holidays
     seed_tz_holidays.main()
+
+    # 7. Country overtime rules (idempotent — skips if an active rule exists).
+    # Only countries configured in scripts/overtime_rule_configs.py are seeded.
+    # Unverified placeholder configs require ALLOW_PLACEHOLDER_OVERTIME=true;
+    # otherwise they are skipped, so a deploy never silently seeds unverified
+    # legal rates. Updates are explicit via scripts/supersede_overtime_rule.py,
+    # never at deploy time.
+    print("[seed_all] country overtime rules ...")
+    from scripts import seed_overtime_rules
+    seed_overtime_rules.main(["--all"])
 
     print("[seed_all] complete.")
 
